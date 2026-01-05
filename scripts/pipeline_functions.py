@@ -136,6 +136,15 @@ def run_analysis(step_file, output_dir, args):
             flat_step_path = unfold_result.get('flat_step_path')
             print(f"  ✓ Unfold geslaagd: {unfold_result.get('flat_length', 0):.0f} x {unfold_result.get('flat_width', 0):.0f} mm")
             print(f"  ✓ Fold lines: {unfold_result.get('fold_lines', 0)}")
+            
+            # Check thickness from unfold result
+            unfold_thickness = unfold_result.get('thickness', 0)
+            if unfold_thickness > 0:
+                print(f"  ✓ Detected thickness (unfold): {unfold_thickness:.2f} mm")
+                # Update analysis thickness if it was 0 or significantly different?
+                # Usually we trust the initial analysis, but this is a good cross-check.
+                if analysis.thickness == 0:
+                    analysis.thickness = unfold_thickness
 
             # Load the flat shape for hole analysis
             if flat_step_path and os.path.exists(flat_step_path):
@@ -260,6 +269,31 @@ shape.read(step_path)
 # K-factor lookup
 kFactorLookup = {{t: 0.44 for t in [0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 15.0, 20.0]}}
 
+def get_thickness_from_solid(solid):
+    try:
+        # Strategy: Find largest planar face, then find opposite face
+        faces = [f for f in solid.Faces if "Plane" in f.Surface.TypeId]
+        if not faces:
+            return 0.0
+            
+        # Sort by area
+        faces.sort(key=lambda f: f.Area, reverse=True)
+        main_face = faces[0]
+        main_normal = main_face.Surface.Axis
+        
+        # Find opposite face (parallel, normal dot product approx -1)
+        # We check the top 5 largest faces to find the matching back face
+        for f in faces[1:10]:
+            # Check if normals are opposite
+            if f.Surface.Axis.dot(main_normal) < -0.9:
+                # Measure distance
+                dist = main_face.distToShape(f)[0]
+                if dist > 0:
+                    return dist
+        return 0.0
+    except:
+        return 0.0
+
 result = {{"success": False}}
 
 # Get solids
@@ -267,6 +301,9 @@ solids = shape.Solids if shape.Solids else [shape]
 sorted_solids = sorted(solids, key=lambda s: s.Volume, reverse=True)
 
 for solid in sorted_solids[:3]:  # Try top 3 by volume
+    # Calculate thickness first
+    detected_thickness = get_thickness_from_solid(solid)
+
     # Find planar faces for base
     planar_faces = []
     for i, face in enumerate(solid.Faces):
@@ -325,6 +362,7 @@ for solid in sorted_solids[:3]:  # Try top 3 by volume
                             "flat_length": dims[0],
                             "flat_width": dims[1],
                             "fold_lines": len(foldLines),
+                            "thickness": detected_thickness
                         }}
                         FreeCAD.closeDocument("UnfoldDoc")
                         break
