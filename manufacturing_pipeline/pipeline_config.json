@@ -1,0 +1,109 @@
+{
+  "step_file": "core_one_assembly.step",
+  "pdf_file": null,
+  "output_dir": ".",
+
+  "material": "steel_s235",
+  "quantity": 1,
+  "surface_treatment": null,
+
+  "use_cache": true,
+  "cache_dir": ".pipeline_cache",
+
+  "_section_pricing": "=== UURTARIEVEN EN MATERIAALKOSTEN ===",
+  "_pricing_comment": "Pas deze tarieven aan voor uw situatie (€/uur of €/kg)",
+
+  "hourly_rates": {
+    "cnc_draaien_klein": 55.0,
+    "cnc_draaien_middel": 65.0,
+    "cnc_draaien_groot": 85.0,
+    "cnc_frezen_3as": 60.0,
+    "cnc_frezen_4as": 75.0,
+    "cnc_frezen_5as": 95.0,
+    "laser_snijden": 70.0,
+    "plasma_snijden": 55.0,
+    "waterstraal": 85.0,
+    "ponsen": 50.0,
+    "kanten": 45.0,
+    "lassen_mig": 50.0,
+    "lassen_tig": 65.0,
+    "slijpen_vlak": 55.0,
+    "slijpen_rond": 60.0,
+    "ontbramen_hand": 35.0,
+    "ontbramen_machine": 40.0
+  },
+
+  "material_prices": {
+    "_comment": "Prijzen in €/kg",
+    "steel_s235": 1.20,
+    "steel_s355": 1.35,
+    "steel_304": 4.50,
+    "steel_316": 5.80,
+    "steel_42crmo4": 2.20,
+    "steel_c45": 1.80,
+    "alu_6061": 3.50,
+    "alu_6082": 3.80,
+    "alu_7075": 8.50,
+    "alu_5083": 4.20,
+    "messing_cuzn39pb3": 7.50,
+    "brons_cusn8": 12.0
+  },
+
+  "modules": {
+    "_comment": "Zet op true of false om modules aan/uit te schakelen",
+
+    "_section_basic": "=== BASIS ANALYSE ===",
+    "geometry": true,
+    "topology": true,
+    "holes": true,
+    "faces": true,
+
+    "_section_iso": "=== ISO STANDAARDEN ===",
+    "iso2768_tolerances": true,
+    "iso286_fits": true,
+    "iso68_threads": true,
+    "iso1302_surface": true,
+    "iso13715_edges": true,
+
+    "_section_manufacturing": "=== PRODUCTIE ===",
+    "mass_estimation": true,
+    "component_classification": true,
+    "detailed_parts": true,
+
+    "_section_werkvoorbereiding": "=== WERKVOORBEREIDING ===",
+    "cost_estimation": true,
+    "tool_list": true,
+    "outsourcing": true,
+    "surface_treatment": true,
+    "purchase_spec": true,
+
+    "_section_plaatwerk": "=== PLAATWERK / KANTBANK ===",
+    "sheetmetal_analysis": true,
+    "bend_detection": true,
+    "kantbank_tooling": true,
+    "flat_pattern": true,
+
+    "_section_other": "=== OVERIG ===",
+    "pdf_correlation": true,
+
+    "_section_report": "=== RAPPORT OPTIES ===",
+    "simple_cost_report": true,
+    "detailed_iso_report": false,
+    "per_part_breakdown": true
+  },
+
+  "_section_cost_columns": "=== KOSTEN KOLOMMEN (voor simple_cost_report) ===",
+  "_cost_columns_comment": "Zet op true/false om kolommen in kostentabel te tonen",
+
+  "cost_columns": {
+    "snijden": true,
+    "ink_per_stuk": true,
+    "zagen": true,
+    "zetten": true,
+    "verspanen": true,
+    "logistiek": true,
+    "lassen": true,
+    "boren": true,
+    "assembleren": true
+  }
+}

@@ -1,0 +1,66 @@
+CLEANED FOLDER STRUCTURE
+========================
+
+Root Directory:
+  ├── run.py                          # Main entry point - simple analysis runner
+  ├── CLAUDE.md                       # Project documentation for Claude Code
+  └── RESEARCH_QUESTIONS.md           # Research notes
+
+Main Directories:
+  ├── manufacturing_pipeline/         # Core pipeline with ISO standards analysis
+  │   ├── main.py                     # Full pipeline entry point
+  │   ├── requirements.txt            # Dependencies
+  │   └── src/                        # Core analysis modules
+  │
+  ├── scripts/                        # Utility & testing scripts (NEW)
+  │   ├── README.md                   # Scripts documentation
+  │   ├── compare_erp.py              # ERP/Spaceclaim comparison
+  │   ├── aag_analyzer.py             # AAG feature recognition
+  │   ├── test_accuracy.py            # Validation tests
+  │   ├── test_freecad.py             # FreeCAD unfold tests
+  │   ├── test_unfold_holes.py        # Unfold + hole detection tests
+  │   ├── debug_bends.py              # Bend detection debugger
+  │   ├── inspect_assembly.py         # Assembly inspector
+  │   └── probe_step_pmi.py           # PMI data extractor
+  │
+  ├── parts/                          # Input STEP files
+  │   └── fwofferte20253515bestanden/ # Sample parts
+  │
+  ├── output/                         # Analysis results from run.py
+  │   └── [part_name]/                # Per-part output folders
+  │
+  ├── examples/                       # Sample files & outputs (NEW)
+  │   ├── core_one_assembly.step      # Sample assembly
+  │   └── *.pdf, *.json               # Example results
+  │
+  ├── data/                           # Data files & databases (NEW)
+  │   ├── manufacturing_data.db       # SQLite database
+  │   └── wonr20253515.xlsx           # Sample ERP data
+  │
+  └── AI-voorbeelden/                 # Test data with ERP/Spaceclaim references
+      ├── 20251145/
+      ├── 20253507/
+      └── ...
+
+Auto-generated (can be deleted):
+  ├── .pipeline_cache/                # Cached analysis results
+  └── part_images/                    # Generated part images
+
+Changes Made:
+  ✓ Created scripts/ for all utility and testing scripts
+  ✓ Created examples/ for sample STEP files and outputs
+  ✓ Created data/ for databases and reference data
+  ✓ Moved 8 Python scripts from root to scripts/
+  ✓ Moved sample files to examples/
+  ✓ Moved database and Excel data to data/
+  ✓ Updated all script imports to reference new paths
+  ✓ Updated CLAUDE.md with new structure
+  ✓ Added scripts/README.md with script documentation
+
+Benefits:
+  ✓ Clean root directory (only run.py + docs)
+  ✓ Organized scripts by purpose
+  ✓ Clear separation: pipeline vs scripts vs data
+  ✓ Easy to find test/utility scripts
+  ✓ Example files don't clutter root
+
