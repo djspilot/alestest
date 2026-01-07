@@ -31,7 +31,7 @@ import FreeCAD
 import Part
 import SheetMetalUnfolder
 
-step_path = "/Users/ds/Projecten/alestest/parts/fwofferte20253515bestanden/10000703900_Rev_00.step"
+step_path = "/Users/ds/Projecten/alestest/resources/parts/fwofferte20253515bestanden/10000703900_Rev_00.step"
 shape = Part.Shape()
 shape.read(step_path)
 

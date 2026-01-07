@@ -18,7 +18,7 @@ from OCP.TopAbs import TopAbs_FACE
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 
-PARTS_DIR = "/Users/ds/Projecten/alestest/parts/fwofferte20253515bestanden"
+PARTS_DIR = "/Users/ds/Projecten/alestest/resources/parts/fwofferte20253515bestanden"
 
 
 def debug_part(artikel_nr, expected_bends):

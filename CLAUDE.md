@@ -115,60 +115,57 @@ python scripts/debug_bends.py
 
 ```
 /
-├── manufacturing_pipeline/           # Main pipeline (ISO standards analysis)
+├── manufacturing_pipeline/           # Main pipeline (Core Application Logic)
 │   ├── main.py                       # Entry point - orchestrates full pipeline with caching
 │   ├── requirements.txt              # Python dependencies
-│   ├── sql/                          # Database schema files
-│   └── src/                          # Core modules
+│   └── src/                          # Core analysis modules (Business Logic)
 │       ├── step_processing.py        # STEP parsing, hole/bend detection, geometry analysis
 │       ├── iso_standards.py          # ISO/NEN standards (tolerances, fits, threads, surface finish)
 │       ├── sheetmetal_analysis.py    # Sheet metal specific analysis (thickness, bends, profiles)
-│       ├── part_analyzer.py          # High-level part classification and analysis logic
-│       ├── freecad_unfold.py         # FreeCAD-based sheet metal unfolding
-│       ├── assembly_analysis.py      # Multi-part assembly analysis
-│       ├── report_generator.py       # PDF report generation with ISO sections
-│       ├── cache_manager.py          # Pipeline caching/checkpoint system
-│       ├── config.py                 # Configuration and constants
-│       ├── werkvoorbereiding.py      # Work preparation calculations
-│       ├── database.py               # SQLite database operations
-│       ├── pdf_processing.py         # PDF dimension extraction
-│       ├── correlation.py            # Correlate STEP geometry with PDF dimensions
-│       └── models.py                 # Data models/dataclasses
+│       └── ... (other core modules)
 │
-├── docs/                             # Documentation
-│   └── FOLDER_STRUCTURE.txt          # Explanation of project structure
+├── scripts/                          # Utility & Testing Scripts (Development Tools)
+│   ├── pipeline_functions.py         # Shared logic for scripts
+│   ├── compare_erp.py                # Validation tool for ERP comparison
+│   ├── batch_process.py              # Batch processing runner
+│   ├── test_*.py                     # Various test scripts
+│   └── debug_*.py                    # Debugging helpers
 │
-├── run.py                            # Simple runner - quick analysis with detailed reasoning
+├── run.py                            # Simple runner - quick analysis entry point
 │
-├── scripts/                          # Utility and testing scripts
-│   ├── batch_process.py              # Process multiple files and compare with Excel
-│   ├── compare_erp.py                # ERP/Spaceclaim comparison tool
-│   ├── aag_analyzer.py               # AAG (Attributed Adjacency Graph) feature recognition
-│   ├── inspect_solids.py             # Inspect geometric solids
-│   ├── inspect_unfold_tree.py        # Debug unfold hierarchy
-│   ├── debug_excel.py                # Debug Excel parsing
-│   ├── pipeline_functions.py         # Shared pipeline logic
-│   ├── test_accuracy.py              # Validation: compare detection vs Excel data
-│   ├── test_freecad.py               # Test FreeCAD unfold functionality
-│   ├── test_unfold_holes.py          # Test unfold with hole detection
-│   ├── debug_bends.py                # Debug sheet metal bend detection
-│   ├── inspect_assembly.py           # Inspect STEP assembly structure
-│   └── probe_step_pmi.py             # Probe PMI (Product Manufacturing Information) data
+├── resources/                        # Project Resources & Data
+│   ├── parts/                        # Input STEP files
+│   ├── output/                       # Analysis results (Reports, Images, JSON)
+│   ├── data/                         # Database and reference files (Excel, DB)
+│   ├── docs/                         # Additional documentation
+│   └── examples/                     # Sample files
 │
-├── parts/                            # Input STEP files
-├── output/                           # Analysis results from run.py
-├── examples/                         # Example STEP files and analysis outputs
-│   ├── core_one_assembly.step        # Sample assembly
-│   └── *.pdf, *.json                 # Example analysis results
-│
-├── data/                             # Data files and databases
-│   ├── manufacturing_data.db         # SQLite database with analysis results
-│   └── wonr20253515.xlsx             # Sample ERP data
-│
-├── AI-voorbeelden/                   # Test data with ERP/Spaceclaim references
-├── .pipeline_cache/                  # Cached intermediate results (auto-created)
-└── part_images/                      # Generated component images (auto-created)
+├── CLAUDE.md                         # Project documentation
+└── RESEARCH_QUESTIONS.md             # Research notes
 ```
+
+## Manufacturing Pipeline vs Scripts
+
+It is important to understand the distinction between the two code directories:
+
+### 1. `manufacturing_pipeline/` (The Application)
+This folder contains the **production-ready core code**. It is structured as a proper Python package.
+- **`src/`**: Contains the actual business logic, classes, and algorithms.
+- **`main.py`**: The official entry point for running the full analysis.
+- **Purpose**: This is the "product". It handles the heavy lifting of geometry analysis, ISO standards, database storage, and caching.
+
+### 2. `scripts/` (The Toolbelt)
+This folder contains **utilities, tests, and wrappers** that use the pipeline.
+- **Purpose**: These are tools for developers and analysts to validate the pipeline, run batches, or debug specific issues.
+- **Dependency**: These scripts Import modules from `manufacturing_pipeline/src` to do their work.
+- **Key Scripts**:
+    - `compare_erp.py`: Critical for validating the code against "Ground Truth" data (Excel/Spaceclaim).
+    - `batch_process.py`: Runs the pipeline on many files at once.
+    - `debug_*.py`: Helps isolate specific problems (like bend detection).
+
+### Note on `src` folders
+- **Root `src/`**: This folder was empty (only containing `__pycache__`) and has been removed to avoid confusion.
+- **`manufacturing_pipeline/src/`**: **DO NOT DELETE**. This is where the actual code lives. It contains all the intelligence for STEP processing and analysis.
 
 ## Architecture
 
@@ -435,15 +432,15 @@ The project requires FreeCAD for unfold operations. Key points:
 ## Notes
 
 - **Folder structure**:
-  - Place STEP files in [parts/](parts/) for [run.py](run.py), or project root for main pipeline
-  - Sample files are in [examples/](examples/)
-  - ERP/test data goes in [data/](data/) or [AI-voorbeelden/](AI-voorbeelden/)
+  - Place STEP files in [resources/parts/](resources/parts/) for [run.py](run.py).
+  - Sample files are in [resources/examples/](resources/examples/)
+  - ERP/test data goes in [resources/data/](resources/data/).
   - Utility scripts are in [scripts/](scripts/)
-- **For ERP comparison**: Organize as `AI-voorbeelden/subfolder/` with STEP + Excel (.xlsx) + XML files
+- **For ERP comparison**: Organize as `resources/parts/AI-voorbeelden/subfolder/` with STEP + Excel (.xlsx) + XML files
 - **Generated outputs**:
-  - Images: `part_images/` or `output/*/images/`
-  - Results: JSON and PDF reports in [output/](output/) or [examples/](examples/)
-  - Database: [data/manufacturing_data.db](data/manufacturing_data.db)
+  - Images: `resources/output/*/images/`
+  - Results: JSON and PDF reports in [resources/output/](resources/output/)
+  - Database: [resources/data/manufacturing_data.db](resources/data/manufacturing_data.db)
 - **PDF reports** include dedicated sections for each ISO standard
 - **Material mass** is calculated for multiple materials (steel/aluminum variants)
 - **Cache files** are stored in `.pipeline_cache/` (can be safely deleted to force re-analysis)

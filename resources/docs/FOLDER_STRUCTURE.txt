@@ -2,9 +2,14 @@ CLEANED FOLDER STRUCTURE
 ========================
 
 Root Directory:
-  ├── run.py                          # Main entry point - simple analysis runner
+  ├── run.py                          # Main entry point - simple analysis runners
   ├── CLAUDE.md                       # Project documentation for Claude Code
-  └── RESEARCH_QUESTIONS.md           # Research notes
+  ├── RESEARCH_QUESTIONS.md           # Research notes
+  └── resources/                      # Data, inputs, outputs, and documentation
+      ├── parts/                      # Input STEP files
+      ├── output/                     # Analysis results
+      ├── data/                       # Database and reference files
+      └── docs/                       # Project documentation
 
 Main Directories:
   ├── manufacturing_pipeline/         # Core pipeline with ISO standards analysis
@@ -22,25 +27,6 @@ Main Directories:
   │   ├── debug_bends.py              # Bend detection debugger
   │   ├── inspect_assembly.py         # Assembly inspector
   │   └── probe_step_pmi.py           # PMI data extractor
-  │
-  ├── parts/                          # Input STEP files
-  │   └── fwofferte20253515bestanden/ # Sample parts
-  │
-  ├── output/                         # Analysis results from run.py
-  │   └── [part_name]/                # Per-part output folders
-  │
-  ├── examples/                       # Sample files & outputs (NEW)
-  │   ├── core_one_assembly.step      # Sample assembly
-  │   └── *.pdf, *.json               # Example results
-  │
-  ├── data/                           # Data files & databases (NEW)
-  │   ├── manufacturing_data.db       # SQLite database
-  │   └── wonr20253515.xlsx           # Sample ERP data
-  │
-  └── AI-voorbeelden/                 # Test data with ERP/Spaceclaim references
-      ├── 20251145/
-      ├── 20253507/
-      └── ...
 
 Auto-generated (can be deleted):
   ├── .pipeline_cache/                # Cached analysis results

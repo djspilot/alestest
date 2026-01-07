@@ -11,8 +11,9 @@ import json
 # Project paths
 # Assuming this file is in PROJECT_ROOT/scripts/
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PARTS_DIR = os.path.join(PROJECT_ROOT, "parts")
-OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
+RESOURCES_DIR = os.path.join(PROJECT_ROOT, "resources")
+PARTS_DIR = os.path.join(RESOURCES_DIR, "parts")
+OUTPUT_DIR = os.path.join(RESOURCES_DIR, "output")
 PIPELINE_DIR = os.path.join(PROJECT_ROOT, "manufacturing_pipeline")
 SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
 

@@ -1095,7 +1095,7 @@ def process_folder(folder_path, verbose=False):
 
 def main():
     parser = argparse.ArgumentParser(description="Compare ERP/Spaceclaim with Pipeline analysis")
-    parser.add_argument("folder", nargs='?', default="/Users/ds/Projecten/alestest/AI-voorbeelden",
+    parser.add_argument("folder", nargs='?', default="/Users/ds/Projecten/alestest/resources/parts/AI-voorbeelden",
                        help="Folder with subfolders containing STEP, Excel, and XML files")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     parser.add_argument("--subfolder", help="Process only specific subfolder")

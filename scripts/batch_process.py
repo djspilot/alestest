@@ -193,6 +193,7 @@ def batch_process(input_dir, output_base_dir):
         print(f"Correct Thickness: {df['Valid Thickness'].sum()}/{df['Valid Thickness'].count()}")
 
 if __name__ == "__main__":
-    input_dir = "/Users/ds/Projecten/alestest/parts/AI-voorbeelden/20253511"
-    output_dir = "/Users/ds/Projecten/alestest/output/20253511"
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    input_dir = os.path.join(PROJECT_ROOT, "resources/parts/AI-voorbeelden/20253511")
+    output_dir = os.path.join(PROJECT_ROOT, "resources/output/20253511")
     batch_process(input_dir, output_dir)

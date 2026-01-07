@@ -3,7 +3,7 @@
 Manufacturing Pipeline Runner
 
 Simple entry point to run the manufacturing analysis pipeline.
-STEP files are read from ./parts/ and output goes to ./output/
+STEP files are read from ./resources/parts/ and output goes to ./resources/output/
 """
 
 import os
@@ -34,7 +34,7 @@ Examples:
         """
     )
 
-    parser.add_argument("-f", "--file", help="STEP file path or name in ./parts/")
+    parser.add_argument("-f", "--file", help="STEP file path or name in ./resources/parts/")
     parser.add_argument("--analyze", action="store_true", help="Show detailed analysis with reasoning")
     parser.add_argument("--aag", action="store_true", help="Run AAG (Attributed Adjacency Graph) analysis")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")

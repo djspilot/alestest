@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 
-excel_path = '/Users/ds/Projecten/alestest/parts/AI-voorbeelden/20251145/20251145.xls'
+excel_path = '/Users/ds/Projecten/alestest/resources/parts/AI-voorbeelden/20251145/20251145.xls'
 search_terms = ['10040852', '10040853', 'MD-06-2-008399', 'MD-19-06774']
 
 try:

@@ -46,7 +46,7 @@ try:
     print("   SheetMetalUnfolder imported OK!")
 
     print("\n5. Testing STEP import...")
-    test_step = "parts/fwofferte20253515bestanden/10000890096_Rev_00.step"
+    test_step = "resources/parts/fwofferte20253515bestanden/10000890096_Rev_00.step"
     if os.path.exists(test_step):
         shape = Part.read(test_step)
         print(f"   STEP loaded: {shape}")
