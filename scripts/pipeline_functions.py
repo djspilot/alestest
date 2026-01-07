@@ -85,51 +85,146 @@ def get_output_dir(step_file):
 def run_analysis(step_file, output_dir, args):
     """Run the complete analysis pipeline.
 
-    NEW FLOW:
-    1. Load & classify part type (plaat/hoekprofiel/gebogen)
-    2. Unfold if needed (gebogen plaatwerk)
-    3. Analyze holes on FLAT pattern (not 3D)
-    4. Generate report with both views
+    IMPROVED FLOW:
+    1. Load STEP file
+    2. Run AAG Analysis (Topology-based feature recognition)
+       -> Detects bends, thickness, holes purely from geometry
+    3. Run Standard Analysis (Dimensions, bounding box)
+    4. Classify based on AAG results (Bends > 0 -> Bent, etc.)
+    5. Unfold if classified as Bent Sheet Metal
+    6. Analyze holes (on flat pattern if available)
+    7. Generate report
     """
-    from src.step_processing import load_step_file, detect_holes, detect_shaped_holes
+    from src.step_processing import load_step_file, detect_holes, detect_shaped_holes, deduplicate_holes
     from src.part_analyzer import analyze_part_geometry, format_analysis_report, PartType
+    
+    # Import AAG Analyzer
+    try:
+        from aag_analyzer import AAGAnalyzer
+    except ImportError:
+        # Fallback if running from different context
+        sys.path.append(SCRIPTS_DIR)
+        from aag_analyzer import AAGAnalyzer
 
     part_name = os.path.splitext(os.path.basename(step_file))[0]
 
-    # ================================================================
-    # STEP 1: Load and classify
-    # ================================================================
-    print("\n[1/5] Loading STEP file...")
+    print("\n[1/6] Loading STEP file...")
     shape = load_step_file(step_file)
 
-    print("[2/5] Classifying part type...")
-    analysis = analyze_part_geometry(shape, part_name)
+    # ================================================================
+    # STEP 2: AAG Feature Recognition (The "Brain")
+    # ================================================================
+    print("[2/6] Running AAG Feature Recognition...")
+    
+    # Run via subprocess to use FreeCAD's robust geometry engine
+    aag_data = run_aag_analysis(step_file)
+    
+    # Create a simple object to hold results for easier access
+    class AAGResult:
+        def __init__(self, data):
+            self.success = data.get('success', False)
+            self.thickness = data.get('thickness', 0.0)
+            self.bend_count = data.get('bend_count', 0)
+            self.hole_count = data.get('hole_count', 0)
+            self.slot_count = data.get('slot_count', 0)
+            self.laser_cut_time = data.get('laser_cut_time', 0.0)
+            self.data = data
 
-    # Determine part category
-    part_category = "ONBEKEND"
-    if analysis.is_profile:
-        part_category = "PROFIEL (ingekocht)"
-    elif analysis.bend_count_erp == 0:
-        part_category = "PLAAT (vlak)"
-    elif analysis.bend_count_erp > 0:
-        part_category = "GEBOGEN PLAATWERK"
-
-    print(f"\n--- Classificatie ---")
-    print(f"Categorie:   {part_category}")
-    print(f"Type:        {analysis.part_type.value.upper()}")
-    print(f"Afmetingen:  {analysis.length:.0f} x {analysis.width:.0f} x {analysis.height:.0f} mm")
-    print(f"Dikte:       {analysis.thickness:.1f} mm")
-    print(f"Zettingen:   {analysis.bend_count_erp}")
+    aag_result = AAGResult(aag_data)
+    
+    if not aag_result.success:
+        print(f"  ⚠ AAG Analysis failed, falling back to standard analysis")
+    else:
+        print(f"  ✓ AAG Success: {aag_result.bend_count} bends, t={aag_result.thickness:.2f}mm")
 
     # ================================================================
-    # STEP 2: Unfold if gebogen plaatwerk
+    # STEP 3: Standard Geometry Analysis
+    # ================================================================
+    print("[3/6] Analyzing dimensions & geometry...")
+    analysis = analyze_part_geometry(shape, part_name)
+
+    # ================================================================
+    # STEP 4: Classification (Logic Update)
+    # ================================================================
+    # Use AAG results to override/refine classification
+    # This makes it robust for files WITHOUT ERP data
+    
+    if aag_result.success:
+        # Update analysis with AAG data
+        if aag_result.thickness > 0:
+            # Only overwrite if current thickness is 0 or if AAG thickness is plausible
+            if analysis.thickness == 0:
+                analysis.thickness = aag_result.thickness
+            elif abs(analysis.thickness - aag_result.thickness) > 0.1:
+                print(f"  ⚠ Thickness mismatch: AAG={aag_result.thickness:.2f}mm, Standard={analysis.thickness:.2f}mm")
+                # Heuristic: If AAG is very thin (<1mm) and Standard is thicker (>2mm), trust Standard
+                if aag_result.thickness < 1.0 and analysis.thickness > 2.0:
+                    print("  -> Keeping Standard thickness (AAG result seems too thin)")
+                else:
+                    analysis.thickness = aag_result.thickness
+        
+        # Determine category based on GEOMETRY (AAG), not ERP
+        part_category = "ONBEKEND"
+        
+        # Profile detection (AAG can detect closed loops of bends, but for now we use simple heuristics)
+        # If it has bends but looks like a standard profile (e.g. 4 bends 90 deg in a loop)
+        # For now, we trust the standard analyzer for profile detection (it checks cross sections)
+        
+        if analysis.is_profile:
+            part_category = "PROFIEL (ingekocht)"
+            # Keep existing profile type (e.g. BUIS, KOKER) if set, otherwise default to KOKER_PROFIEL
+            from src.part_analyzer import PartType
+            if analysis.part_type not in [PartType.BUIS, PartType.KOKER, PartType.KOKER_PROFIEL]:
+                analysis.part_type = PartType.KOKER_PROFIEL 
+        elif aag_result.bend_count > 0:
+            part_category = "GEBOGEN PLAATWERK"
+            analysis.part_type = PartType.COMPLEX # Default to complex/bent
+            analysis.is_sheet_metal = True
+            # Update ERP count to match geometric count if ERP is missing
+            if analysis.bend_count_erp == 0:
+                analysis.bend_count_erp = aag_result.bend_count
+        elif aag_result.thickness > 0 and aag_result.bend_count == 0:
+            part_category = "PLAAT (vlak)"
+            analysis.part_type = PartType.PLAAT
+            analysis.is_sheet_metal = True
+        elif analysis.is_turned:
+            part_category = "DRAAISTUK"
+            
+        print(f"\n--- Classificatie (AAG Powered) ---")
+        print(f"Categorie:   {part_category}")
+        print(f"Type:        {analysis.part_type.value.upper()}")
+        print(f"Afmetingen:  {analysis.length:.0f} x {analysis.width:.0f} x {analysis.height:.0f} mm")
+        print(f"Dikte:       {analysis.thickness:.2f} mm (AAG detected)")
+        print(f"Zettingen:   {aag_result.bend_count} (AAG detected)")
+    else:
+        # Fallback to original logic if AAG failed
+        part_category = "ONBEKEND"
+        if analysis.is_profile:
+            part_category = "PROFIEL (ingekocht)"
+        elif analysis.bend_count_erp == 0:
+            part_category = "PLAAT (vlak)"
+        elif analysis.bend_count_erp > 0:
+            part_category = "GEBOGEN PLAATWERK"
+            
+        print(f"\n--- Classificatie (Standard) ---")
+        print(f"Categorie:   {part_category}")
+        print(f"Type:        {analysis.part_type.value.upper()}")
+        print(f"Afmetingen:  {analysis.length:.0f} x {analysis.width:.0f} x {analysis.height:.0f} mm")
+        print(f"Dikte:       {analysis.thickness:.1f} mm")
+        print(f"Zettingen:   {analysis.bend_count_erp}")
+
+    # ================================================================
+    # STEP 5: Unfold if gebogen plaatwerk
     # ================================================================
     unfold_result = None
     flat_shape = None
     flat_step_path = None
+    
+    # Logic: If it's bent sheet metal, try to unfold
+    should_unfold = (part_category == "GEBOGEN PLAATWERK") and not args.no_unfold
 
-    if analysis.can_unfold and not args.no_unfold and analysis.bend_count_erp > 0:
-        print("\n[3/5] Unfolding sheet metal...")
+    if should_unfold:
+        print("\n[4/6] Unfolding sheet metal...")
         unfold_result = run_unfold_to_step(step_file, output_dir, part_name, analysis)
 
         if unfold_result and unfold_result.get('success'):
@@ -141,10 +236,14 @@ def run_analysis(step_file, output_dir, args):
             unfold_thickness = unfold_result.get('thickness', 0)
             if unfold_thickness > 0:
                 print(f"  ✓ Detected thickness (unfold): {unfold_thickness:.2f} mm")
-                # Update analysis thickness if it was 0 or significantly different?
-                # Usually we trust the initial analysis, but this is a good cross-check.
-                if analysis.thickness == 0:
-                    analysis.thickness = unfold_thickness
+                
+                # Sanity check: Sheet metal thickness is usually < 25mm
+                if unfold_thickness < 25.0:
+                    if analysis.thickness == 0 or abs(analysis.thickness - unfold_thickness) > 0.1:
+                        print(f"  -> Updating thickness to {unfold_thickness:.2f} mm (Unfold is authoritative)")
+                        analysis.thickness = unfold_thickness
+                else:
+                    print(f"  -> Ignoring unfold thickness (seems too large: {unfold_thickness:.2f} mm)")
 
             # Load the flat shape for hole analysis
             if flat_step_path and os.path.exists(flat_step_path):
@@ -152,20 +251,14 @@ def run_analysis(step_file, output_dir, args):
                 print(f"  ✓ Flat STEP: {flat_step_path}")
         else:
             print(f"  ⚠ Unfold niet gelukt: {unfold_result.get('error', 'onbekend') if unfold_result else 'geen resultaat'}")
-    elif analysis.bend_count_erp == 0:
-        print("\n[3/5] Unfold: Niet nodig (vlakke plaat)")
-    elif analysis.is_profile:
-        print("\n[3/5] Unfold: Niet nodig (ingekocht profiel)")
     else:
-        print(f"\n[3/5] Unfold: {analysis.unfold_reason}")
+        print(f"\n[4/6] Unfold: Niet nodig ({part_category})")
 
     # ================================================================
-    # STEP 3: Detect holes - on FLAT pattern if available
+    # STEP 6: Detect holes - on FLAT pattern if available
     # ================================================================
-    print("\n[4/5] Detecting holes...")
+    print("\n[5/6] Detecting holes...")
 
-    # For gebogen plaatwerk: analyze on flat pattern (this is what gets laser cut)
-    # For plaat/profiel: analyze on 3D model
     if flat_shape is not None:
         print(f"  Analyseren op: UITSLAG (flat pattern)")
         analysis_shape = flat_shape
@@ -177,21 +270,43 @@ def run_analysis(step_file, output_dir, args):
 
     circular_holes = detect_holes(analysis_shape, is_flat_pattern=is_flat)
     shaped_holes = detect_shaped_holes(analysis_shape)
+    
+    # Deduplicate holes (remove circular holes that are part of shaped holes)
+    circular_holes = deduplicate_holes(circular_holes, shaped_holes)
+    
     total_holes = len(circular_holes) + len(shaped_holes)
 
     print(f"  Cilindrische gaten: {len(circular_holes)}")
+    for i, h in enumerate(circular_holes):
+        print(f"    {i+1}. Ø{h.diameter:.2f}mm at {h.position}")
+        
     print(f"  Shaped holes (slots/rect): {len(shaped_holes)}")
+    for i, h in enumerate(shaped_holes):
+        print(f"    {i+1}. {h['type']} {h['dim']} at {h['center']}")
+        
     print(f"  Totaal: {total_holes}")
 
     # ================================================================
-    # STEP 4: Save results
+    # STEP 7: Save results
     # ================================================================
-    print("\n[5/5] Saving results...")
+    print("\n[6/6] Saving results...")
 
     # Update analysis with flat dimensions if available
     if unfold_result and unfold_result.get('success'):
+        analysis.unfold_result = unfold_result  # Attach for PDF generation
         analysis.flat_length = unfold_result.get('flat_length', 0)
         analysis.flat_width = unfold_result.get('flat_width', 0)
+        
+        # Update main dimensions to reflect the flat pattern (as requested)
+        # We keep the thickness as the 3rd dimension
+        analysis.length = analysis.flat_length
+        analysis.width = analysis.flat_width
+        analysis.height = analysis.thickness # Height becomes thickness in flat view
+        
+        # Update bend count to match the verified unfold count
+        # AAG can sometimes overcount (e.g. segmented bends), Unfold is authoritative
+        if unfold_result.get('fold_lines', 0) > 0:
+            analysis.bend_count_erp = unfold_result.get('fold_lines')
 
     # Save analysis report
     report_path = os.path.join(output_dir, f"{part_name}_analysis.txt")
@@ -199,7 +314,27 @@ def run_analysis(step_file, output_dir, args):
         f.write(format_analysis_report(analysis))
         f.write(f"\n\nCategorie: {part_category}\n")
         f.write(f"Gaten (flat): {total_holes}\n")
+        if aag_result.success:
+            f.write(f"AAG Analysis (Raw): {aag_result.bend_count} bends detected\n")
         if unfold_result and unfold_result.get('success'):
+            f.write(f"Unfold Analysis: {unfold_result.get('fold_lines')} fold lines (Verified)\n")
+            
+            # Report Zettingen vs Tegenzettingen
+            bends = unfold_result.get('bends_logical', [])
+            if bends:
+                up_count = sum(1 for b in bends if b['type'] == 'up')
+                down_count = sum(1 for b in bends if b['type'] == 'down')
+                f.write(f"  Zettingen (Up): {up_count}\n")
+                f.write(f"  Tegenzettingen (Down): {down_count}\n")
+                f.write("  Bend Sequence:\n")
+                for i, b in enumerate(bends):
+                    f.write(f"    {i+1}. {b['type'].upper()} {b['angle']:.1f}° (R={b['radius']:.1f}mm)\n")
+
+            if unfold_result.get('fold_details'):
+                f.write("  Fold Lines (Center X, Y, Z | Length):\n")
+                for fold in unfold_result.get('fold_details'):
+                    c = fold['center']
+                    f.write(f"  - Fold {fold['id']}: ({c[0]:.1f}, {c[1]:.1f}, {c[2]:.1f}) L={fold['length']:.1f}mm\n")
             f.write(f"Flat dimensions: {analysis.flat_length:.0f} x {analysis.flat_width:.0f} mm\n")
     print(f"  Rapport: {report_path}")
 
@@ -207,6 +342,8 @@ def run_analysis(step_file, output_dir, args):
     analysis.part_category = part_category
     analysis.unfold_result = unfold_result
     analysis.flat_step_path = flat_step_path
+    if aag_result.success:
+        analysis.aag_result = aag_result.data # Store AAG result for PDF
 
     return analysis, total_holes
 
@@ -295,6 +432,7 @@ def get_thickness_from_solid(solid):
         return 0.0
 
 result = {{"success": False}}
+best_score = -1
 
 # Get solids
 solids = shape.Solids if shape.Solids else [shape]
@@ -314,7 +452,8 @@ for solid in sorted_solids[:3]:  # Try top 3 by volume
             pass
     planar_faces.sort(key=lambda x: x["area"], reverse=True)
 
-    for base_info in planar_faces[:3]:  # Try top 3 largest faces
+    # Try top 10 largest faces to find the best base for unfolding
+    for base_info in planar_faces[:10]:
         base_idx = base_info["index"]
         try:
             doc = FreeCAD.newDocument("UnfoldDoc")
@@ -337,36 +476,75 @@ for solid in sorted_solids[:3]:  # Try top 3 by volume
 
                 if not unfold_tree.error_code and theFaceList:
                     # Create flat shape - use FULL faces to preserve inner wires (holes)
-                    # Don't use OuterWire only, that loses the hole geometry!
                     flat_faces = [f for f in theFaceList if f.isValid()]
                     if flat_faces:
-                        # Use Compound instead of Shell to preserve all geometry
                         flat_compound = Part.Compound(flat_faces)
 
-                        # Get dimensions
-                        bbox = flat_compound.BoundBox
-                        dims = sorted([bbox.XLength, bbox.YLength, bbox.ZLength], reverse=True)
+                        # Calculate score: number of fold lines (primary) + area (secondary)
+                        num_folds = len(foldLines)
+                        area = flat_compound.Area
+                        # Weight folds heavily to prefer complete unfolds
+                        score = (num_folds * 1000000) + area
+                        
+                        if score > best_score:
+                            best_score = score
+                            
+                            # Get dimensions
+                            bbox = flat_compound.BoundBox
+                            dims = sorted([bbox.XLength, bbox.YLength, bbox.ZLength], reverse=True)
 
-                        # Export STEP - compound preserves holes
-                        flat_step_path = "{output_dir}/{part_name}_flat.step"
-                        flat_compound.exportStep(flat_step_path)
+                            # Export STEP
+                            flat_step_path = "{output_dir}/{part_name}_flat.step"
+                            flat_compound.exportStep(flat_step_path)
 
-                        # Export DXF
-                        dxf_path = "{output_dir}/{part_name}_flat.dxf"
-                        import importDXF
-                        importDXF.export([flat_compound], dxf_path)
+                            # Export DXF
+                            dxf_path = "{output_dir}/{part_name}_flat.dxf"
+                            import importDXF
+                            importDXF.export([flat_compound], dxf_path)
 
-                        result = {{
-                            "success": True,
-                            "flat_step_path": flat_step_path,
-                            "flat_length": dims[0],
-                            "flat_width": dims[1],
-                            "fold_lines": len(foldLines),
-                            "thickness": detected_thickness
-                        }}
-                        FreeCAD.closeDocument("UnfoldDoc")
-                        break
+                            # Extract fold details from geometry
+                            fold_details = []
+                            for i, line in enumerate(foldLines):
+                                try:
+                                    center = line.BoundBox.Center
+                                    length = line.Length
+                                    fold_details.append({{
+                                        "id": i+1,
+                                        "length": length,
+                                        "center": (center.x, center.y, center.z)
+                                    }})
+                                except:
+                                    pass
 
+                            # Extract logical bend info from tree (Up/Down)
+                            bends_logical = []
+                            def traverse_bends(node):
+                                if hasattr(node, "node_type") and node.node_type == "Bend":
+                                    import math
+                                    angle_deg = math.degrees(node.bend_angle) if node.bend_angle else 0
+                                    bends_logical.append({{
+                                        "type": node.bend_dir, # 'up' or 'down'
+                                        "angle": angle_deg,
+                                        "radius": node.innerRadius
+                                    }})
+                                
+                                if hasattr(node, "child_list"):
+                                    for child in node.child_list:
+                                        traverse_bends(child)
+                            
+                            traverse_bends(unfold_tree.root)
+
+                            result = {{
+                                "success": True,
+                                "flat_step_path": flat_step_path,
+                                "flat_length": dims[0],
+                                "flat_width": dims[1],
+                                "fold_lines": num_folds,
+                                "thickness": detected_thickness,
+                                "fold_details": fold_details,
+                                "bends_logical": bends_logical
+                            }}
+                            
             FreeCAD.closeDocument("UnfoldDoc")
         except Exception as e:
             try:
@@ -374,9 +552,6 @@ for solid in sorted_solids[:3]:  # Try top 3 by volume
             except:
                 pass
             continue
-
-    if result["success"]:
-        break
 
 print("UNFOLD_RESULT:" + json.dumps(result))
 '''
@@ -682,11 +857,283 @@ def run_debug(step_file):
             print("  -> Candidates filtered out (angle < 270°)")
 
 
+def generate_compact_pdf(step_file, output_dir, part_name, analysis, total_holes, unfold_result=None):
+    """Generate a compact 1-page A4 PDF report."""
+    # Fallback: try to get unfold_result from analysis object if not provided
+    if unfold_result is None:
+        unfold_result = getattr(analysis, 'unfold_result', None)
+
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, HRFlowable
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    import datetime
+    from svglib.svglib import svg2rlg
+    from src.step_processing import load_step_file
+    import cadquery as cq
+
+    # Prepare images
+    image_dir = os.path.join(output_dir, "images")
+    os.makedirs(image_dir, exist_ok=True)
+    
+    svg_path = os.path.join(image_dir, f"{part_name}.svg")
+    flat_svg_path = os.path.join(image_dir, f"{part_name}_flat.svg")
+
+    # Generate 3D SVG
+    try:
+        shape = load_step_file(step_file)
+        cq.exporters.export(
+            shape,
+            svg_path,
+            opt={
+                "width": 300,
+                "height": 300,
+                "marginLeft": 10,
+                "marginTop": 10,
+                "showAxes": False,
+                "projectionDir": (1, 1, 1),
+                "strokeWidth": 0.5,
+            }
+        )
+    except Exception as e:
+        print(f"  Warning: Could not generate 3D SVG: {e}")
+
+    # Generate Flat Pattern SVG
+    flat_step_path = getattr(analysis, 'flat_step_path', None)
+    if flat_step_path and os.path.exists(flat_step_path):
+        try:
+            flat_shape = load_step_file(flat_step_path)
+            
+            # Determine optimal projection direction (largest face normal)
+            proj_dir = (0, 0, 1) # Default
+            try:
+                faces = flat_shape.faces().vals()
+                if faces:
+                    largest_face = max(faces, key=lambda f: f.Area())
+                    normal = largest_face.normalAt(largest_face.Center())
+                    proj_dir = (normal.x, normal.y, normal.z)
+            except Exception as e:
+                print(f"  Warning: Could not determine flat face normal: {e}")
+
+            cq.exporters.export(
+                flat_shape,
+                flat_svg_path,
+                opt={
+                    "width": 300,
+                    "height": 300,
+                    "marginLeft": 10,
+                    "marginTop": 10,
+                    "showAxes": False,
+                    "projectionDir": proj_dir,
+                    "strokeWidth": 0.5,
+                }
+            )
+            print(f"  Generated flat pattern SVG: {flat_svg_path}")
+        except Exception as e:
+            print(f"  Warning: Could not generate flat SVG: {e}")
+    
+    # PDF Setup
+    pdf_path = os.path.join(output_dir, f"{part_name}_report.pdf")
+    doc = SimpleDocTemplate(pdf_path, pagesize=A4,
+                           leftMargin=10*mm, rightMargin=10*mm,
+                           topMargin=10*mm, bottomMargin=10*mm)
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=16, alignment=TA_CENTER, spaceAfter=2)
+    subtitle_style = ParagraphStyle('Subtitle', parent=styles['Normal'], fontSize=10, alignment=TA_CENTER, textColor=colors.grey)
+    header_style = ParagraphStyle('Header', parent=styles['Heading3'], fontSize=10, textColor=colors.HexColor('#2c3e50'), spaceBefore=5, spaceAfter=2)
+    normal_style = ParagraphStyle('Normal', parent=styles['Normal'], fontSize=9, leading=11)
+    small_style = ParagraphStyle('Small', parent=styles['Normal'], fontSize=8, leading=10)
+    
+    elements = []
+    
+    # --- Header ---
+    date_str = datetime.datetime.now().strftime("%d-%m-%Y %H:%M")
+    elements.append(Paragraph(f"PRODUCTIE ANALYSE: {part_name}", title_style))
+    elements.append(Paragraph(f"Datum: {date_str} | Bestand: {os.path.basename(step_file)}", subtitle_style))
+    elements.append(Spacer(1, 3*mm))
+    elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#3498db')))
+    elements.append(Spacer(1, 5*mm))
+
+    # --- Main Layout (2 Columns) ---
+    
+    # 1. Classification Data
+    part_category = getattr(analysis, 'part_category', "ONBEKEND")
+    if not part_category:
+        if analysis.is_profile: part_category = "PROFIEL"
+        elif analysis.bend_count_erp > 0: part_category = "GEBOGEN PLAATWERK"
+        else: part_category = "PLAAT (vlak)"
+
+    class_data = [
+        ["CLASSIFICATIE", ""],
+        ["Categorie", part_category],
+        ["Type", analysis.part_type.value.upper()],
+        ["Materiaal", "Staal (aanname)"],
+        ["Dikte", f"{analysis.thickness:.2f} mm"]
+    ]
+    
+    # 2. Dimensions Data
+    dim_data = [
+        ["AFMETINGEN", ""],
+        ["Bounding Box", f"{analysis.length:.1f} x {analysis.width:.1f} x {analysis.height:.1f} mm"],
+    ]
+    if analysis.flat_length > 0:
+        dim_data.append(["Uitslag (Flat)", f"{analysis.flat_length:.1f} x {analysis.flat_width:.1f} mm"])
+    
+    # 3. Production Data
+    prod_data = [
+        ["PRODUCTIE DATA", ""],
+        ["Totaal Gaten", str(total_holes)],
+        ["Zettingen (Totaal)", str(analysis.bend_count_erp)]
+    ]
+    
+    # Add Up/Down counts if available
+    if unfold_result and unfold_result.get('bends_logical'):
+        bends = unfold_result.get('bends_logical')
+        up_count = sum(1 for b in bends if b['type'] == 'up')
+        down_count = sum(1 for b in bends if b['type'] == 'down')
+        prod_data.append(["  - Zettingen (Up)", str(up_count)])
+        prod_data.append(["  - Tegenzettingen (Down)", str(down_count)])
+
+    def create_info_table(data):
+        t = Table(data, colWidths=[50*mm, 40*mm])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#34495e')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#bdc3c7')),
+            ('BACKGROUND', (0, 1), (0, -1), colors.HexColor('#ecf0f1')),
+            ('SPAN', (0, 0), (-1, 0)),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ]))
+        return t
+
+    t_class = create_info_table(class_data)
+    t_dims = create_info_table(dim_data)
+    t_prod = create_info_table(prod_data)
+    
+    # Left Column Content
+    left_table_data = [
+        [t_class],
+        [Spacer(1, 3*mm)],
+        [t_dims],
+        [Spacer(1, 3*mm)],
+        [t_prod]
+    ]
+    left_col_table = Table(left_table_data, colWidths=[90*mm])
+    left_col_table.setStyle(TableStyle([('LEFTPADDING', (0,0), (-1,-1), 0)]))
+    
+    # Right Column Content (Images)
+    right_table_data = []
+    
+    # 3D Image
+    if os.path.exists(svg_path):
+        try:
+            drawing = svg2rlg(svg_path)
+            if drawing:
+                scale = min(85*mm / drawing.width, 60*mm / drawing.height)
+                drawing.width *= scale
+                drawing.height *= scale
+                drawing.scale(scale, scale)
+                right_table_data.append([Paragraph("3D Weergave", header_style)])
+                right_table_data.append([drawing])
+                right_table_data.append([Spacer(1, 5*mm)])
+        except Exception as e:
+            print(f"Error loading 3D SVG: {e}")
+
+    # Flat Image
+    if os.path.exists(flat_svg_path):
+        try:
+            drawing_flat = svg2rlg(flat_svg_path)
+            if drawing_flat:
+                scale = min(85*mm / drawing_flat.width, 80*mm / drawing_flat.height)
+                drawing_flat.width *= scale
+                drawing_flat.height *= scale
+                drawing_flat.scale(scale, scale)
+                right_table_data.append([Paragraph("Uitslag (Flat Pattern)", header_style)])
+                right_table_data.append([drawing_flat])
+        except Exception as e:
+            print(f"Error loading Flat SVG: {e}")
+
+    if not right_table_data:
+        right_table_data = [[Paragraph("Geen afbeeldingen beschikbaar", normal_style)]]
+        
+    right_col_table = Table(right_table_data, colWidths=[90*mm])
+    right_col_table.setStyle(TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('LEFTPADDING', (0,0), (-1,-1), 0)
+    ]))
+    
+    # Master Table
+    master_table = Table([[left_col_table, right_col_table]], colWidths=[95*mm, 95*mm])
+    master_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+    elements.append(master_table)
+    elements.append(Spacer(1, 5*mm))
+    
+    # --- Bottom Section: Details ---
+    
+    # Bend Sequence Table (Compact)
+    if unfold_result and unfold_result.get('bends_logical'):
+        elements.append(Paragraph("Buigvolgorde & Details", header_style))
+        bends = unfold_result.get('bends_logical')
+        
+        # Create a multi-column list if many bends
+        # We want 2 columns of bends: # Type Angle Radius | # Type Angle Radius
+        bend_data = [["#", "Type", "Hoek", "Radius", "#", "Type", "Hoek", "Radius"]]
+        
+        row = []
+        for i, b in enumerate(bends, 1):
+            row.extend([str(i), b['type'].upper(), f"{b['angle']:.0f}°", f"R{b['radius']:.1f}"])
+            if len(row) == 8:
+                bend_data.append(row)
+                row = []
+        if row:
+            while len(row) < 8:
+                row.append("")
+            bend_data.append(row)
+            
+        t_bends = Table(bend_data, colWidths=[10*mm, 15*mm, 15*mm, 15*mm]*2)
+        t_bends.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#34495e')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#bdc3c7')),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+        ]))
+        elements.append(t_bends)
+
+    # Footer
+    elements.append(Spacer(1, 10*mm))
+    elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.grey))
+    elements.append(Paragraph("Gegenereerd door Manufacturing Pipeline", small_style))
+
+    doc.build(elements)
+    print(f"  PDF (Compact): {pdf_path}")
+    return pdf_path
+
+
 def generate_simple_pdf(step_file, output_dir, part_name, analysis, total_holes, unfold_result=None):
     """Generate comprehensive PDF report with detailed analysis and reasoning.
 
     Includes BOTH original 3D view AND flat pattern view when available.
     """
+    # Fallback: try to get unfold_result from analysis object if not provided
+    if unfold_result is None:
+        unfold_result = getattr(analysis, 'unfold_result', None)
+
     from src.step_processing import load_step_file
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -799,14 +1246,29 @@ def generate_simple_pdf(step_file, output_dir, part_name, analysis, total_holes,
         ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
     ]))
 
+    # Calculate up/down for summary
+    up_count = 0
+    down_count = 0
+    if unfold_result and unfold_result.get('success'):
+        bends = unfold_result.get('bends_logical', [])
+        up_count = sum(1 for b in bends if b['type'] == 'up')
+        down_count = sum(1 for b in bends if b['type'] == 'down')
+
     # Production data box
     prod_data = [
         ["PRODUCTIE DATA (ERP)", ""],
-        ["Zettingen", str(analysis.bend_count_erp)],
+        ["Totaal zettingen", str(analysis.bend_count_erp)],
+    ]
+    
+    if up_count > 0 or down_count > 0:
+        prod_data.append(["  - Zettingen", str(up_count)])
+        prod_data.append(["  - Tegenzettingen", str(down_count)])
+        
+    prod_data.extend([
         ["Snijgaten", str(total_holes)],
         ["Max gat diameter", f"{analysis.max_hole_diameter:.1f} mm" if analysis.max_hole_diameter > 0 else "-"],
         ["Plaatdikte", f"{analysis.thickness:.1f} mm" if analysis.thickness > 0 else "-"],
-    ]
+    ])
 
     prod_table = Table(prod_data, colWidths=[60*mm, 60*mm])
     prod_table.setStyle(TableStyle([
@@ -959,19 +1421,72 @@ def generate_simple_pdf(step_file, output_dir, part_name, analysis, total_holes,
             if analysis.flat_length > 0:
                 elements.append(Paragraph(f"✓ Unfold geslaagd: {analysis.flat_length:.1f} × {analysis.flat_width:.1f} mm", success_style))
                 elements.append(Paragraph(f"  Reden: {analysis.unfold_reason}", normal_style))
+                
+                # Add detailed bend info if available
+                if unfold_result and unfold_result.get('success'):
+                    elements.append(Spacer(1, 3*mm))
+                    elements.append(Paragraph("Zettingen Analyse (Verified)", subheading_style))
+                    
+                    # Zettingen vs Tegenzettingen
+                    bends_logical = unfold_result.get('bends_logical', [])
+                    if bends_logical:
+                        up_count = sum(1 for b in bends_logical if b['type'] == 'up')
+                        down_count = sum(1 for b in bends_logical if b['type'] == 'down')
+                        
+                        zt_data = [
+                            ["Type", "Aantal"],
+                            ["Zettingen (Up)", str(up_count)],
+                            ["Tegenzettingen (Down)", str(down_count)]
+                        ]
+                        zt_table = Table(zt_data, colWidths=[60*mm, 30*mm])
+                        zt_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#34495e')),
+                            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#bdc3c7')),
+                            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ]))
+                        elements.append(zt_table)
+                        elements.append(Spacer(1, 3*mm))
+                        
+                        # Detailed sequence
+                        elements.append(Paragraph("Buigvolgorde:", small_style))
+                        seq_text = []
+                        for i, b in enumerate(bends_logical, 1):
+                            seq_text.append(f"{i}. {b['type'].upper()} {b['angle']:.1f}° (R={b['radius']:.1f}mm)")
+                        elements.append(Paragraph(", ".join(seq_text), small_style))
+                        elements.append(Spacer(1, 3*mm))
+
+                    # Fold lines table
+                    fold_details = unfold_result.get('fold_details', [])
+                    if fold_details:
+                        elements.append(Paragraph("Buiglijnen (Locatie op uitslag)", subheading_style))
+                        fd_data = [["#", "Lengte", "Center (X, Y, Z)"]]
+                        for fold in fold_details:
+                            c = fold['center']
+                            fd_data.append([
+                                str(fold['id']),
+                                f"{fold['length']:.1f}mm",
+                                f"({c[0]:.1f}, {c[1]:.1f}, {c[2]:.1f})"
+                            ])
+                        
+                        fd_table = Table(fd_data, colWidths=[15*mm, 30*mm, 80*mm])
+                        fd_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#34495e')),
+                            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#bdc3c7')),
+                            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                            ('FONTSIZE', (0, 0), (-1, -1), 8),
+                        ]))
+                        elements.append(fd_table)
+
             else:
                 elements.append(Paragraph(f"⚠ Unfold mogelijk maar niet uitgevoerd", warning_style))
                 elements.append(Paragraph(f"  Reden: {analysis.unfold_reason}", normal_style))
         else:
             elements.append(Paragraph(f"✗ Unfold niet mogelijk", error_style))
             elements.append(Paragraph(f"  Reden: {analysis.unfold_reason}", normal_style))
-
-        # If unfold failed with details, show them
-        if unfold_result and not unfold_result.get('success') and unfold_result.get('error_details'):
-            elements.append(Spacer(1, 3*mm))
-            elements.append(Paragraph("Unfold pogingen:", subheading_style))
-            for detail in unfold_result.get('error_details', [])[:3]:  # Show max 3
-                elements.append(Paragraph(f"  • Face {detail['face_idx']}: {detail['message']}", small_style))
 
     # ==================== PAGE 2: DETAILED ANALYSIS ====================
     elements.append(PageBreak())

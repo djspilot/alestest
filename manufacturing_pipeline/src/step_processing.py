@@ -968,6 +968,52 @@ def detect_shaped_holes(shape):
                 
     return unique_holes
 
+def deduplicate_holes(circular_holes, shaped_holes):
+    """
+    Remove circular holes that are part of a shaped hole (e.g. rounded corners of a rect).
+    Returns filtered list of circular_holes.
+    """
+    if not shaped_holes:
+        return circular_holes
+        
+    filtered_circular = []
+    
+    for circ in circular_holes:
+        is_duplicate = False
+        c_pos = circ.position
+        
+        for shaped in shaped_holes:
+            s_pos = shaped["center"]
+            
+            # Calculate distance
+            dx = c_pos[0] - s_pos[0]
+            dy = c_pos[1] - s_pos[1]
+            dz = c_pos[2] - s_pos[2]
+            dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+            
+            # Parse dimensions of shaped hole to get a "radius of influence"
+            # dim string is like "20.2x19.5"
+            try:
+                dims = [float(x) for x in shaped["dim"].split('x')]
+                max_dim = max(dims)
+            except:
+                max_dim = 20.0 # Fallback
+                
+            # If the circular hole is within the shaped hole's bounding area
+            # We assume it's part of the shape (e.g. a corner radius)
+            # Threshold: Distance < (Shape Size / 2 + Circle Radius)
+            # But since centers might be offset, we use a generous overlap check.
+            # If distance is small (< 15mm) and the circle is smaller or similar size to the shape
+            
+            if dist < (max_dim * 0.8):
+                is_duplicate = True
+                break
+        
+        if not is_duplicate:
+            filtered_circular.append(circ)
+            
+    return filtered_circular
+
 def is_turned_part(cq_object):
     """
     Identify if part is lathe-machinable based on axisymmetry.

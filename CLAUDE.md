@@ -135,11 +135,19 @@ python scripts/debug_bends.py
 │       ├── correlation.py            # Correlate STEP geometry with PDF dimensions
 │       └── models.py                 # Data models/dataclasses
 │
+├── docs/                             # Documentation
+│   └── FOLDER_STRUCTURE.txt          # Explanation of project structure
+│
 ├── run.py                            # Simple runner - quick analysis with detailed reasoning
 │
 ├── scripts/                          # Utility and testing scripts
+│   ├── batch_process.py              # Process multiple files and compare with Excel
 │   ├── compare_erp.py                # ERP/Spaceclaim comparison tool
 │   ├── aag_analyzer.py               # AAG (Attributed Adjacency Graph) feature recognition
+│   ├── inspect_solids.py             # Inspect geometric solids
+│   ├── inspect_unfold_tree.py        # Debug unfold hierarchy
+│   ├── debug_excel.py                # Debug Excel parsing
+│   ├── pipeline_functions.py         # Shared pipeline logic
 │   ├── test_accuracy.py              # Validation: compare detection vs Excel data
 │   ├── test_freecad.py               # Test FreeCAD unfold functionality
 │   ├── test_unfold_holes.py          # Test unfold with hole detection

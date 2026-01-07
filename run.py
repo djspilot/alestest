@@ -15,7 +15,7 @@ import json
 from scripts.pipeline_functions import (
     PROJECT_ROOT, PARTS_DIR, OUTPUT_DIR,
     find_step_files, select_step_file, get_output_dir,
-    run_analysis, run_aag_analysis, run_debug, generate_simple_pdf
+    run_analysis, run_aag_analysis, run_debug, generate_simple_pdf, generate_compact_pdf
 )
 
 def main():
@@ -177,7 +177,7 @@ Examples:
 
         if not args.no_pdf:
             print("\nGenerating PDF report...")
-            generate_simple_pdf(step_file, output_dir, part_name, analysis, total_holes)
+            generate_compact_pdf(step_file, output_dir, part_name, analysis, total_holes)
 
         print(f"\n{'='*60}")
         print(f"COMPLETE")

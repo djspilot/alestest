@@ -391,14 +391,21 @@ def analyze_part_geometry(shape, name: str = "Part") -> PartAnalysis:
     bend_count_erp = bend_count_total
 
     if is_turned:
-        if min(cylinder_radii) < 5 and len(set(round(r, 1) for r in cylinder_radii)) == 1:
+        # Check aspect ratio (Length / Diameter)
+        # Assuming height is diameter (smallest dim) or width
+        diameter = max(width, height)
+        aspect_ratio = length / diameter if diameter > 0 else 0
+        
+        # Determine if it's a tube/bar profile vs a machined part
+        # High aspect ratio usually implies stock material (bar/tube)
+        if aspect_ratio > 4.0:
             part_type = PartType.BUIS
             is_profile = True
             reasoning.append(AnalysisReason(
                 step="Profiel Type",
-                observation="Gedraaid met constante diameter",
-                conclusion="BUIS - ingekocht profiel, geen bewerkingen tellen",
-                details={}
+                observation=f"Cilindrisch met aspect ratio {aspect_ratio:.1f}",
+                conclusion="BUIS/STAF - ingekocht profiel",
+                details={"aspect_ratio": aspect_ratio}
             ))
         else:
             part_type = PartType.DRAAISTUK
