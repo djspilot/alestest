@@ -3,8 +3,10 @@ import os
 from typing import List
 from .models import HoleFeature, MatchedFeature
 
+from .config import DATABASE_PATH
+
 class DatabaseManager:
-    def __init__(self, db_path="manufacturing_data.db"):
+    def __init__(self, db_path=DATABASE_PATH):
         self.db_path = db_path
         self.conn = None
 

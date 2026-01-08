@@ -1,0 +1,9 @@
+cadquery>=2.4.0
+cadquery-ocp
+numpy
+reportlab
+svglib
+pandas
+openpyxl
+pymupdf
+# edocr # Optional, might need specific installation

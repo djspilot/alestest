@@ -1,14 +1,18 @@
+# Input/Output
+input/*.step
+input/*.stp
+output/
+.cache/
+
+# Python
 __pycache__/
 *.pyc
-.DS_Store
-output/
-parts/
-AI-voorbeelden/
-.venv/
+*.egg-info/
+
+# Environment
+.env
 venv/
-*.step
-*.STEP
-*.stp
-*.STP
-*.dxf
-*.DXF
+.vscode/
+
+# System
+.DS_Store

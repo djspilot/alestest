@@ -72,7 +72,7 @@ class CacheMetadata:
 class CacheManager:
     """Manages caching of pipeline intermediate results"""
 
-    def __init__(self, cache_dir: str = ".pipeline_cache"):
+    def __init__(self, cache_dir: str = ".cache"):
         self.cache_dir = cache_dir
         self.metadata_file = os.path.join(cache_dir, "metadata.json")
         self.data_cache: Dict[str, Any] = {}

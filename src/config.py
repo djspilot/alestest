@@ -167,13 +167,15 @@ class CostColumnsConfig:
 
 
 @dataclass
+@dataclass
 class PipelineConfig:
     """Full pipeline configuration."""
 
-    # Input/Output
+    # Input/Output paths
+    # Defined globally below, but can be overridden here
     step_file: str = ""
     pdf_file: Optional[str] = None
-    output_dir: str = "."
+    output_dir: str = "output"
 
     # Material & Quantity (for cost estimation)
     material: str = "steel_s235"
@@ -192,7 +194,7 @@ class PipelineConfig:
 
     # Cache settings
     use_cache: bool = True
-    cache_dir: str = ".pipeline_cache"
+    cache_dir: str = ".cache"
     from_stage: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -226,6 +228,19 @@ class PipelineConfig:
         config.material_prices = MaterialPricesConfig.from_dict(material_prices_data)
         config.cost_columns = CostColumnsConfig.from_dict(cost_columns_data)
         return config
+
+
+# Directory Configuration
+# This assumes the config.py is in src/, so project root is one level up
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+INPUT_DIR = os.path.join(PROJECT_ROOT, "input")
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+CACHE_DIR = os.path.join(PROJECT_ROOT, ".cache")
+
+# Database Configuration
+DATABASE_PATH = os.path.join(DATA_DIR, "manufacturing_data.db")
 
 
 # Module groupings for easy enable/disable
