@@ -12,3 +12,4 @@ venv/
 *.STP
 *.dxf
 *.DXF
+.pipeline_cache.json
