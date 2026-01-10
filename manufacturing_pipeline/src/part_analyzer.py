@@ -422,12 +422,43 @@ def analyze_part_geometry(shape, name: str = "Part") -> PartAnalysis:
             ))
         elif bend_count_total == 0:
             part_type = PartType.PLAAT
-        elif bend_count_total == 1:
-            part_type = PartType.HOEKPROFIEL
-        elif bend_count_total == 2:
-            part_type = PartType.U_PROFIEL
-        elif bend_count_total == 3:
-            part_type = PartType.C_PROFIEL
+        elif bend_count_total in [1, 2, 3]:
+            # Integration A: Check of dit een ingekocht profiel is
+            if bend_count_total == 1:
+                part_type = PartType.HOEKPROFIEL
+            elif bend_count_total == 2:
+                part_type = PartType.U_PROFIEL
+            elif bend_count_total == 3:
+                part_type = PartType.C_PROFIEL
+
+            # Heuristics voor ingekocht profiel:
+            # 1. Hoge aspect ratio (langwerpig)
+            # 2. Buigingen lopen over de gehele lengte
+            # 3. Afmetingen zijn "mooie" getallen (standaard maten)
+            aspect_ratio_len = length / width if width > 0 else 0
+            
+            is_likely_stock = False
+            # Als aspect ratio > 4 en buigingen vullen > 90% van de lengte
+            if aspect_ratio_len > 3.0: # Iets ruimer nemen (bijv. kort stukje koker)
+                all_long_bends = all(b.length > length * 0.9 for b in bends)
+                
+                # Check of breedte/hoogte standaardwaarden zijn (bijv. 20, 25, 30, 40, 50, ...)
+                standard_dims = [10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 100, 120, 150, 200]
+                is_standard_w = any(abs(width - s) < 0.5 for s in standard_dims)
+                is_standard_h = any(abs(height - s) < 0.5 for s in standard_dims)
+                
+                if all_long_bends and (is_standard_w or is_standard_h):
+                    is_likely_stock = True
+            
+            if is_likely_stock:
+                is_profile = True
+                bend_count_erp = 0
+                reasoning.append(AnalysisReason(
+                    step="Profiel Type",
+                    observation=f"{part_type.value} met aspect ratio {aspect_ratio_len:.1f}, bends over volle lengte en standaard afmetingen",
+                    conclusion=f"{part_type.value.upper()} PROFIEL (ingekocht) - 0 zettingen voor ERP",
+                    details={"aspect_ratio": aspect_ratio_len, "width": width, "height": height}
+                ))
         else:
             part_type = PartType.COMPLEX
     else:

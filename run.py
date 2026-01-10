@@ -144,22 +144,26 @@ Examples:
 
             if aag_result.get('success'):
                 print(f"\n--- AAG Analyse Resultaat ---")
+                print(f"Type:             {aag_result.get('part_type', 'ONBEKEND')}")
                 print(f"Gaten (AAG):      {aag_result['hole_count']}")
                 print(f"Slots (AAG):      {aag_result['slot_count']}")
-                print(f"Zettingen (AAG):  {aag_result['bend_count']}")
+                print(f"Zettingen:        {aag_result['bend_count']}")
+                print(f"Tegenzettingen:   {aag_result.get('counter_bend_count', 0)}")
                 print(f"Dikte (AAG):      {aag_result['thickness']:.2f} mm")
                 print(f"Snijlengte:       {aag_result['total_cut_length']:.0f} mm")
                 print(f"Pierces:          {aag_result['pierce_count']}")
-                print(f"Laser snijtijd:   {aag_result['laser_cut_time']:.1f} sec")
-                print(f"Faces/Edges:      {aag_result['face_count']}/{aag_result['edge_count']}")
-                print(f"Skin/Thickness:   {aag_result['skin_faces']}/{aag_result['thickness_faces']}")
+                if args.verbose:
+                    print(f"Faces/Edges:      {aag_result['face_count']}/{aag_result['edge_count']}")
+                    print(f"Skin/Thickness:   {aag_result['skin_faces']}/{aag_result['thickness_faces']}")
+                    print(f"Raw bends/Prod:   {aag_result.get('all_bend_count', '?')}/{aag_result.get('production_bend_count', '?')}")
 
                 # Show hole details if verbose
                 if args.verbose and aag_result.get('holes_detail'):
                     print(f"\n--- Gaten Detail (AAG) ---")
                     for h in aag_result['holes_detail'][:10]:
                         q_str = f"Q={h['isoperimetric_quotient']:.2f}" if h.get('isoperimetric_quotient') else ""
-                        print(f"  {h['type']}: Ø{h.get('diameter', 0):.1f}mm, P={h['perimeter']:.0f}mm {q_str}")
+                        diam = h.get('diameter') or 0
+                        print(f"  {h['type']}: Ø{diam:.1f}mm, P={h['perimeter']:.0f}mm {q_str}")
 
                 # Show bend details if verbose
                 if args.verbose and aag_result.get('bends_detail'):

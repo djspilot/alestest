@@ -646,33 +646,41 @@ def analyze_sheet_metal_geometry(solid, thickness: float = None) -> Dict[str, An
     # The minority direction is the "counter" direction
     counter_bend_count = min(up_bends, down_bends) if (up_bends + down_bends) > 0 else 0
 
-    # Detect if this is a closed profile (koker/buis)
-    # A koker has 4 bends that form a closed loop (total ~360°)
-    # In this case, it's typically purchased as profile, not bent on kantbank
+    # Detect if this is a stock profile (purchased)
+    # 1. Closed profile (koker/buis): 4 bends forming ~360°
+    # 2. Open standard profile (L, U, C): simple bends over full length
     is_closed_profile = False
+    is_stock_profile = False
+
     if len(bends) >= 4:
         total_bend_angle = sum(b.angle for b in bends)
-        # 4 x 90° = 360° for a rectangular koker
         if 350 <= total_bend_angle <= 370:
             is_closed_profile = True
-        # Also check if bend lengths are similar (consistent profile)
+            is_stock_profile = True
+
+    # Check for open stock profiles (L, U, C)
+    if not is_stock_profile and 1 <= len(bends) <= 3:
+        # Heuristic: If all bends have the same length and that length is significant
         if bends:
             lengths = [b.bend_length for b in bends]
             avg_len = sum(lengths) / len(lengths)
-            # If all bends have similar length, it's likely a profile
-            if all(abs(l - avg_len) < avg_len * 0.1 for l in lengths):
-                is_closed_profile = True
+            # All bends same length and > 100mm? Likely a stock profile
+            if all(abs(l - avg_len) < avg_len * 0.1 for l in lengths) and avg_len > 100:
+                # We could also check aspect ratio if we had bbox here, 
+                # but bend_length is a good proxy for profile length.
+                is_stock_profile = True
 
     result["bends"] = bends
     result["bend_count"] = len(bends)
     result["counter_bend_count"] = counter_bend_count
     result["is_sheet_metal"] = len(bends) > 0
     result["is_closed_profile"] = is_closed_profile
+    result["is_stock_profile"] = is_stock_profile
     result["total_bend_length"] = sum(b.bend_length for b in bends)
 
-    # For closed profiles, set bend_count to 0 (purchased as profile)
-    if is_closed_profile:
-        result["bend_count_for_erp"] = 0  # Separate field for ERP
+    # For stock profiles, set bend_count to 0 (purchased as profile)
+    if is_stock_profile:
+        result["bend_count_for_erp"] = 0
     else:
         result["bend_count_for_erp"] = len(bends)
 

@@ -1,0 +1,11 @@
+Onderdeelnummer;Categorie;Type;Lengte_mm;Breedte_mm;Hoogte_mm;Dikte_mm;Zettingen;Gaten_AAG;Slots;Uitslag_L_mm;Uitslag_B_mm;Vouwlijnen;Snijlengte_mm;Pierces;Unfold_OK
+10000703900;Gebogen plaatwerk;Complex;1225;823;285;0.46;48;18;0;1828;1119;9;10693;19;Ja
+10000705057;Gebogen plaatwerk;Complex;35;20;20;30.00;2;2;0;;;0;141;3;Nee
+10000707475;Profiel;Koker;747;40;40;36.00;8;0;0;;;0;1563;1;N.v.t.
+10000890089;Plaat;Vlak;1200;40;20;20.00;0;9;0;;;0;7537;10;N.v.t.
+10000890096;Gebogen plaatwerk;Complex;310;40;5;40.00;9;0;0;310;40;0;550;1;Ja
+10001057924;Gebogen plaatwerk;Complex;1238;823;585;5.00;283;165;0;1828;1119;9;50172;166;Ja
+10001057925;Gebogen plaatwerk;Complex;823;334;190;5.00;98;58;0;1177;547;7;12953;59;Ja
+10001059687;Gebogen plaatwerk;Complex;823;334;190;5.00;77;42;0;1177;547;6;12193;43;Ja
+10001059694;Gebogen plaatwerk;Complex;883;334;172;3.00;31;4;0;883;526;3;1982;5;Ja
+C1050070;Profiel;Buis;80;16;16;2.00;11;4;0;;;0;166;5;N.v.t.

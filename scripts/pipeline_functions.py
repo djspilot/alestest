@@ -128,7 +128,6 @@ def run_analysis(step_file, output_dir, args):
             self.bend_count = data.get('bend_count', 0)
             self.hole_count = data.get('hole_count', 0)
             self.slot_count = data.get('slot_count', 0)
-            self.laser_cut_time = data.get('laser_cut_time', 0.0)
             self.data = data
 
     aag_result = AAGResult(aag_data)
@@ -738,18 +737,21 @@ result = analyzer.analyze(shape)
 # Convert to JSON-serializable dict
 output = {{
     "success": True,
+    "part_type": result.part_type,
     "hole_count": result.hole_count,
     "bend_count": result.bend_count,
+    "counter_bend_count": result.counter_bend_count,
     "slot_count": result.slot_count,
     "thickness": result.thickness,
     "cut_length": result.cut_length,
     "total_cut_length": result.total_cut_length,
     "pierce_count": result.pierce_count,
-    "laser_cut_time": result.laser_cut_time,
     "face_count": result.face_count,
     "edge_count": result.edge_count,
     "skin_faces": result.skin_faces,
     "thickness_faces": result.thickness_faces,
+    "production_bend_count": len(result.production_bends),
+    "all_bend_count": len(result.bends),
     "holes_detail": [],
     "bends_detail": [],
 }}
@@ -763,8 +765,8 @@ for h in result.holes[:20]:  # Limit to 20
         "isoperimetric_quotient": h.isoperimetric_quotient,
     }})
 
-# Add bend details
-for b in result.bends[:20]:  # Limit to 20
+# Add bend details (only production bends)
+for b in result.production_bends[:20]:  # Limit to 20
     output["bends_detail"].append({{
         "type": b.bend_type.value if hasattr(b.bend_type, 'value') else str(b.bend_type),
         "angle": b.bend_angle,
@@ -783,7 +785,7 @@ print("AAG_RESULT:" + json.dumps(output))
             [FREECAD_PYTHON, "-c", aag_script],
             capture_output=True,
             text=True,
-            timeout=120
+            timeout=300
         )
 
         # Parse result
@@ -799,7 +801,7 @@ print("AAG_RESULT:" + json.dumps(output))
         return {"success": False, "error": "No result returned"}
 
     except subprocess.TimeoutExpired:
-        return {"success": False, "error": "AAG analysis timeout (>120s)"}
+        return {"success": False, "error": "AAG analysis timeout (>300s)"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 

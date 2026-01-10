@@ -1,0 +1,424 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<DocumentElement>
+  <CalculationResult>
+    <Tube_PartName>10000469654_Rev_01</Tube_PartName>
+    <Tube_Name>10000469654_Rev_01</Tube_Name>
+    <Tube_Type>C_50x2</Tube_Type>
+    <Tube_Thickness>2</Tube_Thickness>
+    <Tube_Width>50</Tube_Width>
+    <Tube_Heigth>50</Tube_Heigth>
+    <Tube_Count>1</Tube_Count>
+    <Tube_Material>prof rvs 304 #18</Tube_Material>
+    <Tube_InnerRadius>23</Tube_InnerRadius>
+    <Tube_OuterRadius>25</Tube_OuterRadius>
+    <Tube_OuterArea>-</Tube_OuterArea>
+    <Tube_TotalArea>263592</Tube_TotalArea>
+    <Tube_NrFeatures>0</Tube_NrFeatures>
+    <Tube_NrMarkings>-</Tube_NrMarkings>
+    <Tube_Volume>262964</Tube_Volume>
+    <Tube_BoxCenterX>0</Tube_BoxCenterX>
+    <Tube_BoxCenterY>0</Tube_BoxCenterY>
+    <Tube_BoxCenterZ>436</Tube_BoxCenterZ>
+    <Tube_BoxDeltaX>50</Tube_BoxDeltaX>
+    <Tube_BoxDeltaY>50</Tube_BoxDeltaY>
+    <Tube_BoxDeltaZ>872</Tube_BoxDeltaZ>
+    <Tube_TopCutAngle>180</Tube_TopCutAngle>
+    <Tube_TopCutExtNrEl>1</Tube_TopCutExtNrEl>
+    <Tube_TopCutExtTotL>157.08</Tube_TopCutExtTotL>
+    <Tube_TopCutExtAvgL>157.08</Tube_TopCutExtAvgL>
+    <Tube_TopCutExtMinL>157.08</Tube_TopCutExtMinL>
+    <Tube_TopCutExtMaxL>157.08</Tube_TopCutExtMaxL>
+    <Tube_TopCutExtLineSumL>0</Tube_TopCutExtLineSumL>
+    <Tube_TopCutExtArcSumL>157.08</Tube_TopCutExtArcSumL>
+    <Tube_TopCutExtOtherSumL>0</Tube_TopCutExtOtherSumL>
+    <Tube_TopCutIntNrEl>-</Tube_TopCutIntNrEl>
+    <Tube_TopCutIntTotL>-</Tube_TopCutIntTotL>
+    <Tube_TopCutIntAvgL>-</Tube_TopCutIntAvgL>
+    <Tube_TopCutIntMinL>-</Tube_TopCutIntMinL>
+    <Tube_TopCutIntMaxL>-</Tube_TopCutIntMaxL>
+    <Tube_TopCutIntLineSumL>-</Tube_TopCutIntLineSumL>
+    <Tube_TopCutIntArcSumL>-</Tube_TopCutIntArcSumL>
+    <Tube_TopCutIntOtherSumL>-</Tube_TopCutIntOtherSumL>
+    <Tube_BotCutAngle>180</Tube_BotCutAngle>
+    <Tube_BotCutExtNrEl>1</Tube_BotCutExtNrEl>
+    <Tube_BotCutExtTotL>157.08</Tube_BotCutExtTotL>
+    <Tube_BotCutExtAvgL>157.08</Tube_BotCutExtAvgL>
+    <Tube_BotCutExtMinL>0</Tube_BotCutExtMinL>
+    <Tube_BotCutExtMaxL>157.08</Tube_BotCutExtMaxL>
+    <Tube_BotCutExtLineSumL>0</Tube_BotCutExtLineSumL>
+    <Tube_BotCutExtArcSumL>157.08</Tube_BotCutExtArcSumL>
+    <Tube_BotCutExtOtherSumL>0</Tube_BotCutExtOtherSumL>
+    <Tube_BotCutIntNrEl>-</Tube_BotCutIntNrEl>
+    <Tube_BotCutIntTotL>-</Tube_BotCutIntTotL>
+    <Tube_BotCutIntAvgL>-</Tube_BotCutIntAvgL>
+    <Tube_BotCutIntMinL>-</Tube_BotCutIntMinL>
+    <Tube_BotCutIntMaxL>-</Tube_BotCutIntMaxL>
+    <Tube_BotCutIntLineSumL>-</Tube_BotCutIntLineSumL>
+    <Tube_BotCutIntArcSumL>-</Tube_BotCutIntArcSumL>
+    <Tube_BotCutIntOtherSumL>-</Tube_BotCutIntOtherSumL>
+    <Tube_FeatDistToEnd />
+    <Tube_FeatBoxCX />
+    <Tube_FeatBoxCY />
+    <Tube_FeatBoxCZ />
+    <Tube_FeatBoxDX />
+    <Tube_FeatBoxDY />
+    <Tube_FeatBoxDZ />
+    <Tube_FeatExtNrEl />
+    <Tube_FeatExtTotL />
+    <Tube_FeatExtAvgL />
+    <Tube_FeatExtMinL />
+    <Tube_FeatExtMaxL />
+    <Tube_FeatExtLineSumL />
+    <Tube_FeatExtArcSumL />
+    <Tube_FeatExtOtherSumL />
+    <Tube_FeatIntNrEl>-</Tube_FeatIntNrEl>
+    <Tube_FeatIntTotL>-</Tube_FeatIntTotL>
+    <Tube_FeatIntAvgL>-</Tube_FeatIntAvgL>
+    <Tube_FeatIntMinL>-</Tube_FeatIntMinL>
+    <Tube_FeatIntMaxL>-</Tube_FeatIntMaxL>
+    <Tube_FeatIntLineSumL>-</Tube_FeatIntLineSumL>
+    <Tube_FeatIntArcSumL>-</Tube_FeatIntArcSumL>
+    <Tube_FeatIntOtherSumL>-</Tube_FeatIntOtherSumL>
+    <Tube_MarkDistToEnd />
+    <Tube_MarkBoxCX />
+    <Tube_MarkBoxCY />
+    <Tube_MarkBoxCZ />
+    <Tube_MarkBoxDX />
+    <Tube_MarkBoxDY />
+    <Tube_MarkBoxDZ />
+    <Tube_MarkExtNrEl />
+    <Tube_MarkExtTotL>0</Tube_MarkExtTotL>
+    <Tube_MarkExtAvgL />
+    <Tube_MarkExtMinL />
+    <Tube_MarkExtMaxL />
+    <Tube_MarkExtLineSumL />
+    <Tube_MarkExtArcSumL />
+    <Tube_MarkExtOtherSumL />
+    <Tube_Succes>Succes</Tube_Succes>
+    <Tube_FilePath>S:\Results\Tube\10000469654_Rev_01.stp</Tube_FilePath>
+    <Tube_OrderNr />
+    <Tube_DeliveryDate />
+    <Tube_Weight>2104</Tube_Weight>
+    <Tube_Time>00:00:10</Tube_Time>
+    <Tube_Cost />
+    <Tube_ProfileExists>false</Tube_ProfileExists>
+    <Tube_Id_Object>2</Tube_Id_Object>
+    <Tube_Id_Source>2</Tube_Id_Source>
+    <Tube_Id_ParentObject />
+    <Tube_Id_ParentSource />
+    <Tube_FilePathPNG />
+    <Tube_MaterialExists>true</Tube_MaterialExists>
+    <Tube_IsLocked />
+    <Tube_NestedLength />
+    <Tube_OriginalName>10000469654_Rev_01 @ 10000469654_Rev_01</Tube_OriginalName>
+    <Tube_AddedDocument />
+    <Tube_Machine>M1</Tube_Machine>
+    <Tube_MaterialPrice />
+    <Tube_AssemblyLevel>0</Tube_AssemblyLevel>
+    <Tube_BBox3D />
+    <Tube_ProfileArea>301.59</Tube_ProfileArea>
+    <Tube_Extra6 />
+    <Tube_Extra7 />
+    <Tube_Extra8 />
+    <Tube_Extra9 />
+    <Tube_Extra10 />
+    <Tube_User_Meerprijs>0</Tube_User_Meerprijs>
+    <Tube_User_Poedercoaten>False</Tube_User_Poedercoaten>
+    <Tube_User_Locatie>loc1</Tube_User_Locatie>
+  </CalculationResult>
+  <CalculationResult>
+    <Tube_PartName>10001079143_Rev_00</Tube_PartName>
+    <Tube_Name>10001079143_Rev_00</Tube_Name>
+    <Tube_Type>R_60x40x2</Tube_Type>
+    <Tube_Thickness>2</Tube_Thickness>
+    <Tube_Width>60</Tube_Width>
+    <Tube_Heigth>40</Tube_Heigth>
+    <Tube_Count>1</Tube_Count>
+    <Tube_Material>prof rvs 304 #18</Tube_Material>
+    <Tube_InnerRadius>3</Tube_InnerRadius>
+    <Tube_OuterRadius>5</Tube_OuterRadius>
+    <Tube_OuterArea>-</Tube_OuterArea>
+    <Tube_TotalArea>132462</Tube_TotalArea>
+    <Tube_NrFeatures>2</Tube_NrFeatures>
+    <Tube_NrMarkings>-</Tube_NrMarkings>
+    <Tube_Volume>131428</Tube_Volume>
+    <Tube_BoxCenterX>0</Tube_BoxCenterX>
+    <Tube_BoxCenterY>0</Tube_BoxCenterY>
+    <Tube_BoxCenterZ>177.5</Tube_BoxCenterZ>
+    <Tube_BoxDeltaX>60</Tube_BoxDeltaX>
+    <Tube_BoxDeltaY>40</Tube_BoxDeltaY>
+    <Tube_BoxDeltaZ>355</Tube_BoxDeltaZ>
+    <Tube_TopCutAngle>180</Tube_TopCutAngle>
+    <Tube_TopCutExtNrEl>8</Tube_TopCutExtNrEl>
+    <Tube_TopCutExtTotL>191.42</Tube_TopCutExtTotL>
+    <Tube_TopCutExtAvgL>23.93</Tube_TopCutExtAvgL>
+    <Tube_TopCutExtMinL>7.85</Tube_TopCutExtMinL>
+    <Tube_TopCutExtMaxL>50</Tube_TopCutExtMaxL>
+    <Tube_TopCutExtLineSumL>160</Tube_TopCutExtLineSumL>
+    <Tube_TopCutExtArcSumL>31.42</Tube_TopCutExtArcSumL>
+    <Tube_TopCutExtOtherSumL>0</Tube_TopCutExtOtherSumL>
+    <Tube_TopCutIntNrEl>-</Tube_TopCutIntNrEl>
+    <Tube_TopCutIntTotL>-</Tube_TopCutIntTotL>
+    <Tube_TopCutIntAvgL>-</Tube_TopCutIntAvgL>
+    <Tube_TopCutIntMinL>-</Tube_TopCutIntMinL>
+    <Tube_TopCutIntMaxL>-</Tube_TopCutIntMaxL>
+    <Tube_TopCutIntLineSumL>-</Tube_TopCutIntLineSumL>
+    <Tube_TopCutIntArcSumL>-</Tube_TopCutIntArcSumL>
+    <Tube_TopCutIntOtherSumL>-</Tube_TopCutIntOtherSumL>
+    <Tube_BotCutAngle>180</Tube_BotCutAngle>
+    <Tube_BotCutExtNrEl>8</Tube_BotCutExtNrEl>
+    <Tube_BotCutExtTotL>191.42</Tube_BotCutExtTotL>
+    <Tube_BotCutExtAvgL>23.93</Tube_BotCutExtAvgL>
+    <Tube_BotCutExtMinL>0</Tube_BotCutExtMinL>
+    <Tube_BotCutExtMaxL>50</Tube_BotCutExtMaxL>
+    <Tube_BotCutExtLineSumL>160</Tube_BotCutExtLineSumL>
+    <Tube_BotCutExtArcSumL>31.42</Tube_BotCutExtArcSumL>
+    <Tube_BotCutExtOtherSumL>0</Tube_BotCutExtOtherSumL>
+    <Tube_BotCutIntNrEl>-</Tube_BotCutIntNrEl>
+    <Tube_BotCutIntTotL>-</Tube_BotCutIntTotL>
+    <Tube_BotCutIntAvgL>-</Tube_BotCutIntAvgL>
+    <Tube_BotCutIntMinL>-</Tube_BotCutIntMinL>
+    <Tube_BotCutIntMaxL>-</Tube_BotCutIntMaxL>
+    <Tube_BotCutIntLineSumL>-</Tube_BotCutIntLineSumL>
+    <Tube_BotCutIntArcSumL>-</Tube_BotCutIntArcSumL>
+    <Tube_BotCutIntOtherSumL>-</Tube_BotCutIntOtherSumL>
+    <Tube_FeatDistToEnd>272_342</Tube_FeatDistToEnd>
+    <Tube_FeatBoxCX>0_0</Tube_FeatBoxCX>
+    <Tube_FeatBoxCY>19_19</Tube_FeatBoxCY>
+    <Tube_FeatBoxCZ>272_342</Tube_FeatBoxCZ>
+    <Tube_FeatBoxDX>6.8_6.8</Tube_FeatBoxDX>
+    <Tube_FeatBoxDY>2_2</Tube_FeatBoxDY>
+    <Tube_FeatBoxDZ>6.8_6.8</Tube_FeatBoxDZ>
+    <Tube_FeatExtNrEl>1_1</Tube_FeatExtNrEl>
+    <Tube_FeatExtTotL>21.36_21.36</Tube_FeatExtTotL>
+    <Tube_FeatExtAvgL>21.36_21.36</Tube_FeatExtAvgL>
+    <Tube_FeatExtMinL>21.36_21.36</Tube_FeatExtMinL>
+    <Tube_FeatExtMaxL>21.36_21.36</Tube_FeatExtMaxL>
+    <Tube_FeatExtLineSumL>0_0</Tube_FeatExtLineSumL>
+    <Tube_FeatExtArcSumL>21.36_21.36</Tube_FeatExtArcSumL>
+    <Tube_FeatExtOtherSumL>0_0</Tube_FeatExtOtherSumL>
+    <Tube_FeatIntNrEl>-</Tube_FeatIntNrEl>
+    <Tube_FeatIntTotL>-</Tube_FeatIntTotL>
+    <Tube_FeatIntAvgL>-</Tube_FeatIntAvgL>
+    <Tube_FeatIntMinL>-</Tube_FeatIntMinL>
+    <Tube_FeatIntMaxL>-</Tube_FeatIntMaxL>
+    <Tube_FeatIntLineSumL>-</Tube_FeatIntLineSumL>
+    <Tube_FeatIntArcSumL>-</Tube_FeatIntArcSumL>
+    <Tube_FeatIntOtherSumL>-</Tube_FeatIntOtherSumL>
+    <Tube_MarkDistToEnd />
+    <Tube_MarkBoxCX />
+    <Tube_MarkBoxCY />
+    <Tube_MarkBoxCZ />
+    <Tube_MarkBoxDX />
+    <Tube_MarkBoxDY />
+    <Tube_MarkBoxDZ />
+    <Tube_MarkExtNrEl />
+    <Tube_MarkExtTotL>0</Tube_MarkExtTotL>
+    <Tube_MarkExtAvgL />
+    <Tube_MarkExtMinL />
+    <Tube_MarkExtMaxL />
+    <Tube_MarkExtLineSumL />
+    <Tube_MarkExtArcSumL />
+    <Tube_MarkExtOtherSumL />
+    <Tube_Succes>Succes</Tube_Succes>
+    <Tube_FilePath>S:\Results\Tube\10001079143_Rev_00.stp</Tube_FilePath>
+    <Tube_OrderNr />
+    <Tube_DeliveryDate />
+    <Tube_Weight>1051</Tube_Weight>
+    <Tube_Time>00:00:18</Tube_Time>
+    <Tube_Cost />
+    <Tube_ProfileExists>false</Tube_ProfileExists>
+    <Tube_Id_Object>2</Tube_Id_Object>
+    <Tube_Id_Source>2</Tube_Id_Source>
+    <Tube_Id_ParentObject />
+    <Tube_Id_ParentSource />
+    <Tube_FilePathPNG />
+    <Tube_MaterialExists>true</Tube_MaterialExists>
+    <Tube_IsLocked />
+    <Tube_NestedLength />
+    <Tube_OriginalName>10001079143_Rev_00 @ 10001079143_Rev_00</Tube_OriginalName>
+    <Tube_AddedDocument />
+    <Tube_Machine>M1</Tube_Machine>
+    <Tube_MaterialPrice />
+    <Tube_AssemblyLevel>0</Tube_AssemblyLevel>
+    <Tube_BBox3D />
+    <Tube_ProfileArea>370.27</Tube_ProfileArea>
+    <Tube_Extra6 />
+    <Tube_Extra7 />
+    <Tube_Extra8 />
+    <Tube_Extra9 />
+    <Tube_Extra10 />
+    <Tube_User_Meerprijs>0</Tube_User_Meerprijs>
+    <Tube_User_Poedercoaten>False</Tube_User_Poedercoaten>
+    <Tube_User_Locatie>loc1</Tube_User_Locatie>
+  </CalculationResult>
+  <CalculationResult>
+    <Tube_PartName>10001079878_Rev_00</Tube_PartName>
+    <Tube_Name>10001079878_Rev_00</Tube_Name>
+    <Tube_Type>R_60x40x2</Tube_Type>
+    <Tube_Thickness>2</Tube_Thickness>
+    <Tube_Width>60</Tube_Width>
+    <Tube_Heigth>40</Tube_Heigth>
+    <Tube_Count>1</Tube_Count>
+    <Tube_Material>prof rvs 304 #18</Tube_Material>
+    <Tube_InnerRadius>1</Tube_InnerRadius>
+    <Tube_OuterRadius>3</Tube_OuterRadius>
+    <Tube_OuterArea>-</Tube_OuterArea>
+    <Tube_TotalArea>258336</Tube_TotalArea>
+    <Tube_NrFeatures>0</Tube_NrFeatures>
+    <Tube_NrMarkings>-</Tube_NrMarkings>
+    <Tube_Volume>257582</Tube_Volume>
+    <Tube_BoxCenterX>0</Tube_BoxCenterX>
+    <Tube_BoxCenterY>0</Tube_BoxCenterY>
+    <Tube_BoxCenterZ>341.5</Tube_BoxCenterZ>
+    <Tube_BoxDeltaX>60</Tube_BoxDeltaX>
+    <Tube_BoxDeltaY>40</Tube_BoxDeltaY>
+    <Tube_BoxDeltaZ>683</Tube_BoxDeltaZ>
+    <Tube_TopCutAngle>180</Tube_TopCutAngle>
+    <Tube_TopCutExtNrEl>8</Tube_TopCutExtNrEl>
+    <Tube_TopCutExtTotL>194.85</Tube_TopCutExtTotL>
+    <Tube_TopCutExtAvgL>24.36</Tube_TopCutExtAvgL>
+    <Tube_TopCutExtMinL>4.71</Tube_TopCutExtMinL>
+    <Tube_TopCutExtMaxL>54</Tube_TopCutExtMaxL>
+    <Tube_TopCutExtLineSumL>176</Tube_TopCutExtLineSumL>
+    <Tube_TopCutExtArcSumL>18.85</Tube_TopCutExtArcSumL>
+    <Tube_TopCutExtOtherSumL>0</Tube_TopCutExtOtherSumL>
+    <Tube_TopCutIntNrEl>-</Tube_TopCutIntNrEl>
+    <Tube_TopCutIntTotL>-</Tube_TopCutIntTotL>
+    <Tube_TopCutIntAvgL>-</Tube_TopCutIntAvgL>
+    <Tube_TopCutIntMinL>-</Tube_TopCutIntMinL>
+    <Tube_TopCutIntMaxL>-</Tube_TopCutIntMaxL>
+    <Tube_TopCutIntLineSumL>-</Tube_TopCutIntLineSumL>
+    <Tube_TopCutIntArcSumL>-</Tube_TopCutIntArcSumL>
+    <Tube_TopCutIntOtherSumL>-</Tube_TopCutIntOtherSumL>
+    <Tube_BotCutAngle>180</Tube_BotCutAngle>
+    <Tube_BotCutExtNrEl>8</Tube_BotCutExtNrEl>
+    <Tube_BotCutExtTotL>194.85</Tube_BotCutExtTotL>
+    <Tube_BotCutExtAvgL>24.36</Tube_BotCutExtAvgL>
+    <Tube_BotCutExtMinL>0</Tube_BotCutExtMinL>
+    <Tube_BotCutExtMaxL>54</Tube_BotCutExtMaxL>
+    <Tube_BotCutExtLineSumL>176</Tube_BotCutExtLineSumL>
+    <Tube_BotCutExtArcSumL>18.85</Tube_BotCutExtArcSumL>
+    <Tube_BotCutExtOtherSumL>0</Tube_BotCutExtOtherSumL>
+    <Tube_BotCutIntNrEl>-</Tube_BotCutIntNrEl>
+    <Tube_BotCutIntTotL>-</Tube_BotCutIntTotL>
+    <Tube_BotCutIntAvgL>-</Tube_BotCutIntAvgL>
+    <Tube_BotCutIntMinL>-</Tube_BotCutIntMinL>
+    <Tube_BotCutIntMaxL>-</Tube_BotCutIntMaxL>
+    <Tube_BotCutIntLineSumL>-</Tube_BotCutIntLineSumL>
+    <Tube_BotCutIntArcSumL>-</Tube_BotCutIntArcSumL>
+    <Tube_BotCutIntOtherSumL>-</Tube_BotCutIntOtherSumL>
+    <Tube_FeatDistToEnd />
+    <Tube_FeatBoxCX />
+    <Tube_FeatBoxCY />
+    <Tube_FeatBoxCZ />
+    <Tube_FeatBoxDX />
+    <Tube_FeatBoxDY />
+    <Tube_FeatBoxDZ />
+    <Tube_FeatExtNrEl />
+    <Tube_FeatExtTotL />
+    <Tube_FeatExtAvgL />
+    <Tube_FeatExtMinL />
+    <Tube_FeatExtMaxL />
+    <Tube_FeatExtLineSumL />
+    <Tube_FeatExtArcSumL />
+    <Tube_FeatExtOtherSumL />
+    <Tube_FeatIntNrEl>-</Tube_FeatIntNrEl>
+    <Tube_FeatIntTotL>-</Tube_FeatIntTotL>
+    <Tube_FeatIntAvgL>-</Tube_FeatIntAvgL>
+    <Tube_FeatIntMinL>-</Tube_FeatIntMinL>
+    <Tube_FeatIntMaxL>-</Tube_FeatIntMaxL>
+    <Tube_FeatIntLineSumL>-</Tube_FeatIntLineSumL>
+    <Tube_FeatIntArcSumL>-</Tube_FeatIntArcSumL>
+    <Tube_FeatIntOtherSumL>-</Tube_FeatIntOtherSumL>
+    <Tube_MarkDistToEnd />
+    <Tube_MarkBoxCX />
+    <Tube_MarkBoxCY />
+    <Tube_MarkBoxCZ />
+    <Tube_MarkBoxDX />
+    <Tube_MarkBoxDY />
+    <Tube_MarkBoxDZ />
+    <Tube_MarkExtNrEl />
+    <Tube_MarkExtTotL>0</Tube_MarkExtTotL>
+    <Tube_MarkExtAvgL />
+    <Tube_MarkExtMinL />
+    <Tube_MarkExtMaxL />
+    <Tube_MarkExtLineSumL />
+    <Tube_MarkExtArcSumL />
+    <Tube_MarkExtOtherSumL />
+    <Tube_Succes>Succes</Tube_Succes>
+    <Tube_FilePath>S:\Results\Tube\10001079878_Rev_00.stp</Tube_FilePath>
+    <Tube_OrderNr />
+    <Tube_DeliveryDate />
+    <Tube_Weight>2061</Tube_Weight>
+    <Tube_Time>00:00:11</Tube_Time>
+    <Tube_Cost />
+    <Tube_ProfileExists>false</Tube_ProfileExists>
+    <Tube_Id_Object>2</Tube_Id_Object>
+    <Tube_Id_Source>2</Tube_Id_Source>
+    <Tube_Id_ParentObject />
+    <Tube_Id_ParentSource />
+    <Tube_FilePathPNG />
+    <Tube_MaterialExists>true</Tube_MaterialExists>
+    <Tube_IsLocked />
+    <Tube_NestedLength />
+    <Tube_OriginalName>10001079878_Rev_00 @ 10001079878_Rev_00</Tube_OriginalName>
+    <Tube_AddedDocument />
+    <Tube_Machine>M1</Tube_Machine>
+    <Tube_MaterialPrice />
+    <Tube_AssemblyLevel>0</Tube_AssemblyLevel>
+    <Tube_BBox3D />
+    <Tube_ProfileArea>377.13</Tube_ProfileArea>
+    <Tube_Extra6 />
+    <Tube_Extra7 />
+    <Tube_Extra8 />
+    <Tube_Extra9 />
+    <Tube_Extra10 />
+    <Tube_User_Meerprijs>0</Tube_User_Meerprijs>
+    <Tube_User_Poedercoaten>False</Tube_User_Poedercoaten>
+    <Tube_User_Locatie>loc1</Tube_User_Locatie>
+  </CalculationResult>
+  <CalculationResult>
+    <Assembly_PartName>10001079878_Rev_00</Assembly_PartName>
+    <Assembly_Name>10001079878_Rev_00</Assembly_Name>
+    <Assembly_Type>(sub)assembly</Assembly_Type>
+    <Assembly_Count>1</Assembly_Count>
+    <Assembly_Id_Object>2</Assembly_Id_Object>
+    <Assembly_Id_Source>2</Assembly_Id_Source>
+    <Assembly_Id_ParentObject />
+    <Assembly_Id_ParentSource />
+    <Assy_User_Finish>False</Assy_User_Finish>
+  </CalculationResult>
+  <CalculationResult>
+    <Assembly_PartName>10001079143_Rev_00</Assembly_PartName>
+    <Assembly_Name>10001079143_Rev_00</Assembly_Name>
+    <Assembly_Type>(sub)assembly</Assembly_Type>
+    <Assembly_Count>1</Assembly_Count>
+    <Assembly_Id_Object>2</Assembly_Id_Object>
+    <Assembly_Id_Source>2</Assembly_Id_Source>
+    <Assembly_Id_ParentObject />
+    <Assembly_Id_ParentSource />
+    <Assy_User_Finish>False</Assy_User_Finish>
+  </CalculationResult>
+  <CalculationResult>
+    <Assembly_PartName>10000469654_Rev_01</Assembly_PartName>
+    <Assembly_Name>10000469654_Rev_01</Assembly_Name>
+    <Assembly_Type>(sub)assembly</Assembly_Type>
+    <Assembly_Count>1</Assembly_Count>
+    <Assembly_Id_Object>2</Assembly_Id_Object>
+    <Assembly_Id_Source>2</Assembly_Id_Source>
+    <Assembly_Id_ParentObject />
+    <Assembly_Id_ParentSource />
+    <Assy_User_Finish>False</Assy_User_Finish>
+  </CalculationResult>
+  <Job>
+    <Name></Name>
+    <NrParts>3</NrParts>
+    <Weigth>4,17</Weigth>
+    <Time>00:00:21</Time>
+    <CostSheet>€ 0,00</CostSheet>
+    <CostTube>€ 0,00</CostTube>
+    <CostOther>€ 0,00</CostOther>
+    <CostTotal>€ 0,00</CostTotal>
+  </Job>
+</DocumentElement>

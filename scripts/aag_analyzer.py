@@ -147,16 +147,21 @@ class AnalysisResult:
     hole_count: int = 0
     bend_count: int = 0
     slot_count: int = 0
+    counter_bend_count: int = 0  # Tegenzettingen
 
     # Features
     holes: List[HoleFeature] = field(default_factory=list)
     bends: List[BendFeature] = field(default_factory=list)
+    production_bends: List[BendFeature] = field(default_factory=list)  # Filtered
 
     # Geometry
     thickness: float = 0
     flat_length: float = 0
     flat_width: float = 0
     flat_area: float = 0
+
+    # Classification
+    part_type: str = "ONBEKEND"  # PLAAT, KOKER, COMPLEX
 
     # Costs
     cut_length: float = 0
@@ -605,6 +610,70 @@ class FeatureRecognizer:
         except Exception:
             return None
 
+    def is_production_bend(self, bend: BendFeature, min_length: float = 10.0) -> bool:
+        """
+        Filter om alleen productie-relevante zettingen te tellen.
+        
+        Criteria voor een echte zetting:
+        - Hoek tussen 10° en 170° (inclusief kleine hoeken)
+        - Radius tussen 0.3mm en 15mm
+        - Lengte minimaal 10mm OF (kleine hoek <45° met lengte ≥2mm)
+        
+        Spaceclaim telt ook korte bends (2-14mm) maar alleen bij specifieke hoeken.
+        """
+        # Hoek check
+        angle_ok = (10 <= bend.bend_angle <= 170) or (170 <= bend.bend_angle <= 180)
+        
+        # Radius check (realistisch voor kantbank)
+        radius_ok = 0.3 <= bend.bend_radius <= 15.0
+        
+        # Lengte check - afhankelijk van hoek
+        # Grote hoeken (≥45°): lengte ≥10mm
+        # Kleine hoeken (<45°): lengte ≥2mm (zoals Spaceclaim's 10° bend van 2mm)
+        if bend.bend_angle < 45:
+            length_ok = bend.bend_length >= 2.0
+        else:
+            length_ok = bend.bend_length >= 10.0
+        
+        return angle_ok and radius_ok and length_ok
+
+    def get_bend_direction(self, bend: BendFeature) -> str:
+        """
+        Bepaal zetrichting: ZETTING of TEGENZETTING.
+        
+        Gebaseerd op bend hoek:
+        - Positieve hoek (0-180°) → normale zetting
+        - Als hoek > 90° en er zijn 2+ bends met tegengestelde orientatie → tegenzetting
+        
+        Eenvoudige regel: tel afwisselend (eerste = zetting, volgende met tegengestelde
+        orientatie = tegenzetting)
+        """
+        try:
+            # Gebruik bend hoek relatief tot adjacent faces
+            # Als de hoek buigt naar "binnen" (concave side) = tegenzetting
+            cyl_idx = bend.cylindrical_face_idx
+            convex_count = 0
+            concave_count = 0
+            
+            for adj_idx in bend.adjacent_faces:
+                edge = self.graph.get_edge_between(cyl_idx, adj_idx)
+                if edge:
+                    if edge.convexity == EdgeConvexity.CONVEX:
+                        convex_count += 1
+                    elif edge.convexity == EdgeConvexity.CONCAVE:
+                        concave_count += 1
+            
+            # Als beide edges concave zijn = tegenzetting (Z-bend)
+            if concave_count >= 2:
+                return "TEGENZETTING"
+            # Als beide edges convex zijn = normale zetting
+            elif convex_count >= 2:
+                return "ZETTING"
+            # Mix = normale zetting (default)
+            return "ZETTING"
+        except:
+            return "ZETTING"
+
     def _estimate_thickness_from_bend(self, cyl_node: FaceNode, adjacent_planar: List) -> float:
         """Estimate sheet thickness from bend geometry."""
         # The thickness can be estimated from the distance between
@@ -884,8 +953,29 @@ class AAGAnalyzer:
                                                         FeatureType.HOLE_COMPLEX)])
             result.slot_count = len([h for h in result.holes
                                      if h.hole_type == FeatureType.HOLE_SLOT])
-        if result.bends:
+        
+        # Filter production bends and count zettingen/tegenzettingen
+        if result.bends and self.recognizer:
+            filtered = [b for b in result.bends 
+                        if self.recognizer.is_production_bend(b)]
+            
+            # Groepeer dubbele bends (binnen/buiten radius van dezelfde zetting)
+            # Bends met dezelfde hoek en lengte maar iets andere radius zijn 1 zetting
+            result.production_bends = self._group_paired_bends(filtered)
+            
+            result.bend_count = 0
+            result.counter_bend_count = 0
+            for bend in result.production_bends:
+                direction = self.recognizer.get_bend_direction(bend)
+                if direction == "TEGENZETTING":
+                    result.counter_bend_count += 1
+                else:
+                    result.bend_count += 1
+        elif result.bends:
             result.bend_count = len(result.bends)
+        
+        # Classify part type
+        result.part_type = self._classify_part_type(shape, result)
 
         # Calculate cut length (sum of hole perimeters)
         try:
@@ -938,14 +1028,373 @@ class AAGAnalyzer:
                     if abs(dot + 1.0) < 0.05:  # Anti-parallel
                         diff = tuple(a - b for a, b in zip(f2['center'], f1['center']))
                         dist = abs(sum(a*b for a, b in zip(diff, f1['normal'])))
-                        if 0.3 <= dist <= 20:
+                        if 0.3 <= dist <= 25:  # Realistic sheet metal thickness range
                             distances.append(dist)
 
             if distances:
-                return min(distances)
+                # Use median for robustness against outliers
+                distances.sort()
+                n = len(distances)
+                if n % 2 == 0:
+                    return (distances[n//2 - 1] + distances[n//2]) / 2
+                return distances[n//2]
             return 0
         except:
             return 0
+
+    def _group_paired_bends(self, bends: List[BendFeature]) -> List[BendFeature]:
+        """
+        Spaceclaim-compatibele bend grouping in 3 stappen:
+        1. Groepeer binnen/buiten radius paren
+        2. Filter "wrapper" bends (>1000mm)
+        3. Groepeer aansluitende bends met zelfde hoek+radius
+        """
+        if not bends:
+            return []
+        
+        # Stap 1: Groepeer binnen/buiten radius paren
+        paired = self._group_inner_outer_pairs(bends)
+        
+        if len(paired) <= 3:
+            return paired
+        
+        # Stap 2: Filter wrapper bends (>1000mm) als er ook kortere zijn
+        has_short = any(b.bend_length < 850 for b in paired)
+        has_long = any(b.bend_length > 1000 for b in paired)
+        
+        if has_short and has_long:
+            filtered = [b for b in paired if b.bend_length <= 1000]
+        else:
+            filtered = paired
+        
+        # Stap 3: Groepeer aansluitende bends met zelfde hoek+radius
+        # ALLEEN als er veel bends met dezelfde hoek+radius zijn (>2)
+        grouped = self._group_adjacent_same_angle_bends_conservative(filtered)
+        
+        return grouped
+    
+    def _group_adjacent_same_angle_bends_conservative(self, bends: List[BendFeature]) -> List[BendFeature]:
+        """
+        Conservatieve grouping: alleen groeperen als het duidelijk is.
+        
+        Spaceclaim groepeert kleine bend-segmenten (<50mm) die samen 
+        1 langere zetting vormen. Langere bends blijven apart.
+        """
+        if not bends or len(bends) <= 1:
+            return bends
+        
+        # Tel bends per hoek+radius
+        combos = {}
+        for b in bends:
+            key = (round(b.bend_angle / 5) * 5, round(b.bend_radius))
+            if key not in combos:
+                combos[key] = []
+            combos[key].append(b)
+        
+        result = []
+        for key, group in combos.items():
+            if len(group) <= 2:
+                # 1-2 bends: behoud allemaal
+                result.extend(group)
+            else:
+                # >2 bends met zelfde hoek+radius
+                # Scheidt korte (<100mm) en lange bends
+                short = [b for b in group if b.bend_length < 100]
+                long_bends = [b for b in group if b.bend_length >= 100]
+                
+                # Korte bends die adjacent zijn, groeperen
+                if len(short) > 1:
+                    merged_short = self._merge_adjacent_bends_in_group(short)
+                    result.extend(merged_short)
+                else:
+                    result.extend(short)
+                
+                # Lange bends: behoud allemaal apart
+                result.extend(long_bends)
+        
+        return result
+    
+    def _group_adjacent_same_angle_bends(self, bends: List[BendFeature]) -> List[BendFeature]:
+        """
+        Groepeer aansluitende bends die dezelfde hoek+radius hebben.
+        
+        Dit imiteert hoe Spaceclaim continue zettingslijnen telt:
+        meerdere kleine segmenten die samen 1 kantbank-operatie vormen
+        worden als 1 zetting geteld.
+        """
+        if not bends or len(bends) <= 1:
+            return bends
+        
+        # Groepeer per hoek+radius combinatie
+        combos = {}
+        for b in bends:
+            # Round angle to 5° and radius to 1mm for matching
+            key = (round(b.bend_angle / 5) * 5, round(b.bend_radius))
+            if key not in combos:
+                combos[key] = []
+            combos[key].append(b)
+        
+        result = []
+        
+        for key, group in combos.items():
+            if len(group) == 1:
+                result.append(group[0])
+            else:
+                # Meerdere bends met zelfde hoek+radius
+                # Groepeer aansluitende bends via adjacency graph
+                merged = self._merge_adjacent_bends_in_group(group)
+                result.extend(merged)
+        
+        return result
+    
+    def _merge_adjacent_bends_in_group(self, bends: List[BendFeature]) -> List[BendFeature]:
+        """
+        Binnen een groep bends met zelfde hoek+radius:
+        merge bends die geometrisch aansluiten tot 1 bend.
+        """
+        if not bends or not self.graph:
+            return bends
+        
+        # Build adjacency clusters
+        n = len(bends)
+        parent = list(range(n))
+        
+        def find(x):
+            if parent[x] != x:
+                parent[x] = find(parent[x])
+            return parent[x]
+        
+        def union(x, y):
+            px, py = find(x), find(y)
+            if px != py:
+                parent[px] = py
+        
+        # Check adjacency between all pairs
+        for i in range(n):
+            for j in range(i + 1, n):
+                if self._bends_share_edge_or_face(bends[i], bends[j]):
+                    union(i, j)
+        
+        # Group by cluster
+        clusters = {}
+        for i in range(n):
+            root = find(i)
+            if root not in clusters:
+                clusters[root] = []
+            clusters[root].append(bends[i])
+        
+        # For each cluster, keep only one representative bend
+        # (the one with the longest length, as it's the "main" bend)
+        result = []
+        for cluster in clusters.values():
+            if len(cluster) == 1:
+                result.append(cluster[0])
+            else:
+                # Keep the longest as representative
+                cluster.sort(key=lambda b: b.bend_length, reverse=True)
+                result.append(cluster[0])
+        
+        return result
+    
+    def _bends_share_edge_or_face(self, b1: BendFeature, b2: BendFeature) -> bool:
+        """
+        Check of twee bends geometrisch aansluiten via een KLEIN gedeeld vlak.
+        
+        Alleen groeperen als ze een klein overgangsvlak delen (<500mm²),
+        niet als ze allebei aan een groot hoofdvlak grenzen.
+        """
+        try:
+            adj1 = set(b1.adjacent_faces)
+            adj2 = set(b2.adjacent_faces)
+            shared = adj1 & adj2
+            
+            if not shared:
+                return False
+            
+            # Check of het gedeelde vlak klein is (overgang, niet hoofdvlak)
+            for face_idx in shared:
+                if face_idx in self.graph.nodes:
+                    face_area = self.graph.nodes[face_idx].area
+                    # Alleen groeperen als gedeeld vlak klein is
+                    # 200mm² = ~14x14mm overgangsvlak
+                    if face_area < 200:
+                        return True
+            
+            return False
+        except:
+            return False
+    
+    def _group_inner_outer_pairs(self, bends: List[BendFeature]) -> List[BendFeature]:
+        """Groepeer binnen/buiten radius paren tot 1 zetting."""
+        if not bends:
+            return []
+        
+        used = set()
+        grouped = []
+        
+        for i, b1 in enumerate(bends):
+            if i in used:
+                continue
+            
+            found_pair = False
+            for j, b2 in enumerate(bends):
+                if j <= i or j in used:
+                    continue
+                
+                angle_match = abs(b1.bend_angle - b2.bend_angle) < 5
+                length_ratio = min(b1.bend_length, b2.bend_length) / max(b1.bend_length, b2.bend_length) if max(b1.bend_length, b2.bend_length) > 0 else 0
+                length_match = length_ratio > 0.9
+                
+                radius_diff = abs(b1.bend_radius - b2.bend_radius)
+                radius_pair = 0.5 <= radius_diff <= 15
+                
+                if angle_match and length_match and radius_pair:
+                    used.add(j)
+                    if b1.bend_radius < b2.bend_radius:
+                        grouped.append(b1)
+                    else:
+                        grouped.append(b2)
+                    found_pair = True
+                    break
+            
+            if not found_pair:
+                grouped.append(b1)
+            used.add(i)
+        
+        return grouped
+    
+    def _group_adjacent_bends(self, bends: List[BendFeature]) -> List[BendFeature]:
+        """
+        Groepeer aansluitende bends langs dezelfde zettingslijn.
+        
+        Bends die:
+        - Dezelfde hoek hebben (±5°)
+        - Dezelfde radius hebben (±1mm)
+        - Aangrenzende faces delen (via AAG adjacency)
+        worden samengevoegd tot 1 zetting.
+        """
+        if not bends or not self.graph:
+            return bends
+        
+        used = set()
+        grouped = []
+        
+        for i, b1 in enumerate(bends):
+            if i in used:
+                continue
+            
+            # Verzamel alle bends die bij deze zetting horen
+            cluster = [b1]
+            used.add(i)
+            
+            # Zoek aansluitende bends
+            for j, b2 in enumerate(bends):
+                if j in used:
+                    continue
+                
+                # Check of ze kunnen aansluiten
+                angle_match = abs(b1.bend_angle - b2.bend_angle) < 5
+                radius_match = abs(b1.bend_radius - b2.bend_radius) < 1.0
+                
+                if not (angle_match and radius_match):
+                    continue
+                
+                # Check adjacency via gedeelde faces
+                # Als de cylindrische faces aangrenzende planar faces delen
+                adjacent = self._bends_are_adjacent(b1, b2)
+                
+                if adjacent:
+                    cluster.append(b2)
+                    used.add(j)
+            
+            # Neem de langste bend als representant, of combineer lengtes
+            if len(cluster) == 1:
+                grouped.append(cluster[0])
+            else:
+                # Maak een gecombineerde bend met totale lengte
+                combined = cluster[0]
+                # We houden de eerste, Spaceclaim telt dit als 1 zetting
+                grouped.append(combined)
+        
+        return grouped
+    
+    def _bends_are_adjacent(self, b1: BendFeature, b2: BendFeature) -> bool:
+        """
+        Check of twee bends geometrisch aansluiten EN deel zijn van dezelfde zettingslijn.
+        
+        Stricter criterium: alleen groeperen als ze DIRECT aangrenzend zijn
+        (cilindrische faces delen een edge).
+        """
+        try:
+            # Alleen groeperen als de cilindrische faces direct naast elkaar liggen
+            # Dit betekent: ze delen een adjacent planar face die KLEIN is
+            # (een overgangsface, niet een grote skin face)
+            
+            adj1 = set(b1.adjacent_faces)
+            adj2 = set(b2.adjacent_faces)
+            
+            # Gedeelde adjacent faces
+            shared = adj1 & adj2
+            
+            if not shared:
+                return False
+            
+            # Check of de gedeelde face klein is (overgangsface)
+            # Grote gedeelde faces betekent dat ze NIET aansluitend zijn
+            for face_idx in shared:
+                if face_idx in self.graph.nodes:
+                    face_area = self.graph.nodes[face_idx].area
+                    # Alleen groeperen als gedeelde face klein is (<5000 mm²)
+                    # Dit voorkomt dat bends aan grote vlakken worden gegroepeerd
+                    # Maar staat kleine overgangsvlakken toe
+                    if face_area < 5000:
+                        return True
+            
+            return False
+        except:
+            return False
+
+    def _classify_part_type(self, shape, result: AnalysisResult) -> str:
+        """
+        Classificeer onderdeel: PLAAT, KOKER, of COMPLEX.
+        
+        - PLAAT: Vlak, geen zettingen
+        - KOKER: 4 zijvlakken, gesloten profiel
+        - COMPLEX: Gebogen plaatwerk met zettingen
+        """
+        try:
+            bbox = shape.BoundBox
+            dims = sorted([bbox.XLength, bbox.YLength, bbox.ZLength])
+            
+            # Aspect ratio check
+            min_dim = dims[0]
+            max_dim = dims[2]
+            
+            # PLAAT: Zeer plat (kleinste dimensie << andere)
+            if min_dim < 10 and (result.bend_count + result.counter_bend_count) == 0:
+                return "PLAAT"
+            
+            # KOKER: Vierkant/rechthoekig profiel
+            # Kenmerk: 2 kleine dimensies ongeveer gelijk, 1 lange
+            if dims[0] > 0 and dims[1] > 0:
+                ratio_01 = dims[1] / dims[0] if dims[0] > 0 else 0
+                ratio_12 = dims[2] / dims[1] if dims[1] > 0 else 0
+                
+                # Koker: dims[0] ≈ dims[1] << dims[2]
+                if 0.5 <= ratio_01 <= 2.0 and ratio_12 > 3:
+                    # Check for 4 parallel faces (koker shape)
+                    if result.thickness_faces >= 4:
+                        return "KOKER"
+            
+            # COMPLEX: Heeft zettingen
+            if (result.bend_count + result.counter_bend_count) > 0:
+                return "COMPLEX"
+            
+            # Default
+            return "PLAAT"
+            
+        except:
+            return "ONBEKEND"
 
     def _simple_feature_detection(self, shape) -> tuple:
         """Simple hole and bend detection as fallback."""
@@ -1043,16 +1492,32 @@ def analyze_with_aag(shape, material: str = 'steel') -> Dict:
     Convenience function for AAG analysis.
 
     Returns dict compatible with compare_erp.py pipeline.
+    
+    Belangrijkste output:
+    - type: PLAAT / KOKER / COMPLEX
+    - gaten: aantal gaten
+    - zettingen: aantal zettingen (normale)
+    - tegenzettingen: aantal tegenzettingen
+    - dikte: plaatdikte in mm
     """
     analyzer = AAGAnalyzer()
     result = analyzer.analyze(shape, material)
 
     return {
         'source': 'AAG',
+        # Hoofddata (gevraagd door gebruiker)
+        'type': result.part_type,
+        'gaten': result.hole_count + result.slot_count,
+        'zettingen': result.bend_count,
+        'tegenzettingen': result.counter_bend_count,
+        'dikte': round(result.thickness, 2),
+        
+        # Detail data
         'holes': result.hole_count + result.slot_count,
         'holes_round': result.hole_count,
         'holes_slot': result.slot_count,
         'bends': result.bend_count,
+        'counter_bends': result.counter_bend_count,
         'thickness': round(result.thickness, 2),
         'cut_length': round(result.cut_length, 1),
         'pierce_count': result.pierce_count,
@@ -1061,6 +1526,11 @@ def analyze_with_aag(shape, material: str = 'steel') -> Dict:
         'edge_count': result.edge_count,
         'skin_faces': result.skin_faces,
         'thickness_faces': result.thickness_faces,
+        
+        # Production bends details (gefilterd)
+        'production_bend_count': len(result.production_bends),
+        'all_bend_count': len(result.bends),  # Voor debugging
+        
         'hole_details': [
             {
                 'type': h.hole_type.value,
@@ -1080,7 +1550,7 @@ def analyze_with_aag(shape, material: str = 'steel') -> Dict:
                 'bend_allowance': round(b.bend_allowance, 2),
                 'bend_deduction': round(b.bend_deduction, 2),
             }
-            for b in result.bends
+            for b in result.production_bends  # Alleen productie-zettingen
         ],
     }
 
