@@ -1,7 +1,7 @@
 {
-  "step_file": "/Users/ds/Projecten/alestest/parts/343336_rev[B].STEP",
-  "step_file_hash": "10810e3d3484841805108a9c93f098aa",
-  "created_at": "2025-12-29T21:10:56.835022",
+  "step_file": "/tmp/test_step/MD-19-04332_1.stp",
+  "step_file_hash": "4442309da656eedf17162550b4ebdcb5",
+  "created_at": "2026-01-10T13:59:30.396415",
   "stages_completed": [
     "load_step",
     "detect_holes",
@@ -9,16 +9,8 @@
     "face_analysis",
     "topology",
     "component_classification",
-    "detailed_parts",
-    "manufacturing_requirements",
-    "holes_with_fits",
-    "threads",
-    "chamfers_fillets",
-    "mass_properties",
-    "werkvoorbereiding",
-    "pdf_correlation",
-    "complete"
+    "detailed_parts"
   ],
-  "last_stage": "complete",
+  "last_stage": "detailed_parts",
   "pipeline_version": "2.0"
 }

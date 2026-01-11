@@ -1,3 +1,12 @@
+#!/usr/bin/env python3
+"""
+Manufacturing Pipeline - Full Analysis Mode
+
+NOTE: This is the legacy entry point. Consider using the unified entry point:
+    python run.py -f mypart.step --full
+
+This script is maintained for backward compatibility.
+"""
 import sys
 import os
 import argparse

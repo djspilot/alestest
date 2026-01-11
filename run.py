@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
-Manufacturing Pipeline Runner
+Manufacturing Pipeline Runner - Unified Entry Point
 
-Simple entry point to run the manufacturing analysis pipeline.
+Modes:
+  - Quick mode (default): Fast AAG-based analysis with simple reports
+  - Full mode (--full): Complete ISO pipeline with database storage
+
 STEP files are read from ./resources/parts/ and output goes to ./resources/output/
 """
 
@@ -21,6 +24,11 @@ from scripts.pipeline_functions import (
     find_step_files, select_step_file, get_output_dir,
     run_analysis, run_aag_analysis, run_debug, generate_simple_pdf, generate_compact_pdf
 )
+
+# Add manufacturing_pipeline to path for full mode
+PIPELINE_DIR = os.path.join(PROJECT_ROOT, "manufacturing_pipeline")
+if PIPELINE_DIR not in sys.path:
+    sys.path.insert(0, PIPELINE_DIR)
 
 # Cache file location
 CACHE_FILE = os.path.join(PROJECT_ROOT, ".pipeline_cache.json")
@@ -151,39 +159,202 @@ def process_single_file(step_file, args_dict, cache_data=None):
             'error': str(e)
         }
 
+def run_full_pipeline(step_file, args):
+    """Run the full manufacturing pipeline with ISO standards and database."""
+    try:
+        from src.step_processing import (
+            load_step_file, detect_holes, is_turned_part, get_geometric_properties,
+            analyze_faces, get_topology_stats, classify_components, analyze_components_detailed,
+            detect_threads, analyze_manufacturing_requirements, calculate_mass_properties,
+            analyze_holes_with_fits, analyze_sheetmetal
+        )
+        from src.pdf_processing import extract_dimensions_from_pdf
+        from src.database import DatabaseManager
+        from src.report_generator import PDFReportGenerator
+        from src.cache_manager import PipelineRunner, PipelineStage
+        from src.config import PipelineConfig
+    except ImportError as e:
+        print(f"Error: Full pipeline requires manufacturing_pipeline modules: {e}")
+        print("Install requirements: pip install -r manufacturing_pipeline/requirements.txt")
+        return None
+
+    part_name = os.path.splitext(os.path.basename(step_file))[0]
+    
+    # Initialize
+    cache_dir = os.path.join(PIPELINE_DIR, ".pipeline_cache")
+    db_path = os.path.join(PIPELINE_DIR, "manufacturing_data.db")
+    schema_path = os.path.join(PIPELINE_DIR, "sql", "schema.sql")
+    
+    runner = PipelineRunner(
+        step_file=step_file,
+        cache_dir=cache_dir,
+        no_cache=args.no_cache,
+        verbose=True
+    )
+    
+    print(f"\n{'='*60}")
+    print(f"FULL PIPELINE: {part_name}")
+    print(f"{'='*60}")
+    
+    # Load STEP
+    print("\n[1/8] Loading STEP file...")
+    shape = runner.get_or_run(PipelineStage.LOAD_STEP, load_step_file, step_file)
+    if shape is None:
+        print("  ✗ Failed to load STEP file")
+        return None
+    
+    # Detect holes
+    print("[2/8] Detecting holes...")
+    holes = runner.get_or_run(PipelineStage.DETECT_HOLES, detect_holes, shape)
+    print(f"  Found {len(holes)} holes")
+    
+    # Geometry analysis
+    print("[3/8] Analyzing geometry...")
+    geom_props = runner.get_or_run(PipelineStage.GEOMETRY_ANALYSIS, get_geometric_properties, shape)
+    is_turned = is_turned_part(shape)
+    
+    # Face analysis
+    print("[4/8] Analyzing faces...")
+    face_analysis = runner.get_or_run(PipelineStage.FACE_ANALYSIS, analyze_faces, shape)
+    
+    # Topology
+    print("[5/8] Topology analysis...")
+    topology_stats = runner.get_or_run(PipelineStage.TOPOLOGY, get_topology_stats, shape)
+    
+    # Component classification
+    print("[6/8] Classifying components...")
+    component_classification = runner.get_or_run(
+        PipelineStage.COMPONENT_CLASSIFICATION, classify_components, shape
+    )
+    
+    # Detailed parts
+    print("[7/8] Detailed parts analysis...")
+    detailed_parts = runner.get_or_run(
+        PipelineStage.DETAILED_PARTS, analyze_components_detailed, shape, part_name
+    )
+    
+    # Manufacturing requirements (ISO 2768)
+    print("[8/8] Manufacturing requirements (ISO standards)...")
+    try:
+        mfg_requirements = runner.get_or_run(
+            PipelineStage.MANUFACTURING_REQUIREMENTS,
+            analyze_manufacturing_requirements, shape, geom_props
+        )
+    except Exception as e:
+        print(f"  ⚠ Manufacturing requirements failed: {e}")
+        mfg_requirements = {"error": str(e)}
+    
+    # Save results
+    result = {
+        'part_name': part_name,
+        'holes': len(holes),
+        'is_turned': is_turned,
+        'geometry': geom_props,
+        'face_analysis': face_analysis,
+        'topology': topology_stats,
+        'components': component_classification,
+        'manufacturing': mfg_requirements,
+    }
+    
+    # Save to JSON
+    json_path = os.path.join(OUTPUT_DIR, part_name, f"{part_name}_full_results.json")
+    os.makedirs(os.path.dirname(json_path), exist_ok=True)
+    
+    # Convert holes to serializable format
+    result_serializable = result.copy()
+    
+    with open(json_path, 'w') as f:
+        json.dump(result_serializable, f, indent=2, default=str)
+    
+    # Generate PDF report if not disabled
+    if not args.no_pdf:
+        try:
+            report_gen = PDFReportGenerator(json_path)
+            pdf_path = os.path.join(OUTPUT_DIR, part_name, f"{part_name}_full_report.pdf")
+            report_gen.generate_report(pdf_path)
+            print(f"\n  PDF Report: {pdf_path}")
+        except Exception as e:
+            print(f"  ⚠ PDF generation failed: {e}")
+    
+    # Save to database
+    try:
+        db = DatabaseManager(db_path)
+        db.initialize_schema(schema_path)
+        db.save_analysis_results(part_name, holes, [], is_turned)
+        print(f"  Database: {db_path}")
+    except Exception as e:
+        print(f"  ⚠ Database save failed: {e}")
+    
+    print(f"\n{'='*60}")
+    print(f"FULL PIPELINE COMPLETE")
+    print(f"  JSON: {json_path}")
+    print(f"{'='*60}")
+    
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Manufacturing Pipeline - Analyze STEP files with detailed reasoning",
+        description="Manufacturing Pipeline - Unified Entry Point",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  python run.py                    Analyze STEP file (interactive)
-  python run.py -f mypart.step     Analyze specific file
-  python run.py -f ./folder --batch            Batch process folder
-  python run.py -f ./folder --batch -p 4       Parallel batch (4 workers)
-  python run.py -f ./folder --batch -p 0       Parallel batch (auto workers)
-  python run.py -f ./folder --batch --json     Output results as JSON
-  python run.py -f ./folder --batch --no-cache Force re-analysis (skip cache)
-  python run.py --analyze          Show detailed analysis reasoning
-  python run.py --aag              Run AAG topology-based feature recognition
-  python run.py --debug            Debug hole detection
-  python run.py --no-unfold        Skip automatic unfolding
+Modes:
+  Quick (default)   Fast AAG-based analysis
+  Full (--full)     Complete ISO pipeline with database
+
+Examples - Quick Mode:
+  python run.py                              Interactive file selection
+  python run.py -f mypart.step               Analyze specific file
+  python run.py -f ./folder --batch -p 4     Parallel batch (4 workers)
+  python run.py -f ./folder --batch --json   JSON output for ERP
+
+Examples - Full Mode:
+  python run.py -f mypart.step --full        Full ISO pipeline
+  python run.py -f mypart.step --full --production-info
+  python run.py -f ./folder --batch --full   Full pipeline batch
+
+Options:
+  --analyze          Show detailed analysis reasoning
+  --aag              Run AAG topology-based feature recognition
+  --debug            Debug hole detection
+  --no-unfold        Skip automatic unfolding
         """
     )
 
-    parser.add_argument("-f", "--file", help="STEP file path or name in ./resources/parts/")
+    # File selection
+    parser.add_argument("-f", "--file", help="STEP file or folder path")
+    
+    # Mode selection
+    parser.add_argument("--full", action="store_true", 
+                        help="Run full ISO pipeline with database (slower, more detailed)")
+    
+    # Quick mode options
     parser.add_argument("--analyze", action="store_true", help="Show detailed analysis with reasoning")
     parser.add_argument("--aag", action="store_true", help="Run AAG (Attributed Adjacency Graph) analysis")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--debug", action="store_true", help="Debug hole detection")
     parser.add_argument("--no-unfold", action="store_true", help="Skip automatic unfolding")
     parser.add_argument("--no-pdf", action="store_true", help="Skip PDF generation")
-    parser.add_argument("--batch", action="store_true", help="Process all STEP files")
+    
+    # Batch options
+    parser.add_argument("--batch", action="store_true", help="Process all STEP files in folder")
     parser.add_argument("--parallel", "-p", type=int, default=1, metavar="N",
-                        help="Number of parallel workers for batch processing (default: 1, use 0 for auto)")
-    parser.add_argument("--json", action="store_true", help="Output results as JSON (machine-readable)")
-    parser.add_argument("--no-cache", action="store_true", help="Skip cache, force re-analysis of all files")
-    parser.add_argument("--clear-cache", action="store_true", help="Clear the cache file and exit")
+                        help="Number of parallel workers (default: 1, use 0 for auto)")
+    parser.add_argument("--json", action="store_true", help="Output results as JSON")
+    
+    # Cache options
+    parser.add_argument("--no-cache", action="store_true", help="Skip cache, force re-analysis")
+    parser.add_argument("--clear-cache", action="store_true", help="Clear cache and exit")
+    
+    # Full mode options
+    parser.add_argument("--production-info", action="store_true", 
+                        help="Show production information table (full mode)")
+    parser.add_argument("--material", default="steel_s235",
+                        help="Material for cost estimation (full mode)")
+    parser.add_argument("--quantity", type=int, default=1,
+                        help="Quantity for cost estimation (full mode)")
+    
+    # Utility options
     parser.add_argument("--list", action="store_true", help="List available STEP files")
 
     args = parser.parse_args()
@@ -405,14 +576,22 @@ Examples:
         run_debug(step_file)
         return
 
-    # Normal analysis
+    # Full pipeline mode
+    if args.full:
+        result = run_full_pipeline(step_file, args)
+        if result is None:
+            sys.exit(1)
+        return
+
+    # Quick analysis (default)
     output_dir, part_name = get_output_dir(step_file)
 
     print(f"\n{'='*60}")
-    print(f"MANUFACTURING ANALYSIS: {part_name}")
+    print(f"QUICK ANALYSIS: {part_name}")
     print(f"{'='*60}")
     print(f"Input:  {step_file}")
     print(f"Output: {output_dir}/")
+    print(f"Mode:   Quick (use --full for complete ISO pipeline)")
 
     try:
         analysis, total_holes = run_analysis(step_file, output_dir, args)
