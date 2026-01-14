@@ -1,5 +1,5 @@
 """
-Pipeline functions moved from run.py
+Pipeline utilities for manufacturing analysis.
 """
 
 import os
@@ -7,15 +7,17 @@ import sys
 import glob
 import subprocess
 import json
+import hashlib
+from datetime import datetime
 
 # Project paths
-# Assuming this file is in PROJECT_ROOT/scripts/
+# This file is now in PROJECT_ROOT/manufacturing_pipeline/
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESOURCES_DIR = os.path.join(PROJECT_ROOT, "resources")
-PARTS_DIR = os.path.join(RESOURCES_DIR, "parts")
+PARTS_DIR = os.path.join(RESOURCES_DIR, "input")  # Consolidated: was resources/parts and input/
 OUTPUT_DIR = os.path.join(RESOURCES_DIR, "output")
 PIPELINE_DIR = os.path.join(PROJECT_ROOT, "manufacturing_pipeline")
-SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
+SCRIPTS_DIR = os.path.join(PIPELINE_DIR, "scripts")  # Now inside manufacturing_pipeline/
 
 # FreeCAD Python path
 FREECAD_PYTHON = "/opt/homebrew/Caskroom/freecad/1.0.2/FreeCAD.app/Contents/Resources/bin/python"
@@ -25,6 +27,129 @@ if PIPELINE_DIR not in sys.path:
     sys.path.insert(0, PIPELINE_DIR)
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
+
+# Cache file location
+CACHE_FILE = os.path.join(PROJECT_ROOT, ".pipeline_cache.json")
+
+
+# =============================================================================
+# Cache Functions
+# =============================================================================
+
+def get_file_hash(filepath):
+    """Calculate MD5 hash of a file."""
+    hasher = hashlib.md5()
+    with open(filepath, 'rb') as f:
+        for chunk in iter(lambda: f.read(65536), b''):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def load_cache():
+    """Load cache from disk."""
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return {}
+    return {}
+
+
+def save_cache(cache):
+    """Save cache to disk."""
+    with open(CACHE_FILE, 'w') as f:
+        json.dump(cache, f, indent=2)
+
+
+def get_cached_result(filepath, cache):
+    """Get cached result if file hasn't changed."""
+    file_hash = get_file_hash(filepath)
+    cache_key = os.path.abspath(filepath)
+    
+    if cache_key in cache:
+        cached = cache[cache_key]
+        if cached.get('hash') == file_hash:
+            return cached.get('result')
+    return None
+
+
+def cache_result(filepath, result, cache):
+    """Cache a result for a file."""
+    file_hash = get_file_hash(filepath)
+    cache_key = os.path.abspath(filepath)
+    
+    cache[cache_key] = {
+        'hash': file_hash,
+        'result': result,
+        'cached_at': datetime.now().isoformat()
+    }
+    return cache
+
+
+def process_single_file(step_file, args_dict, cache_data=None):
+    """Worker function to process a single STEP file (for parallel processing)."""
+    # Convert args dict back to namespace
+    class Args:
+        def __init__(self, d):
+            for k, v in d.items():
+                setattr(self, k, v)
+    
+    args = Args(args_dict)
+    part_name = os.path.basename(step_file)
+    
+    # Check cache if provided and not disabled
+    if cache_data is not None and not args_dict.get('no_cache', False):
+        file_key = os.path.abspath(step_file)
+        if file_key in cache_data:
+            current_hash = get_file_hash(step_file)
+            cached = cache_data[file_key]
+            if cached.get('hash') == current_hash:
+                result = cached.get('result', {}).copy()
+                result['cached'] = True
+                return result
+    
+    try:
+        output_dir, part_name_clean = get_output_dir(step_file)
+        analysis, total_holes = run_analysis(step_file, output_dir, args)
+        
+        if not args.no_pdf:
+            generate_simple_pdf(step_file, output_dir, part_name_clean, analysis, total_holes)
+        
+        result = {
+            'file': part_name,
+            'filepath': step_file,
+            'success': True,
+            'cached': False,
+            'category': getattr(analysis, 'part_category', 'UNKNOWN'),
+            'part_type': getattr(analysis, 'part_type', None),
+            'holes': total_holes,
+            'thickness': getattr(analysis, 'thickness', 0),
+            'bends': getattr(analysis, 'bend_count_erp', 0),
+            'dimensions': {
+                'length': getattr(analysis, 'length', 0),
+                'width': getattr(analysis, 'width', 0),
+                'height': getattr(analysis, 'height', 0)
+            }
+        }
+        # Convert part_type enum to string for JSON serialization
+        if result['part_type'] is not None:
+            result['part_type'] = str(result['part_type'].value) if hasattr(result['part_type'], 'value') else str(result['part_type'])
+        
+        return result
+    except Exception as e:
+        return {
+            'file': part_name,
+            'filepath': step_file,
+            'success': False,
+            'cached': False,
+            'error': str(e)
+        }
+
+
+# =============================================================================
+# File Discovery Functions
+# =============================================================================
 
 
 def find_step_files(directory=None):
@@ -96,8 +221,8 @@ def run_analysis(step_file, output_dir, args):
     6. Analyze holes (on flat pattern if available)
     7. Generate report
     """
-    from src.step_processing import load_step_file, detect_holes, detect_shaped_holes, deduplicate_holes
-    from src.part_analyzer import analyze_part_geometry, format_analysis_report, PartType
+    from .step_processing import load_step_file, detect_holes, detect_shaped_holes, deduplicate_holes
+    from .part_analyzer import analyze_part_geometry, format_analysis_report, PartType
     
     # Import AAG Analyzer
     try:
@@ -173,7 +298,7 @@ def run_analysis(step_file, output_dir, args):
         if analysis.is_profile:
             part_category = "PROFIEL (ingekocht)"
             # Keep existing profile type (e.g. BUIS, KOKER) if set, otherwise default to KOKER_PROFIEL
-            from src.part_analyzer import PartType
+            from .part_analyzer import PartType
             if analysis.part_type not in [PartType.BUIS, PartType.KOKER, PartType.KOKER_PROFIEL]:
                 analysis.part_type = PartType.KOKER_PROFIEL 
         elif aag_result.bend_count > 0:
@@ -579,7 +704,7 @@ print("UNFOLD_RESULT:" + json.dumps(result))
 
 def run_unfold(step_file, output_dir, part_name, analysis):
     """Run FreeCAD unfold via subprocess, with theoretical fallback (legacy)."""
-    unfold_script = os.path.join(PIPELINE_DIR, "src", "freecad_unfold.py")
+    unfold_script = os.path.join(PIPELINE_DIR, "freecad_unfold.py")
     dxf_output = os.path.join(output_dir, f"{part_name}_flat.dxf")
     unfold_result = {'success': False, 'error_details': []}
 
@@ -658,7 +783,7 @@ def run_theoretical_unfold(step_file, analysis):
         # Run theoretical calculation via FreeCAD Python
         calc_code = f'''
 import sys
-sys.path.insert(0, "{PIPELINE_DIR}/src")
+sys.path.insert(0, "{PIPELINE_DIR}")
 from freecad_unfold import calculate_theoretical_unfold
 import json
 
