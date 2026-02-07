@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manufacturing Analysis</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #ffffff;
+            color: #000000;
+            line-height: 1.6;
+            font-size: 15px;
+        }
+
+        .header {
+            background: #000000;
+            color: #ffffff;
+            padding: 24px 32px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 1.25rem;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+        }
+
+        .header-status {
+            font-size: 0.8rem;
+            opacity: 0.6;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 32px;
+        }
+
+        /* Drop zone */
+        .dropzone {
+            border: 3px dashed #cccccc;
+            padding: 60px 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: 32px;
+        }
+
+        .dropzone:hover,
+        .dropzone.dragover {
+            border-color: #000000;
+            background: #fafafa;
+        }
+
+        .dropzone-icon {
+            font-size: 3rem;
+            margin-bottom: 16px;
+            opacity: 0.3;
+        }
+
+        .dropzone-text {
+            font-size: 1.1rem;
+            color: #666666;
+            margin-bottom: 8px;
+        }
+
+        .dropzone-hint {
+            font-size: 0.85rem;
+            color: #999999;
+        }
+
+        .dropzone input[type="file"] {
+            display: none;
+        }
+
+        /* Processing state */
+        .processing {
+            text-align: center;
+            padding: 60px 40px;
+            display: none;
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid #e0e0e0;
+            border-top-color: #000000;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 24px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .processing-text {
+            font-size: 1.1rem;
+            color: #333333;
+        }
+
+        .processing-sub {
+            font-size: 0.85rem;
+            color: #999999;
+            margin-top: 8px;
+        }
+
+        /* Error state */
+        .error-box {
+            background: #fff5f5;
+            border: 1px solid #000000;
+            padding: 20px 24px;
+            margin-bottom: 24px;
+            display: none;
+        }
+
+        .error-title {
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .error-message {
+            font-size: 0.9rem;
+            color: #333333;
+        }
+
+        /* Results */
+        .results {
+            display: none;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #000000;
+        }
+
+        .result-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .result-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            padding: 8px 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            border: 2px solid #000000;
+            background: #ffffff;
+            color: #000000;
+            transition: all 0.15s ease;
+        }
+
+        .btn:hover {
+            background: #000000;
+            color: #ffffff;
+        }
+
+        .btn-primary {
+            background: #000000;
+            color: #ffffff;
+        }
+
+        .btn-primary:hover {
+            background: #333333;
+        }
+
+        /* Result sections */
+        .result-section {
+            margin-bottom: 24px;
+        }
+
+        .section-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 12px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .result-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 600px) {
+            .result-grid { grid-template-columns: 1fr; }
+            .container { padding: 24px 16px; }
+        }
+
+        .result-card {
+            border: 1px solid #000000;
+            padding: 16px 20px;
+        }
+
+        .card-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #666666;
+            margin-bottom: 4px;
+        }
+
+        .card-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .card-sub {
+            font-size: 0.8rem;
+            color: #999999;
+            margin-top: 2px;
+        }
+
+        /* Data table */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .data-table th {
+            background: #000000;
+            color: #ffffff;
+            padding: 10px 16px;
+            text-align: left;
+            font-weight: 500;
+            font-size: 0.85rem;
+        }
+
+        .data-table td {
+            padding: 10px 16px;
+            border-bottom: 1px solid #e0e0e0;
+            font-size: 0.9rem;
+        }
+
+        .data-table tr:nth-child(even) {
+            background: #fafafa;
+        }
+
+        /* Category badge */
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            border: 1px solid #000000;
+        }
+
+        .badge-dark {
+            background: #000000;
+            color: #ffffff;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 24px;
+            color: #999999;
+            font-size: 0.8rem;
+            margin-top: 48px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Manufacturing Analysis</h1>
+        <span class="header-status" id="headerStatus">Ready</span>
+    </div>
+
+    <div class="container">
+        <!-- Upload State -->
+        <div id="uploadSection">
+            <div class="dropzone" id="dropzone">
+                <div class="dropzone-icon">&#9881;</div>
+                <div class="dropzone-text">Sleep een STEP bestand hierheen</div>
+                <div class="dropzone-hint">of klik om een bestand te selecteren (.step, .stp)</div>
+                <input type="file" id="fileInput" accept=".step,.stp,.STEP,.STP">
+            </div>
+        </div>
+
+        <!-- Processing State -->
+        <div class="processing" id="processingSection">
+            <div class="spinner"></div>
+            <div class="processing-text" id="processingText">Analyseren...</div>
+            <div class="processing-sub" id="processingSub">STEP bestand wordt verwerkt</div>
+        </div>
+
+        <!-- Error State -->
+        <div class="error-box" id="errorSection">
+            <div class="error-title">Analyse mislukt</div>
+            <div class="error-message" id="errorMessage"></div>
+            <br>
+            <button class="btn" onclick="reset()">Opnieuw proberen</button>
+        </div>
+
+        <!-- Results State -->
+        <div class="results" id="resultsSection">
+            <div class="result-header">
+                <div class="result-title" id="resultFilename">result.step</div>
+                <div class="result-actions">
+                    <button class="btn" onclick="downloadCSV()">CSV Download</button>
+                    <button class="btn btn-primary" onclick="reset()">Nieuw bestand</button>
+                </div>
+            </div>
+
+            <!-- Classification Cards -->
+            <div class="result-grid">
+                <div class="result-card">
+                    <div class="card-label">Categorie</div>
+                    <div class="card-value" id="resCategory">-</div>
+                </div>
+                <div class="result-card">
+                    <div class="card-label">Type</div>
+                    <div class="card-value" id="resType">-</div>
+                </div>
+                <div class="result-card">
+                    <div class="card-label">Dikte</div>
+                    <div class="card-value" id="resThickness">-</div>
+                    <div class="card-sub">mm</div>
+                </div>
+                <div class="result-card">
+                    <div class="card-label">Afmetingen</div>
+                    <div class="card-value" id="resDimensions">-</div>
+                    <div class="card-sub" id="resDimensionsSub">L x B x H (mm)</div>
+                </div>
+            </div>
+
+            <!-- Production Data -->
+            <div class="result-section">
+                <div class="section-title">Productie Data</div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Parameter</th>
+                            <th>Waarde</th>
+                        </tr>
+                    </thead>
+                    <tbody id="productionTable">
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Flat Dimensions (conditional) -->
+            <div class="result-section" id="flatSection" style="display:none">
+                <div class="section-title">Uitslag (Flat Pattern)</div>
+                <table class="data-table">
+                    <tbody id="flatTable">
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- AAG Details (conditional) -->
+            <div class="result-section" id="aagSection" style="display:none">
+                <div class="section-title">AAG Analyse Details</div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Parameter</th>
+                            <th>Waarde</th>
+                        </tr>
+                    </thead>
+                    <tbody id="aagTable">
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Hole Details (conditional) -->
+            <div class="result-section" id="holeSection" style="display:none">
+                <div class="section-title">Gaten Detail</div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Diameter</th>
+                            <th>Q-waarde</th>
+                        </tr>
+                    </thead>
+                    <tbody id="holeTable">
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Bend Details (conditional) -->
+            <div class="result-section" id="bendSection" style="display:none">
+                <div class="section-title">Zettingen Detail</div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Hoek</th>
+                            <th>Radius</th>
+                            <th>Lengte</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bendTable">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        Manufacturing Analysis API &mdash; STEP File Analyzer
+    </div>
+
+    <script>
+        let currentJobId = null;
+        let currentResult = null;
+        let pollTimer = null;
+
+        const dropzone = document.getElementById('dropzone');
+        const fileInput = document.getElementById('fileInput');
+
+        // ---- Drag & Drop ----
+
+        dropzone.addEventListener('click', () => fileInput.click());
+
+        dropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropzone.classList.add('dragover');
+        });
+
+        dropzone.addEventListener('dragleave', () => {
+            dropzone.classList.remove('dragover');
+        });
+
+        dropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) handleFile(file);
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files[0]) handleFile(fileInput.files[0]);
+        });
+
+        // ---- File Upload ----
+
+        async function handleFile(file) {
+            const ext = file.name.split('.').pop().toLowerCase();
+            if (!['step', 'stp'].includes(ext)) {
+                showError('Ongeldig bestandstype. Alleen .step en .stp bestanden zijn toegestaan.');
+                return;
+            }
+
+            showProcessing(file.name);
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const resp = await fetch('/api/v1/analyze', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.detail || `HTTP ${resp.status}`);
+                }
+
+                const data = await resp.json();
+                currentJobId = data.job_id;
+                startPolling();
+            } catch (e) {
+                showError('Upload mislukt: ' + e.message);
+            }
+        }
+
+        // ---- Polling ----
+
+        function startPolling() {
+            pollTimer = setInterval(pollJob, 2000);
+        }
+
+        async function pollJob() {
+            if (!currentJobId) return;
+
+            try {
+                const resp = await fetch(`/api/v1/jobs/${currentJobId}`);
+                const data = await resp.json();
+
+                if (data.status === 'completed') {
+                    clearInterval(pollTimer);
+                    currentResult = data.result;
+                    showResults(data.result);
+                } else if (data.status === 'failed') {
+                    clearInterval(pollTimer);
+                    showError(data.error || 'Analyse mislukt (onbekende fout)');
+                } else if (data.status === 'processing') {
+                    document.getElementById('processingSub').textContent = 'Bezig met analyse...';
+                }
+            } catch (e) {
+                clearInterval(pollTimer);
+                showError('Verbinding verloren: ' + e.message);
+            }
+        }
+
+        // ---- UI States ----
+
+        function showProcessing(filename) {
+            document.getElementById('uploadSection').style.display = 'none';
+            document.getElementById('errorSection').style.display = 'none';
+            document.getElementById('resultsSection').style.display = 'none';
+            document.getElementById('processingSection').style.display = 'block';
+            document.getElementById('processingText').textContent = `Analyseren: ${filename}`;
+            document.getElementById('processingSub').textContent = 'STEP bestand wordt verwerkt...';
+            document.getElementById('headerStatus').textContent = 'Analyseren...';
+        }
+
+        function showError(message) {
+            document.getElementById('uploadSection').style.display = 'none';
+            document.getElementById('processingSection').style.display = 'none';
+            document.getElementById('resultsSection').style.display = 'none';
+            document.getElementById('errorSection').style.display = 'block';
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('headerStatus').textContent = 'Fout';
+        }
+
+        function showResults(result) {
+            document.getElementById('uploadSection').style.display = 'none';
+            document.getElementById('processingSection').style.display = 'none';
+            document.getElementById('errorSection').style.display = 'none';
+            document.getElementById('resultsSection').style.display = 'block';
+            document.getElementById('headerStatus').textContent = 'Klaar';
+
+            // Filename
+            document.getElementById('resultFilename').textContent = result.file || 'Resultaat';
+
+            // Classification
+            document.getElementById('resCategory').textContent = result.category || '-';
+            document.getElementById('resType').textContent = (result.part_type || '-').toUpperCase();
+            document.getElementById('resThickness').textContent =
+                result.thickness ? result.thickness.toFixed(2) : '-';
+
+            // Dimensions
+            const d = result.dimensions;
+            if (d) {
+                document.getElementById('resDimensions').textContent =
+                    `${d.length.toFixed(1)} x ${d.width.toFixed(1)} x ${d.height.toFixed(1)}`;
+            }
+
+            // Production table
+            const prod = result.production || {};
+            const prodRows = [
+                ['Gaten (totaal)', prod.holes_total || 0],
+                ['Zettingen (totaal)', prod.bends_total || 0],
+                ['Zettingen (up)', prod.bends_up || 0],
+                ['Tegenzettingen (down)', prod.bends_down || 0],
+            ];
+            const prodTable = document.getElementById('productionTable');
+            prodTable.innerHTML = prodRows.map(([k, v]) =>
+                `<tr><td>${k}</td><td><strong>${v}</strong></td></tr>`
+            ).join('');
+
+            // Flat dimensions
+            const flat = result.flat_dimensions;
+            if (flat && flat.length > 0) {
+                document.getElementById('flatSection').style.display = 'block';
+                document.getElementById('flatTable').innerHTML = `
+                    <tr><td>Uitslag afmetingen</td><td><strong>${flat.length.toFixed(1)} x ${flat.width.toFixed(1)} mm</strong></td></tr>
+                `;
+            } else {
+                document.getElementById('flatSection').style.display = 'none';
+            }
+
+            // AAG details
+            const aag = result.aag_details;
+            if (aag) {
+                document.getElementById('aagSection').style.display = 'block';
+                const aagRows = [];
+                if (aag.cut_length != null) aagRows.push(['Snijlengte', `${aag.cut_length.toFixed(1)} mm`]);
+                if (aag.total_cut_length != null) aagRows.push(['Totale snijlengte', `${aag.total_cut_length.toFixed(1)} mm`]);
+                if (aag.pierce_count != null) aagRows.push(['Piercings', aag.pierce_count]);
+                if (aag.estimated_cut_time_seconds != null)
+                    aagRows.push(['Geschatte snijtijd', `${aag.estimated_cut_time_seconds.toFixed(1)} sec`]);
+                if (aag.face_count != null) aagRows.push(['Faces', aag.face_count]);
+                if (aag.edge_count != null) aagRows.push(['Edges', aag.edge_count]);
+
+                document.getElementById('aagTable').innerHTML = aagRows.map(([k, v]) =>
+                    `<tr><td>${k}</td><td><strong>${v}</strong></td></tr>`
+                ).join('');
+
+                // Hole details
+                if (aag.hole_details && aag.hole_details.length > 0) {
+                    document.getElementById('holeSection').style.display = 'block';
+                    document.getElementById('holeTable').innerHTML = aag.hole_details.map(h =>
+                        `<tr>
+                            <td>${h.type || '-'}</td>
+                            <td>${h.diameter ? h.diameter.toFixed(2) + ' mm' : '-'}</td>
+                            <td>${h.isoperimetric_quotient ? h.isoperimetric_quotient.toFixed(3) : '-'}</td>
+                        </tr>`
+                    ).join('');
+                } else {
+                    document.getElementById('holeSection').style.display = 'none';
+                }
+
+                // Bend details
+                if (aag.bend_details && aag.bend_details.length > 0) {
+                    document.getElementById('bendSection').style.display = 'block';
+                    document.getElementById('bendTable').innerHTML = aag.bend_details.map(b =>
+                        `<tr>
+                            <td>${b.type || '-'}</td>
+                            <td>${b.angle ? b.angle.toFixed(1) + '\u00B0' : '-'}</td>
+                            <td>${b.radius ? 'R' + b.radius.toFixed(1) + ' mm' : '-'}</td>
+                            <td>${b.length ? b.length.toFixed(1) + ' mm' : '-'}</td>
+                        </tr>`
+                    ).join('');
+                } else {
+                    document.getElementById('bendSection').style.display = 'none';
+                }
+            } else {
+                document.getElementById('aagSection').style.display = 'none';
+                document.getElementById('holeSection').style.display = 'none';
+                document.getElementById('bendSection').style.display = 'none';
+            }
+        }
+
+        function reset() {
+            if (pollTimer) clearInterval(pollTimer);
+            currentJobId = null;
+            currentResult = null;
+            fileInput.value = '';
+
+            document.getElementById('uploadSection').style.display = 'block';
+            document.getElementById('processingSection').style.display = 'none';
+            document.getElementById('errorSection').style.display = 'none';
+            document.getElementById('resultsSection').style.display = 'none';
+            document.getElementById('headerStatus').textContent = 'Ready';
+        }
+
+        // ---- CSV Download ----
+
+        function downloadCSV() {
+            if (!currentJobId) return;
+            window.open(`/api/v1/jobs/${currentJobId}?format=csv`, '_blank');
+        }
+    </script>
+</body>
+</html>

@@ -498,16 +498,17 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     unfold_script = f'''
 import sys
 import os
+import platform
 import json
 
 # FreeCAD paths
 freecad_lib = "{fc_lib}"
 freecad_mod = "{fc_mod}"
-freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
 
-sys.path.insert(0, freecad_lib)
-sys.path.insert(0, freecad_mod)
-freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
+if platform.system() == "Darwin":
+    freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
+else:
+    freecad_user_mod = os.path.expanduser("~/.local/share/FreeCAD/Mod")
 
 sys.path.insert(0, freecad_lib)
 sys.path.insert(0, freecad_mod)
@@ -852,16 +853,17 @@ def run_aag_analysis(step_file):
     aag_script = f'''
 import sys
 import os
+import platform
 import json
 
 # FreeCAD paths
 freecad_lib = "{fc_lib}"
 freecad_mod = "{fc_mod}"
-freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
 
-sys.path.insert(0, freecad_lib)
-sys.path.insert(0, freecad_mod)
-freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
+if platform.system() == "Darwin":
+    freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
+else:
+    freecad_user_mod = os.path.expanduser("~/.local/share/FreeCAD/Mod")
 
 sys.path.insert(0, freecad_lib)
 sys.path.insert(0, freecad_mod)

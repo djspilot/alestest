@@ -1,0 +1,12 @@
+resources/output/
+resources/data/
+.pipeline_cache/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+archive/
+docs/
+tests/
+*.md
+!requirements*.txt

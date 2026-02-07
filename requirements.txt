@@ -1,6 +1,5 @@
 cadquery>=2.4.0
 cadquery-ocp
-edocr
 opencv-python
 pymupdf
 numpy

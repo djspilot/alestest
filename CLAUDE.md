@@ -6,9 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a **manufacturing analysis pipeline** that processes STEP CAD files to extract geometric data, analyze components, detect holes/features, and generate reports. The pipeline includes comprehensive **Dutch/ISO manufacturing standards** analysis for tolerances, fits, threads, surface finish, and material calculations.
 
-The project provides two main analysis modes:
+The project provides three analysis modes:
 1. **Quick mode** (default via `run.py`) - Fast AAG-based analysis with simple reports
 2. **Full mode** (`run.py --full` or `manufacturing_pipeline/cli.py`) - Complete ISO pipeline with database storage
+3. **API mode** (`api/app.py`) - REST API for VPS deployment, accepts STEP uploads, returns JSON/CSV
 
 ## Key Commands
 
@@ -129,6 +130,34 @@ python manufacturing_pipeline/scripts/compare_erp.py AI-voorbeelden/ --subfolder
 python manufacturing_pipeline/scripts/compare_erp.py AI-voorbeelden/ -v
 ```
 
+### API Mode (VPS Deployment)
+```bash
+# Install API dependencies
+pip install -r requirements-api.txt
+
+# Start API server (development)
+API_KEYS=your-key uvicorn api.app:app --reload --port 8000
+
+# Docker deployment
+docker compose up -d
+
+# Upload a STEP file for analysis
+curl -X POST http://localhost:8000/api/v1/analyze \
+  -H "X-API-Key: your-key" \
+  -F "file=@mypart.step"
+
+# Poll job result (JSON)
+curl http://localhost:8000/api/v1/jobs/{job_id} \
+  -H "X-API-Key: your-key"
+
+# Get result as CSV
+curl http://localhost:8000/api/v1/jobs/{job_id}?format=csv \
+  -H "X-API-Key: your-key"
+
+# Health check
+curl http://localhost:8000/api/v1/health
+```
+
 ### Testing
 ```bash
 # Run basic tests
@@ -144,7 +173,22 @@ python tests/test_basic.py
 /
 ├── run.py                            # Unified entry point (Quick + Full modes)
 ├── requirements.txt                  # Python dependencies
+├── requirements-api.txt              # API-specific dependencies (FastAPI, uvicorn)
 ├── CLAUDE.md                         # Project documentation (this file)
+├── Dockerfile                        # Docker container image definition
+├── docker-compose.yml                # Docker orchestration for VPS deployment
+│
+├── api/                              # REST API Service (VPS deployment)
+│   ├── __init__.py
+│   ├── app.py                        # FastAPI application, middleware, CORS
+│   ├── config.py                     # API configuration (env vars)
+│   ├── schemas.py                    # Pydantic request/response models
+│   ├── routes.py                     # API endpoints (analyze, jobs, health)
+│   ├── analysis_service.py           # Bridge to manufacturing pipeline
+│   └── job_manager.py                # In-memory job state management
+│
+├── deployment/                       # VPS Deployment Configuration
+│   └── nginx.conf                    # Example nginx reverse proxy config
 │
 ├── manufacturing_pipeline/           # Core Application Package
 │   ├── __init__.py
@@ -239,6 +283,12 @@ The `manufacturing_pipeline` package is organized into logical subpackages:
 3. **`manufacturing_pipeline/main.py`** - Legacy shim
    - Maintained for backward compatibility
    - Redirects to `cli.py`
+
+4. **`api/app.py`** - REST API (VPS deployment)
+   - Accepts STEP file uploads via HTTP POST
+   - Async job processing via FastAPI BackgroundTasks
+   - Returns JSON or CSV results
+   - API key authentication via `X-API-Key` header
 
 ### Analysis Flow
 
@@ -410,6 +460,56 @@ The full pipeline supports checkpoint/resume functionality.
 - **svglib**: SVG to PDF conversion
 - **pymupdf**: PDF parsing
 - **numpy**: Numerical operations
+
+### API Dependencies (requirements-api.txt)
+
+- **fastapi**: Web framework for REST API
+- **uvicorn**: ASGI server
+- **python-multipart**: File upload handling
+- **pydantic**: Request/response validation
+
+## Docker / VPS Deployment
+
+### Quick Start
+```bash
+# Set API key and start
+export API_KEYS=your-secret-key
+docker compose up -d
+
+# Verify
+curl http://localhost:8000/api/v1/health
+```
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/analyze` | Upload STEP file, returns job_id |
+| GET | `/api/v1/jobs/{job_id}` | Poll job status, get results |
+| GET | `/api/v1/health` | Health check |
+
+### VPS Setup (Ubuntu)
+```bash
+# On VPS
+apt update && apt install docker.io docker-compose-v2 nginx certbot python3-certbot-nginx
+git clone <repo> /opt/manufacturing-api
+cd /opt/manufacturing-api
+echo "API_KEYS=your-key" > .env
+docker compose up -d
+
+# Configure nginx (copy deployment/nginx.conf to /etc/nginx/sites-available/)
+# Add SSL: certbot --nginx -d api.example.com
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `API_KEYS` | (none) | Comma-separated API keys. Empty = no auth (dev mode) |
+| `FREECAD_PATH` | `/usr/lib/freecad` | FreeCAD installation path |
+| `UPLOAD_DIR` | `/tmp/manufacturing-uploads` | Temp directory for uploaded files |
+| `MAX_FILE_SIZE_MB` | `100` | Max upload size in MB |
+| `JOB_TTL_SECONDS` | `3600` | Job cleanup after N seconds |
 
 ## Development Workflow
 
