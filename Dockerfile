@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y \
 
 # FreeCAD SheetMetal workbench (required for unfold)
 RUN mkdir -p /root/.local/share/FreeCAD/Mod && \
-    git clone --depth 1 https://github.com/shaise/FreeCADSheetMetal.git \
+    git clone --depth 1 https://github.com/shaise/FreeCAD_SheetMetal.git \
     /root/.local/share/FreeCAD/Mod/sheetmetal
 
 # FreeCAD path on Debian
