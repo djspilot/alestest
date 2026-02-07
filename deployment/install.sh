@@ -12,7 +12,7 @@ set -e
 # ============================================================================
 
 INSTALL_DIR="/opt/manufacturing-api"
-REPO_URL=""  # Set your git repo URL here, or pass as argument
+REPO_URL="https://github.com/djspilot/alestest.git"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -45,14 +45,9 @@ echo ""
 read -p "API key for authentication [leave empty for no auth]: " API_KEY
 echo ""
 
-# Repo URL (if not hardcoded)
-if [ -z "$REPO_URL" ]; then
-    read -p "Git repository URL: " REPO_URL
-    if [ -z "$REPO_URL" ]; then
-        echo -e "${RED}Error: Repository URL is required${NC}"
-        exit 1
-    fi
-fi
+# Repo URL
+read -p "Git repository URL [$REPO_URL]: " INPUT_REPO
+REPO_URL="${INPUT_REPO:-$REPO_URL}"
 
 echo ""
 echo -e "${GREEN}Configuration:${NC}"
