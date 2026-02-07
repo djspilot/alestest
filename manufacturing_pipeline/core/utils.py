@@ -11,16 +11,22 @@ import hashlib
 from datetime import datetime
 
 # Project paths
-# This file is now in PROJECT_ROOT/manufacturing_pipeline/
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# This file is now in PROJECT_ROOT/manufacturing_pipeline/core/
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RESOURCES_DIR = os.path.join(PROJECT_ROOT, "resources")
-PARTS_DIR = os.path.join(RESOURCES_DIR, "input")  # Consolidated: was resources/parts and input/
+DATA_DIR = os.path.join(RESOURCES_DIR, "data")
+CONFIG_DIR = os.path.join(RESOURCES_DIR, "config")
+
+PARTS_DIR = os.path.join(RESOURCES_DIR, "input")
 OUTPUT_DIR = os.path.join(RESOURCES_DIR, "output")
 PIPELINE_DIR = os.path.join(PROJECT_ROOT, "manufacturing_pipeline")
-SCRIPTS_DIR = os.path.join(PIPELINE_DIR, "scripts")  # Now inside manufacturing_pipeline/
+SCRIPTS_DIR = os.path.join(PIPELINE_DIR, "scripts")
 
 # FreeCAD Python path
-FREECAD_PYTHON = "/opt/homebrew/Caskroom/freecad/1.0.2/FreeCAD.app/Contents/Resources/bin/python"
+# FreeCAD Python path
+from manufacturing_pipeline.core.config import SystemConfig
+FREECAD_PYTHON = SystemConfig.from_env().freecad_python
+
 
 # Add pipeline and scripts to path
 if PIPELINE_DIR not in sys.path:
@@ -28,8 +34,8 @@ if PIPELINE_DIR not in sys.path:
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
-# Cache file location
-CACHE_FILE = os.path.join(PROJECT_ROOT, ".pipeline_cache.json")
+# Cache file location (moved to data directory)
+CACHE_FILE = os.path.join(DATA_DIR, "pipeline_cache.json")
 
 
 # =============================================================================
@@ -221,16 +227,16 @@ def run_analysis(step_file, output_dir, args):
     6. Analyze holes (on flat pattern if available)
     7. Generate report
     """
-    from .step_processing import load_step_file, detect_holes, detect_shaped_holes, deduplicate_holes
-    from .part_analyzer import analyze_part_geometry, format_analysis_report, PartType
+    from manufacturing_pipeline.analysis.step_processing import load_step_file, detect_holes, detect_shaped_holes, deduplicate_holes
+    from manufacturing_pipeline.analysis.part_analyzer import analyze_part_geometry, format_analysis_report, PartType
     
     # Import AAG Analyzer
     try:
-        from aag_analyzer import AAGAnalyzer
-    except ImportError:
-        # Fallback if running from different context
-        sys.path.append(SCRIPTS_DIR)
-        from aag_analyzer import AAGAnalyzer
+        from manufacturing_pipeline.scripts.aag_analyzer import AAGAnalyzer
+    except ImportError as e:
+        print(f"Warning: Could not import AAGAnalyzer: {e}")
+        # Fallback dummy class if needed or just let it fail later
+        AAGAnalyzer = None
 
     part_name = os.path.splitext(os.path.basename(step_file))[0]
 
@@ -298,7 +304,8 @@ def run_analysis(step_file, output_dir, args):
         if analysis.is_profile:
             part_category = "PROFIEL (ingekocht)"
             # Keep existing profile type (e.g. BUIS, KOKER) if set, otherwise default to KOKER_PROFIEL
-            from .part_analyzer import PartType
+            # PartType is already imported at function start
+
             if analysis.part_type not in [PartType.BUIS, PartType.KOKER, PartType.KOKER_PROFIEL]:
                 analysis.part_type = PartType.KOKER_PROFIEL 
         elif aag_result.bend_count > 0:
@@ -482,6 +489,11 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     - flat_length, flat_width: dimensions
     - fold_lines: number of bends
     """
+    # Get system config for paths
+    sys_config = SystemConfig.from_env()
+    fc_lib = sys_config.freecad_lib
+    fc_mod = sys_config.freecad_mod
+
     # Build unfold script that exports STEP
     unfold_script = f'''
 import sys
@@ -489,9 +501,12 @@ import os
 import json
 
 # FreeCAD paths
-freecad_app = "/opt/homebrew/Caskroom/freecad/1.0.2/FreeCAD.app"
-freecad_lib = f"{{freecad_app}}/Contents/Resources/lib"
-freecad_mod = f"{{freecad_app}}/Contents/Resources/Mod"
+freecad_lib = "{fc_lib}"
+freecad_mod = "{fc_mod}"
+freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
+
+sys.path.insert(0, freecad_lib)
+sys.path.insert(0, freecad_mod)
 freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
 
 sys.path.insert(0, freecad_lib)
@@ -828,6 +843,11 @@ def run_aag_analysis(step_file):
     - cut length and laser cut time estimation
     - isoperimetric quotients for hole classification
     """
+    # Get system config for paths
+    sys_config = SystemConfig.from_env()
+    fc_lib = sys_config.freecad_lib
+    fc_mod = sys_config.freecad_mod
+
     # Build the analysis script
     aag_script = f'''
 import sys
@@ -835,9 +855,12 @@ import os
 import json
 
 # FreeCAD paths
-freecad_app = "/opt/homebrew/Caskroom/freecad/1.0.2/FreeCAD.app"
-freecad_lib = f"{{freecad_app}}/Contents/Resources/lib"
-freecad_mod = f"{{freecad_app}}/Contents/Resources/Mod"
+freecad_lib = "{fc_lib}"
+freecad_mod = "{fc_mod}"
+freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
+
+sys.path.insert(0, freecad_lib)
+sys.path.insert(0, freecad_mod)
 freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
 
 sys.path.insert(0, freecad_lib)
@@ -933,7 +956,7 @@ print("AAG_RESULT:" + json.dumps(output))
 
 def run_debug(step_file):
     """Debug mode - detailed hole detection analysis."""
-    from src.step_processing import load_step_file, debug_hole_detection
+    from manufacturing_pipeline.analysis.step_processing import load_step_file, debug_hole_detection
 
     print(f"\n{'='*60}")
     print(f"DEBUG: HOLE DETECTION ANALYSIS")
@@ -999,7 +1022,7 @@ def generate_compact_pdf(step_file, output_dir, part_name, analysis, total_holes
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     import datetime
     from svglib.svglib import svg2rlg
-    from src.step_processing import load_step_file
+    from manufacturing_pipeline.analysis.step_processing import load_step_file
     import cadquery as cq
 
     # Prepare images
@@ -1262,7 +1285,7 @@ def generate_simple_pdf(step_file, output_dir, part_name, analysis, total_holes,
     if unfold_result is None:
         unfold_result = getattr(analysis, 'unfold_result', None)
 
-    from src.step_processing import load_step_file
+    from manufacturing_pipeline.analysis.step_processing import load_step_file
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, HRFlowable, Image

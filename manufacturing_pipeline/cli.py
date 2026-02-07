@@ -12,27 +12,28 @@ import os
 import argparse
 
 # Modules are now directly in this package (no src/ subdirectory)
+# Updated to modular structure (core, analysis, reporting, data)
 
 try:
-    from .step_processing import load_step_file
-    from .pdf_processing import extract_dimensions_from_pdf
-    from .correlation import correlate_hole_dimension
-    from .database import DatabaseManager
-    from .report_generator import PDFReportGenerator
-    from . import iso_standards
-    from .cache_manager import CacheManager, PipelineRunner, PipelineStage
-    from .config import PipelineConfig
-    from .pipeline_init import (
+    from manufacturing_pipeline.analysis.step_processing import load_step_file
+    from manufacturing_pipeline.reporting.pdf_processing import extract_dimensions_from_pdf
+    from manufacturing_pipeline.analysis.correlation import correlate_hole_dimension
+    from manufacturing_pipeline.data.database import DatabaseManager
+    from manufacturing_pipeline.reporting.report_generator import PDFReportGenerator
+    from manufacturing_pipeline.analysis import iso_standards
+    from manufacturing_pipeline.data.cache_manager import CacheManager, PipelineRunner, PipelineStage
+    from manufacturing_pipeline.core.config import PipelineConfig
+    from manufacturing_pipeline.core.pipeline_init import (
         normalize_args, resolve_input_paths, resolve_db_paths,
         load_or_init_pipeline_config, handle_module_listing, handle_stage_listing,
         handle_config_display_and_save, handle_cache_commands, parse_force_from_stage
     )
-    from .pipeline_stages import (
+    from manufacturing_pipeline.analysis.pipeline_stages import (
         run_geometry_and_topology_stages, run_iso_standards_stages,
         run_werkvoorbereiding_stage, run_sheetmetal_stage, run_assembly_bom_stage,
         run_simple_cost_table_stage, compile_manufacturing_data
     )
-    from .cli_output import print_section_header, print_production_info_table
+    from manufacturing_pipeline.reporting.cli_output import print_section_header, print_production_info_table
 except ImportError as e:
     print(f"Error importing modules: {e}")
     print("Please ensure all requirements are installed.")
@@ -334,7 +335,7 @@ def main():
 
     # Show active configuration if modules were toggled
     if (args.enable or args.disable) and not args.production_only:
-        from .config import print_module_status
+        from manufacturing_pipeline.core.config import print_module_status
         print_module_status(config.modules)
 
     # Run the pipeline

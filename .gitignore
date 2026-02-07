@@ -13,3 +13,6 @@ venv/
 *.dxf
 *.DXF
 .pipeline_cache.json
+
+# Local Netlify folder
+.netlify

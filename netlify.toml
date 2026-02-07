@@ -1,0 +1,11 @@
+[build]
+  publish = "."
+  command = "echo 'Static site ready'"
+
+[context.production]
+  environment = { NODE_VERSION = "18" }
+
+[[redirects]]
+  from = "/"
+  to = "/ales-analyse.html"
+  status = 200

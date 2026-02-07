@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manufacturing Pipeline - Production Readiness Roadmap</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header .subtitle {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .context-bar {
+            background: #f8f9fa;
+            padding: 20px 40px;
+            border-bottom: 3px solid #e9ecef;
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .context-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .context-item .icon {
+            font-size: 1.5em;
+        }
+
+        .timeline {
+            padding: 40px;
+            position: relative;
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(to bottom, #667eea, #764ba2);
+            transform: translateX(-50%);
+        }
+
+        .week-card {
+            position: relative;
+            margin-bottom: 40px;
+            width: calc(50% - 40px);
+        }
+
+        .week-card:nth-child(odd) {
+            margin-left: 0;
+            margin-right: auto;
+        }
+
+        .week-card:nth-child(even) {
+            margin-right: 0;
+            margin-left: auto;
+        }
+
+        .week-content {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            border-left: 5px solid;
+            position: relative;
+        }
+
+        .week-1 .week-content { border-left-color: #e74c3c; }
+        .week-2 .week-content { border-left-color: #f39c12; }
+        .week-3 .week-content { border-left-color: #3498db; }
+        .week-4 .week-content { border-left-color: #27ae60; }
+
+        .week-badge {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.2em;
+            color: white;
+            top: 20px;
+            z-index: 10;
+        }
+
+        .week-1 .week-badge { background: #e74c3c; right: -80px; }
+        .week-2 .week-badge { background: #f39c12; left: -80px; }
+        .week-3 .week-badge { background: #3498db; right: -80px; }
+        .week-4 .week-badge { background: #27ae60; left: -80px; }
+
+        .week-title {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+
+        .week-goal {
+            color: #7f8c8d;
+            font-style: italic;
+            margin-bottom: 20px;
+        }
+
+        .task-list {
+            list-style: none;
+        }
+
+        .task-list li {
+            padding: 10px 0;
+            border-bottom: 1px solid #ecf0f1;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .task-list li:last-child {
+            border-bottom: none;
+        }
+
+        .checkbox {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #bdc3c7;
+            border-radius: 4px;
+            flex-shrink: 0;
+            margin-top: 2px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .checkbox:hover {
+            border-color: #3498db;
+            background: #ebf5fb;
+        }
+
+        .checkbox.checked {
+            background: #27ae60;
+            border-color: #27ae60;
+        }
+
+        .checkbox.checked::after {
+            content: '✓';
+            color: white;
+            display: block;
+            text-align: center;
+            line-height: 16px;
+            font-weight: bold;
+        }
+
+        .deliverable {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        .priority-section {
+            background: #f8f9fa;
+            padding: 40px;
+            border-top: 3px solid #e9ecef;
+        }
+
+        .priority-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin-top: 20px;
+        }
+
+        .priority-card {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.1);
+        }
+
+        .priority-card h3 {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        .priority-card.skip { border-top: 4px solid #e74c3c; }
+        .priority-card.keep { border-top: 4px solid #27ae60; }
+
+        .priority-card ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .priority-card li {
+            padding: 8px 0;
+            padding-left: 25px;
+            position: relative;
+        }
+
+        .priority-card li::before {
+            position: absolute;
+            left: 0;
+        }
+
+        .priority-card.skip li::before { content: '❌'; }
+        .priority-card.keep li::before { content: '✅'; }
+
+        .metrics {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .metrics h2 {
+            margin-bottom: 30px;
+        }
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 30px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .metric {
+            background: rgba(255,255,255,0.1);
+            padding: 25px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+
+        .metric-value {
+            font-size: 2.5em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .metric-label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        .footer {
+            background: #2c3e50;
+            color: white;
+            padding: 30px 40px;
+            text-align: center;
+        }
+
+        .footer .status {
+            display: inline-block;
+            background: #e74c3c;
+            padding: 10px 25px;
+            border-radius: 25px;
+            font-weight: bold;
+            margin-top: 15px;
+        }
+
+        .footer .status.ready {
+            background: #27ae60;
+        }
+
+        .technical-section {
+            background: white;
+            padding: 40px;
+            border-top: 3px solid #e9ecef;
+        }
+
+        .code-block {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 15px 0;
+            overflow-x: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9em;
+        }
+
+        .code-block .comment {
+            color: #95a5a6;
+        }
+
+        .code-block .keyword {
+            color: #3498db;
+        }
+
+        .code-block .string {
+            color: #2ecc71;
+        }
+
+        @media (max-width: 768px) {
+            .timeline::before {
+                left: 20px;
+            }
+            .week-card {
+                width: calc(100% - 60px);
+                margin-left: 60px !important;
+                margin-right: 0 !important;
+            }
+            .week-badge {
+                left: -70px !important;
+                right: auto !important;
+                width: 50px;
+                height: 50px;
+                font-size: 1em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏭 Manufacturing Pipeline</h1>
+            <div class="subtitle">Production Readiness Roadmap - February 2026</div>
+        </div>
+
+        <div class="context-bar">
+            <div class="context-item">
+                <span class="icon">👤</span>
+                <span>Solo Developer</span>
+            </div>
+            <div class="context-item">
+                <span class="icon">📅</span>
+                <span>4 Weeks</span>
+            </div>
+            <div class="context-item">
+                <span class="icon">🪟</span>
+                <span>Windows Server</span>
+            </div>
+            <div class="context-item">
+                <span class="icon">🔗</span>
+                <span>ERP Shadow Process</span>
+            </div>
+            <div class="context-item">
+                <span class="icon">📊</span>
+                <span>SpaceClaim Validation</span>
+            </div>
+        </div>
+
+        <div class="timeline">
+            <div class="week-card week-1">
+                <div class="week-badge">W1</div>
+                <div class="week-content">
+                    <div class="week-title">🪟 Windows Infrastructure</div>
+                    <div class="week-goal">Get it running on Windows reliably</div>
+                    <ul class="task-list">
+                        <li><span class="checkbox"></span><span>Update FreeCAD auto-detection for Windows paths</span></li>
+                        <li><span class="checkbox"></span><span>Create Windows installation script</span></li>
+                        <li><span class="checkbox"></span><span>Pin all dependency versions</span></li>
+                        <li><span class="checkbox"></span><span>Test clean install on Windows VM</span></li>
+                        <li><span class="checkbox"></span><span>Set up basic pytest infrastructure</span></li>
+                    </ul>
+                    <div class="deliverable">✅ Pipeline runs on Windows without manual path edits</div>
+                </div>
+            </div>
+
+            <div class="week-card week-2">
+                <div class="week-badge">W2</div>
+                <div class="week-content">
+                    <div class="week-title">🔗 ERP Integration</div>
+                    <div class="week-goal">Robust ERP shadow validation tool</div>
+                    <ul class="task-list">
+                        <li><span class="checkbox"></span><span>Enhance batch folder processing with progress bar</span></li>
+                        <li><span class="checkbox"></span><span>Add error tolerance (continue on failures)</span></li>
+                        <li><span class="checkbox"></span><span>Support ERP file formats (Excel/XML)</span></li>
+                        <li><span class="checkbox"></span><span>Implement deviation thresholds (±5%)</span></li>
+                        <li><span class="checkbox"></span><span>Generate side-by-side comparison tables</span></li>
+                        <li><span class="checkbox"></span><span>Export to Excel/CSV for ERP team</span></li>
+                        <li><span class="checkbox"></span><span>Build HTML validation dashboard</span></li>
+                    </ul>
+                    <div class="deliverable">✅ Can process ERP folder → generate deviation report</div>
+                </div>
+            </div>
+
+            <div class="week-card week-3">
+                <div class="week-badge">W3</div>
+                <div class="week-content">
+                    <div class="week-title">🛡️ Error Handling</div>
+                    <div class="week-goal">Production-grade stability</div>
+                    <ul class="task-list">
+                        <li><span class="checkbox"></span><span>Try/except wrappers around STEP loading</span></li>
+                        <li><span class="checkbox"></span><span>Try/except for Excel parsing errors</span></li>
+                        <li><span class="checkbox"></span><span>Try/except for FreeCAD operations</span></li>
+                        <li><span class="checkbox"></span><span>Log errors to daily log files</span></li>
+                        <li><span class="checkbox"></span><span>Validate STEP files (size, format)</span></li>
+                        <li><span class="checkbox"></span><span>Sanitize file paths (security)</span></li>
+                        <li><span class="checkbox"></span><span>Set file size limits (500MB max)</span></li>
+                        <li><span class="checkbox"></span><span>Structured logging with timestamps</span></li>
+                    </ul>
+                    <div class="deliverable">✅ Runs unattended on ERP data, logs issues, continues on errors</div>
+                </div>
+            </div>
+
+            <div class="week-card week-4">
+                <div class="week-badge">W4</div>
+                <div class="week-content">
+                    <div class="week-title">🚀 Polish & Deploy</div>
+                    <div class="week-goal">Ready for ERP team to use</div>
+                    <ul class="task-list">
+                        <li><span class="checkbox"></span><span>Write Windows deployment documentation</span></li>
+                        <li><span class="checkbox"></span><span>Document ERP integration workflow</span></li>
+                        <li><span class="checkbox"></span><span>Update CLI help with examples</span></li>
+                        <li><span class="checkbox"></span><span>Implement parallel batch processing</span></li>
+                        <li><span class="checkbox"></span><span>Add result caching (avoid re-processing)</span></li>
+                        <li><span class="checkbox"></span><span>Test on sample ERP dataset (5-10 parts)</span></li>
+                        <li><span class="checkbox"></span><span>Compare results with SpaceClaim manually</span></li>
+                        <li><span class="checkbox"></span><span>Create deployment package with .bat scripts</span></li>
+                    </ul>
+                    <div class="deliverable">✅ Production-ready ERP shadow validation tool</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="priority-section">
+            <h2 style="text-align: center; font-size: 2em; color: #2c3e50; margin-bottom: 10px;">📋 Scope Decisions</h2>
+            <p style="text-align: center; color: #7f8c8d; margin-bottom: 30px;">What we're doing vs. what we're skipping to meet the February deadline</p>
+            
+            <div class="priority-grid">
+                <div class="priority-card skip">
+                    <h3><span>❌</span> Skip for Now</h3>
+                    <ul>
+                        <li>Full test coverage (>80%)</li>
+                        <li>CI/CD pipeline (GitHub Actions)</li>
+                        <li>API documentation (Sphinx)</li>
+                        <li>Database storage layer</li>
+                        <li>Entry point unification</li>
+                        <li>Advanced performance optimization</li>
+                        <li>Multi-platform support (Linux/Mac)</li>
+                        <li>Complex refactoring</li>
+                    </ul>
+                </div>
+
+                <div class="priority-card keep">
+                    <h3><span>✅</span> Keep & Focus On</h3>
+                    <ul>
+                        <li>ERP comparison workflow (CORE)</li>
+                        <li>Windows compatibility (REQUIRED)</li>
+                        <li>Error handling & logging (STABILITY)</li>
+                        <li>Batch processing (SCALABILITY)</li>
+                        <li>Deviation reporting (VALUE)</li>
+                        <li>Basic testing (CONFIDENCE)</li>
+                        <li>Dependency pinning (RELIABILITY)</li>
+                        <li>Input validation (SECURITY)</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="technical-section">
+            <h2 style="text-align: center; font-size: 2em; color: #2c3e50; margin-bottom: 30px;">🔧 Critical Windows Changes</h2>
+            
+            <h3 style="color: #e74c3c; margin-bottom: 15px;">1. FreeCAD Auto-Detection</h3>
+            <div class="code-block">
+<span class="keyword">def</span> <span class="string">find_freecad_windows</span>():<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">"""Auto-detect FreeCAD on Windows."""</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;possible_paths = [<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;os.environ.get(<span class="string">"FREECAD_PATH"</span>),<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="string">r"C:\Program Files\FreeCAD 1.0\bin"</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="string">r"C:\Program Files (x86)\FreeCAD 1.0\bin"</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;]<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">for</span> path <span class="keyword">in</span> possible_paths:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span> path <span class="keyword">and</span> os.path.exists(os.path.join(path, <span class="string">"python.exe"</span>)):<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">return</span> path<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">raise</span> RuntimeError(<span class="string">"FreeCAD not found. Set FREECAD_PATH env variable."</span>)
+            </div>
+
+            <h3 style="color: #f39c12; margin: 30px 0 15px 0;">2. ERP Deviation Comparison</h3>
+            <div class="code-block">
+<span class="keyword">def</span> <span class="string">compare_with_tolerance</span>(pipeline_val, erp_val, tolerance=<span class="string">0.05</span>):<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">"""Compare values with ±5% tolerance."""</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span> erp_val == <span class="string">0</span>:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">return</span> pipeline_val == <span class="string">0</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;deviation = <span class="string">abs</span>(pipeline_val - erp_val) / erp_val<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">return</span> deviation <= tolerance
+            </div>
+        </div>
+
+        <div class="metrics">
+            <h2>📊 Target Metrics</h2>
+            <div class="metric-grid">
+                <div class="metric">
+                    <div class="metric-value">4</div>
+                    <div class="metric-label">Weeks Timeline</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value">95%</div>
+                    <div class="metric-label">Windows Compatibility</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value">±5%</div>
+                    <div class="metric-label">Deviation Tolerance</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value">24/7</div>
+                    <div class="metric-label">Unattended Operation</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <div style="font-size: 1.1em; margin-bottom: 15px;"><strong>Status:</strong> Ready to Begin Implementation</div>
+            <div style="opacity: 0.8; margin-bottom: 20px;">Solo Developer | February 2026 | Windows ERP Shadow Process</div>
+            <div class="status" id="projectStatus">🚀 PLANNING PHASE</div>
+        </div>
+    </div>
+
+    <script>
+        document.querySelectorAll('.checkbox').forEach(checkbox => {
+            checkbox.addEventListener('click', function() {
+                this.classList.toggle('checked');
+                updateProgress();
+            });
+        });
+
+        function updateProgress() {
+            const total = document.querySelectorAll('.checkbox').length;
+            const checked = document.querySelectorAll('.checkbox.checked').length;
+            const percentage = Math.round((checked / total) * 100);
+            
+            const statusDiv = document.getElementById('projectStatus');
+            if (percentage === 0) {
+                statusDiv.textContent = '🚀 PLANNING PHASE';
+                statusDiv.className = 'status';
+            } else if (percentage < 50) {
+                statusDiv.textContent = `⚡ IN PROGRESS (${percentage}%)`;
+                statusDiv.className = 'status';
+            } else if (percentage < 100) {
+                statusDiv.textContent = `🔧 ADVANCED (${percentage}%)`;
+                statusDiv.className = 'status';
+            } else {
+                statusDiv.textContent = '✅ COMPLETE (100%)';
+                statusDiv.className = 'status ready';
+            }
+        }
+    </script>
+</body>
+</html>

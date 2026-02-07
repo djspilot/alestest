@@ -39,6 +39,8 @@ class HoleInfo:
     hole_type: str  # 'cylindrical', 'inner_wire', 'slot', 'rectangular'
     position: Tuple[float, float, float]
     reason: str  # Uitleg waarom dit als gat is gedetecteerd
+    thread_name: Optional[str] = None  # Bijv. "M8"
+    fit_name: Optional[str] = None     # Bijv. "H7"
 
 
 @dataclass

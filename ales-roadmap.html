@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ALES - Manufacturing Pipeline Implementatie</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #000000;
+            --secondary: #212121;
+            --surface: #ffffff;
+            --surface-variant: #f5f5f5;
+            --on-surface: #000000;
+            --on-surface-variant: #616161;
+            --outline: #e0e0e0;
+            --accent: #000000;
+        }
+
+        body {
+            font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--surface);
+            color: var(--on-surface);
+            line-height: 1.6;
+            font-size: 16px;
+        }
+
+        .app-bar {
+            background: var(--primary);
+            color: white;
+            padding: 16px 24px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .app-bar h1 {
+            font-size: 1.25rem;
+            font-weight: 500;
+            letter-spacing: 0.025em;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        .hero {
+            background: var(--surface-variant);
+            padding: 48px 24px;
+            margin: -24px -24px 32px -24px;
+            border-bottom: 1px solid var(--outline);
+        }
+
+        .hero h2 {
+            font-size: 2.5rem;
+            font-weight: 300;
+            margin-bottom: 16px;
+            letter-spacing: -0.025em;
+        }
+
+        .hero .subtitle {
+            font-size: 1.125rem;
+            color: var(--on-surface-variant);
+            font-weight: 400;
+        }
+
+        .meta-card {
+            background: white;
+            border: 1px solid var(--outline);
+            border-radius: 4px;
+            padding: 16px 24px;
+            margin-bottom: 32px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+
+        .meta-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .meta-label {
+            font-size: 0.75rem;
+            color: var(--on-surface-variant);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 4px;
+        }
+
+        .meta-value {
+            font-size: 1rem;
+            font-weight: 500;
+        }
+
+        .section {
+            margin-bottom: 48px;
+        }
+
+        .section-title {
+            font-size: 1.25rem;
+            font-weight: 500;
+            margin-bottom: 24px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--primary);
+            display: inline-block;
+        }
+
+        .step-list {
+            list-style: none;
+        }
+
+        .step-item {
+            background: white;
+            border: 1px solid var(--outline);
+            border-radius: 4px;
+            margin-bottom: 16px;
+            overflow: hidden;
+            transition: box-shadow 0.2s;
+        }
+
+        .step-item:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .step-header {
+            padding: 20px 24px;
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            cursor: pointer;
+            background: white;
+            transition: background 0.2s;
+        }
+
+        .step-header:hover {
+            background: var(--surface-variant);
+        }
+
+        .step-number {
+            width: 32px;
+            height: 32px;
+            background: var(--primary);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 500;
+            font-size: 0.875rem;
+            flex-shrink: 0;
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        .step-title {
+            font-size: 1.125rem;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .step-duration {
+            font-size: 0.875rem;
+            color: var(--on-surface-variant);
+        }
+
+        .step-expand {
+            font-size: 1.5rem;
+            color: var(--on-surface-variant);
+            transition: transform 0.2s;
+        }
+
+        .step-item.expanded .step-expand {
+            transform: rotate(180deg);
+        }
+
+        .step-details {
+            display: none;
+            padding: 0 24px 24px 72px;
+            background: var(--surface-variant);
+            border-top: 1px solid var(--outline);
+        }
+
+        .step-item.expanded .step-details {
+            display: block;
+        }
+
+        .task-list {
+            list-style: none;
+            margin-top: 16px;
+        }
+
+        .task-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--outline);
+        }
+
+        .task-item:last-child {
+            border-bottom: none;
+        }
+
+        .checkbox {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--on-surface-variant);
+            border-radius: 2px;
+            flex-shrink: 0;
+            margin-top: 2px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .checkbox:hover {
+            border-color: var(--primary);
+        }
+
+        .checkbox.checked {
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .checkbox.checked::after {
+            content: '✓';
+            color: white;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .deliverable {
+            background: var(--primary);
+            color: white;
+            padding: 16px;
+            border-radius: 4px;
+            margin-top: 16px;
+            font-weight: 500;
+        }
+
+        .scope-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            margin-top: 24px;
+        }
+
+        .scope-card {
+            background: white;
+            border: 1px solid var(--outline);
+            border-radius: 4px;
+            padding: 24px;
+        }
+
+        .scope-card h3 {
+            font-size: 1rem;
+            font-weight: 500;
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .scope-card.in h3 { color: var(--primary); }
+        .scope-card.out h3 { color: var(--on-surface-variant); }
+
+        .scope-card ul {
+            list-style: none;
+        }
+
+        .scope-card li {
+            padding: 8px 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .scope-card.in li::before { content: '✓'; font-weight: bold; }
+        .scope-card.out li::before { content: '✗'; }
+
+        .info-card {
+            background: white;
+            border: 1px solid var(--outline);
+            border-left: 4px solid var(--primary);
+            border-radius: 4px;
+            padding: 24px;
+            margin-bottom: 16px;
+        }
+
+        .info-card h4 {
+            font-size: 1rem;
+            font-weight: 500;
+            margin-bottom: 12px;
+        }
+
+        .info-card p, .info-card li {
+            font-size: 0.875rem;
+            color: var(--on-surface-variant);
+            margin-bottom: 8px;
+        }
+
+        .info-card ul {
+            margin-left: 20px;
+        }
+
+        .info-card li {
+            list-style-type: disc;
+        }
+
+        .code-block {
+            background: #263238;
+            color: #aed581;
+            padding: 20px;
+            border-radius: 4px;
+            margin: 16px 0;
+            overflow-x: auto;
+            font-family: 'Roboto Mono', 'Consolas', monospace;
+            font-size: 0.875rem;
+            line-height: 1.5;
+        }
+
+        .footer {
+            background: var(--primary);
+            color: white;
+            padding: 32px 24px;
+            text-align: center;
+            margin: 48px -24px -24px -24px;
+        }
+
+        .footer .status {
+            display: inline-block;
+            background: white;
+            color: var(--primary);
+            padding: 12px 24px;
+            border-radius: 4px;
+            font-weight: 500;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        @media (max-width: 600px) {
+            .hero h2 {
+                font-size: 1.75rem;
+            }
+            
+            .step-details {
+                padding: 0 16px 16px 16px;
+            }
+            
+            .step-number {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-bar">
+        <h1>ALES - Manufacturing Pipeline</h1>
+    </div>
+
+    <div class="container">
+        <div class="hero">
+            <h2>Implementatie Roadmap</h2>
+            <p class="subtitle">Stappenplan voor productie-ready deployment binnen ALES</p>
+        </div>
+
+        <div class="meta-card">
+            <div class="meta-item">
+                <span class="meta-label">Timeline</span>
+                <span class="meta-value">Februari 2026 (4 weken)</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">Ontwikkelaar</span>
+                <span class="meta-value">1 persoon</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">Platform</span>
+                <span class="meta-value">Windows Server</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">Doel</span>
+                <span class="meta-value">ERP Shadow Validatie</span>
+            </div>
+        </div>
+
+        <div class="section">
+            <h3 class="section-title">Stappenplan</h3>
+            <ul class="step-list">
+                <li class="step-item expanded">
+                    <div class="step-header" onclick="toggleStep(this)">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <div class="step-title">Windows Infrastructuur Opzetten</div>
+                            <div class="step-duration">Week 1 • 5 dagen</div>
+                        </div>
+                        <div class="step-expand">⌄</div>
+                    </div>
+                    <div class="step-details">
+                        <ul class="task-list">
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>FreeCAD auto-detectie implementeren voor Windows paden</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Windows installatiescript maken (.bat)</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Alle dependency versies vastpinnen in requirements.txt</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Clean install testen op Windows VM</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Basis pytest infrastructuur opzetten (3 tests)</span>
+                            </li>
+                        </ul>
+                        <div class="deliverable">
+                            Opleveren: Pipeline draait op Windows zonder handmatige pad-aanpassingen
+                        </div>
+                    </div>
+                </li>
+
+                <li class="step-item">
+                    <div class="step-header" onclick="toggleStep(this)">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <div class="step-title">ERP Integratie Realiseren</div>
+                            <div class="step-duration">Week 2 • 7 dagen</div>
+                        </div>
+                        <div class="step-expand">⌄</div>
+                    </div>
+                    <div class="step-details">
+                        <ul class="task-list">
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Batch folder processing met progress indicator</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Fout-tolerantie toevoegen (doorgaan bij enkele failures)</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>ERP bestandsformaten ondersteunen (Excel/XML)</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Afwijking drempels implementeren (±5% tolerantie)</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Zij-aan-zij vergelijkingstabellen genereren</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Export naar Excel/CSV voor ERP team</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>HTML validatie dashboard bouwen</span>
+                            </li>
+                        </ul>
+                        <div class="deliverable">
+                            Opleveren: Kan ERP folder verwerken en afwijkingsrapport genereren
+                        </div>
+                    </div>
+                </li>
+
+                <li class="step-item">
+                    <div class="step-header" onclick="toggleStep(this)">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <div class="step-title">Foutafhandeling & Logging</div>
+                            <div class="step-duration">Week 3 • 8 dagen</div>
+                        </div>
+                        <div class="step-expand">⌄</div>
+                    </div>
+                    <div class="step-details">
+                        <ul class="task-list">
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Try/except wrappers rondom STEP file loading</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Try/except voor Excel parsing errors</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Try/except voor FreeCAD operaties</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Fouten loggen naar dagelijkse logfiles</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>STEP files valideren (grootte, formaat)</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Bestandspaden sanitizen (security)</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Bestandsgrootte limieten instellen (500MB max)</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Gestructureerde logging met timestamps</span>
+                            </li>
+                        </ul>
+                        <div class="deliverable">
+                            Opleveren: Draait onbemand op ERP data, logt issues, gaat door bij errors
+                        </div>
+                    </div>
+                </li>
+
+                <li class="step-item">
+                    <div class="step-header" onclick="toggleStep(this)">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <div class="step-title">Afronding & Deployment</div>
+                            <div class="step-duration">Week 4 • 8 dagen</div>
+                        </div>
+                        <div class="step-expand">⌄</div>
+                    </div>
+                    <div class="step-details">
+                        <ul class="task-list">
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Windows deployment documentatie schrijven</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>ERP integratie workflow documenteren</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>CLI help text updaten met voorbeelden</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Parallelle batch processing implementeren</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Result caching toevoegen (geen herverwerking)</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Testen op sample ERP dataset (5-10 onderdelen)</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Handmatige vergelijking met SpaceClaim</span>
+                            </li>
+                            <li class="task-item">
+                                <span class="checkbox" onclick="toggleCheckbox(this)"></span>
+                                <span>Deployment package maken met .bat scripts</span>
+                            </li>
+                        </ul>
+                        <div class="deliverable">
+                            Opleveren: Productie-ready ERP shadow validatie tool
+                        </div>
+                    </div>
+                </li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h3 class="section-title">Scope & Prioriteiten</h3>
+            <div class="scope-grid">
+                <div class="scope-card in">
+                    <h3>✓ In Scope (Focus)</h3>
+                    <ul>
+                        <li>ERP vergelijkings workflow</li>
+                        <li>Windows compatibiliteit</li>
+                        <li>Foutafhandeling & logging</li>
+                        <li>Batch verwerking</li>
+                        <li>Afwijkingsrapportage</li>
+                        <li>Basis testing</li>
+                        <li>Dependency management</li>
+                        <li>Input validatie</li>
+                    </ul>
+                </div>
+                <div class="scope-card out">
+                    <h3>✗ Out of Scope (Later)</h3>
+                    <ul>
+                        <li>Volledige testdekking (>80%)</li>
+                        <li>CI/CD pipeline</li>
+                        <li>API documentatie</li>
+                        <li>Database laag</li>
+                        <li>Multi-platform support</li>
+                        <li>Grote refactoring</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h3 class="section-title">ALES Implementatie Details</h3>
+            
+            <div class="info-card">
+                <h4>1. Windows FreeCAD Detectie</h4>
+                <p>Huidige code heeft macOS paden hardcoded. Voor ALES Windows omgeving:</p>
+                <div class="code-block">
+def find_freecad_windows():
+    """Auto-detect FreeCAD op Windows."""
+    paths = [
+        os.environ.get("FREECAD_PATH"),
+        r"C:\Program Files\FreeCAD 1.0\bin",
+        r"C:\Program Files (x86)\FreeCAD 1.0\bin",
+    ]
+    for path in paths:
+        if path and os.path.exists(os.path.join(path, "python.exe")):
+            return path
+    raise RuntimeError("FreeCAD niet gevonden")
+                </div>
+            </div>
+
+            <div class="info-card">
+                <h4>2. ERP Afwijking Vergelijking</h4>
+                <p>Logica voor het vergelijken van pipeline vs SpaceClaim data:</p>
+                <div class="code-block">
+def compare_with_tolerance(pipeline_val, erp_val, tolerance=0.05):
+    """Vergelijk waarden met ±5% tolerantie."""
+    if erp_val == 0:
+        return pipeline_val == 0
+    deviation = abs(pipeline_val - erp_val) / erp_val
+    return deviation <= tolerance
+                </div>
+            </div>
+
+            <div class="info-card">
+                <h4>3. ALES Deployment Checklist</h4>
+                <ul>
+                    <li>FreeCAD geïnstalleerd op target Windows server</li>
+                    <li>ERP bestandsformaten geïdentificeerd (Excel/XML)</li>
+                    <li>Sample dataset beschikbaar (5-10 STEP files)</li>
+                    <li>SpaceClaim referentie data formaat bekend</li>
+                    <li>Windows Server versie & Python versie bevestigd</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="section">
+            <h3 class="section-title">Succes Criteria</h3>
+            <div class="info-card">
+                <h4>Minimum Viable Product (Eind Week 4)</h4>
+                <ul>
+                    <li>Draait op Windows zonder code wijzigingen</li>
+                    <li>Verwerkt ERP data folder automatisch</li>
+                    <li>Vergelijkt met SpaceClaim data (±5% tolerantie)</li>
+                    <li>Genereert afwijkingsrapport (Excel/CSV/HTML)</li>
+                    <li>Gaat door bij individuele bestand errors</li>
+                    <li>Logt alle operaties en errors</li>
+                    <li>Kan onbemand uren draaien</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <div class="status" id="projectStatus">Klaar voor Implementatie</div>
+        <p style="margin-top: 16px; opacity: 0.8;">ALES Manufacturing Pipeline • Februari 2026</p>
+    </div>
+
+    <script>
+        function toggleStep(header) {
+            const stepItem = header.parentElement;
+            stepItem.classList.toggle('expanded');
+        }
+
+        function toggleCheckbox(checkbox) {
+            checkbox.classList.toggle('checked');
+            updateProgress();
+        }
+
+        function updateProgress() {
+            const total = document.querySelectorAll('.checkbox').length;
+            const checked = document.querySelectorAll('.checkbox.checked').length;
+            const percentage = Math.round((checked / total) * 100);
+            
+            const statusDiv = document.getElementById('projectStatus');
+            if (percentage === 0) {
+                statusDiv.textContent = 'Klaar voor Implementatie';
+            } else if (percentage < 25) {
+                statusDiv.textContent = `Gestart (${percentage}%)`;
+            } else if (percentage < 50) {
+                statusDiv.textContent = `In Uitvoering (${percentage}%)`;
+            } else if (percentage < 75) {
+                statusDiv.textContent = `Gevorderd (${percentage}%)`;
+            } else if (percentage < 100) {
+                statusDiv.textContent = `Afronding (${percentage}%)`;
+            } else {
+                statusDiv.textContent = '✓ Voltooid (100%)';
+            }
+        }
+
+        // Expand first step by default
+        document.addEventListener('DOMContentLoaded', function() {
+            const firstStep = document.querySelector('.step-item');
+            if (firstStep) {
+                firstStep.classList.add('expanded');
+            }
+        });
+    </script>
+</body>
+</html>

@@ -12,11 +12,11 @@ from OCP.TopAbs import TopAbs_SOLID, TopAbs_SHELL, TopAbs_FACE, TopAbs_EDGE, Top
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 from OCP.BRep import BRep_Tool
-from .models import HoleFeature
-from . import iso_standards
-from . import werkvoorbereiding
-from . import sheetmetal_analysis
-from . import assembly_analysis
+from manufacturing_pipeline.core.models import HoleFeature
+from manufacturing_pipeline.analysis import iso_standards
+from manufacturing_pipeline.analysis import werkvoorbereiding
+from manufacturing_pipeline.analysis import sheetmetal_analysis
+from manufacturing_pipeline.analysis import assembly_analysis
 import os
 import uuid
 from collections import Counter

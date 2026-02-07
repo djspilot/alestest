@@ -6,8 +6,8 @@ Groups related pipeline stages into logical units for cleaner orchestration.
 import os
 from typing import Dict, Any, Optional, List, Tuple
 
-from .cache_manager import PipelineRunner, PipelineStage
-from .step_processing import (
+from manufacturing_pipeline.data.cache_manager import PipelineRunner, PipelineStage
+from manufacturing_pipeline.analysis.step_processing import (
     load_step_file, detect_holes, is_turned_part, get_geometric_properties,
     analyze_faces, get_topology_stats, classify_components, analyze_components_detailed,
     detect_threads, detect_shafts, analyze_chamfers_and_fillets,
@@ -15,9 +15,9 @@ from .step_processing import (
     analyze_holes_with_fits, analyze_sheetmetal, analyze_assembly_bom,
     generate_werkvoorbereiding
 )
-from .werkvoorbereiding import generate_simple_cost_table
-from . import iso_standards
-from .cli_output import (
+from manufacturing_pipeline.analysis.werkvoorbereiding import generate_simple_cost_table
+from manufacturing_pipeline.analysis import iso_standards
+from manufacturing_pipeline.reporting.cli_output import (
     print_section_header, print_holes_summary, print_geometry_summary,
     print_iso2768_summary, print_iso286_summary, print_threads_summary,
     print_surface_finish_summary, print_edge_analysis_summary, print_mass_summary,

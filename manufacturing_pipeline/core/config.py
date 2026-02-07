@@ -8,6 +8,54 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional, Dict, Any
 import json
 import os
+import sys
+
+
+@dataclass
+class SystemConfig:
+    """System configuration (paths, environment)."""
+    freecad_path: str = "/opt/homebrew/Caskroom/freecad/1.0.2/FreeCAD.app"
+
+    @property
+    def freecad_python(self) -> str:
+        """Path to FreeCAD's Python executable."""
+        # Mac OS specific path construction
+        if sys.platform == 'darwin':
+            return os.path.join(self.freecad_path, "Contents/Resources/bin/python")
+        else:
+            # Linux/Windows assumption (can be refined)
+            return os.path.join(self.freecad_path, "bin", "python")
+
+    @property
+    def freecad_lib(self) -> str:
+        """Path to FreeCAD's library."""
+        if sys.platform == 'darwin':
+            return os.path.join(self.freecad_path, "Contents/Resources/lib")
+        else:
+            return os.path.join(self.freecad_path, "lib")
+
+    @property
+    def freecad_mod(self) -> str:
+        """Path to FreeCAD's Mod directory."""
+        if sys.platform == 'darwin':
+            return os.path.join(self.freecad_path, "Contents/Resources/Mod")
+        else:
+            return os.path.join(self.freecad_path, "Mod")
+
+    @classmethod
+    def from_env(cls) -> "SystemConfig":
+        """Load from environment variables."""
+        path = os.environ.get("FREECAD_PATH")
+        if path:
+            return cls(freecad_path=path)
+        return cls()
+
+    def to_dict(self) -> Dict[str, str]:
+        return {"freecad_path": self.freecad_path}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, str]) -> "SystemConfig":
+        return cls(freecad_path=data.get("freecad_path", "/opt/homebrew/Caskroom/freecad/1.0.2/FreeCAD.app"))
 
 
 @dataclass
@@ -169,6 +217,9 @@ class CostColumnsConfig:
 @dataclass
 class PipelineConfig:
     """Full pipeline configuration."""
+    
+    # System Settings
+    system: SystemConfig = field(default_factory=SystemConfig)
 
     # Input/Output
     step_file: str = ""
@@ -211,6 +262,7 @@ class PipelineConfig:
             data = json.load(f)
 
         # Extract nested configs
+        system_data = data.pop('system', {})
         modules_data = data.pop('modules', {})
         hourly_rates_data = data.pop('hourly_rates', {})
         material_prices_data = data.pop('material_prices', {})
@@ -221,6 +273,7 @@ class PipelineConfig:
                          if not k.startswith('_') and hasattr(cls, k)}
 
         config = cls(**filtered_data)
+        config.system = SystemConfig.from_dict(system_data)
         config.modules = ModuleConfig.from_dict(modules_data)
         config.hourly_rates = PricingConfig.from_dict(hourly_rates_data)
         config.material_prices = MaterialPricesConfig.from_dict(material_prices_data)

@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ALES - Manufacturing Pipeline Architectuur & ERP Integratie</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #ffffff;
+            color: #000000;
+            line-height: 1.6;
+            font-size: 15px;
+        }
+
+        .header {
+            background: #000000;
+            color: #ffffff;
+            padding: 24px 32px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header h1 {
+            font-size: 1.25rem;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 32px;
+        }
+
+        h2 {
+            font-size: 1.75rem;
+            font-weight: 600;
+            margin: 48px 0 24px 0;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #000000;
+        }
+
+        h2:first-of-type {
+            margin-top: 0;
+        }
+
+        h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin: 32px 0 16px 0;
+        }
+
+        h4 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin: 24px 0 12px 0;
+        }
+
+        p {
+            margin-bottom: 16px;
+            color: #333333;
+        }
+
+        .intro {
+            background: #f5f5f5;
+            border-left: 4px solid #000000;
+            padding: 20px 24px;
+            margin-bottom: 32px;
+        }
+
+        .intro p {
+            margin: 0 0 12px 0;
+            color: #000000;
+        }
+
+        .intro p:last-child {
+            margin-bottom: 0;
+        }
+
+        .mermaid {
+            background: #fafafa;
+            border: 1px solid #e0e0e0;
+            padding: 20px;
+            margin: 24px 0;
+        }
+
+        .component-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 16px;
+            margin: 24px 0;
+        }
+
+        .component-card {
+            background: #ffffff;
+            border: 1px solid #000000;
+            padding: 20px 24px;
+        }
+
+        .component-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .component-name {
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
+        .component-status {
+            font-size: 0.75rem;
+            padding: 4px 8px;
+            border: 1px solid #000000;
+            font-weight: 600;
+        }
+
+        .component-status.ready {
+            background: #000000;
+            color: #ffffff;
+        }
+
+        .component-status.change {
+            background: #ffffff;
+            color: #000000;
+        }
+
+        .component-details {
+            font-size: 0.9rem;
+            color: #333333;
+        }
+
+        .component-details ul {
+            margin: 8px 0 8px 20px;
+        }
+
+        .component-details li {
+            margin-bottom: 4px;
+        }
+
+        .requirement-box {
+            background: #ffffff;
+            border: 1px solid #000000;
+            padding: 20px 24px;
+            margin-bottom: 16px;
+        }
+
+        .requirement-title {
+            font-weight: 600;
+            font-size: 1rem;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .change-list {
+            list-style: none;
+            margin: 16px 0;
+        }
+
+        .change-list li {
+            padding: 12px 0;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .change-list li:last-child {
+            border-bottom: none;
+        }
+
+        .change-icon {
+            width: 24px;
+            height: 24px;
+            border: 2px solid #000000;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.75rem;
+            flex-shrink: 0;
+        }
+
+        .code-block {
+            background: #1a1a1a;
+            color: #00ff41;
+            padding: 20px 24px;
+            margin: 16px 0;
+            overflow-x: auto;
+            font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+            font-size: 0.875rem;
+            line-height: 1.5;
+            border-radius: 4px;
+        }
+
+        .code-comment {
+            color: #888888;
+        }
+
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 24px 0;
+        }
+
+        .comparison-table th {
+            background: #000000;
+            color: #ffffff;
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 500;
+        }
+
+        .comparison-table td {
+            padding: 12px 16px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .comparison-table tr:nth-child(even) {
+            background: #fafafa;
+        }
+
+        .erp-flow {
+            background: #f5f5f5;
+            border: 1px solid #000000;
+            padding: 24px;
+            margin: 24px 0;
+        }
+
+        .erp-step {
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            padding: 16px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .erp-step:last-child {
+            border-bottom: none;
+        }
+
+        .erp-number {
+            width: 32px;
+            height: 32px;
+            background: #000000;
+            color: #ffffff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .erp-content {
+            flex: 1;
+        }
+
+        .erp-title {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .erp-desc {
+            font-size: 0.9rem;
+            color: #666666;
+        }
+
+        .action-box {
+            background: #000000;
+            color: #ffffff;
+            padding: 24px;
+            margin: 32px 0;
+        }
+
+        .action-box h3 {
+            color: #ffffff;
+            margin-top: 0;
+        }
+
+        .action-box ul {
+            margin-left: 20px;
+        }
+
+        .action-box li {
+            margin-bottom: 8px;
+        }
+
+        .integration-diagram {
+            background: #ffffff;
+            border: 2px solid #000000;
+            padding: 24px;
+            margin: 24px 0;
+        }
+
+        .footer {
+            background: #000000;
+            color: #ffffff;
+            padding: 24px 32px;
+            text-align: center;
+            margin-top: 64px;
+        }
+
+        .note {
+            font-size: 0.875rem;
+            color: #666666;
+            font-style: italic;
+            margin-top: 8px;
+        }
+
+        .highlight {
+            background: #ffff00;
+            padding: 2px 4px;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 24px 16px;
+            }
+            
+            .component-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>ALES - Manufacturing Pipeline Architectuur & ERP Integratie</h1>
+    </div>
+
+    <div class="container">
+        <div class="intro">
+            <p><strong>Situatie:</strong> Een manufacturing analysis pipeline die STEP CAD bestanden verwerkt en geometrische data extraheert voor vergelijking met ERP/SpaceClaim data.</p>
+            <p><strong>Huidig:</strong> Werkend op macOS met hardcoded paden.</p>
+            <p><strong>Doel:</strong> Productie-ready op Windows binnen ALES om als <span class="highlight">shadow process</span> naast het bestaande ERP systeem te draaien.</p>
+        </div>
+
+        <h2>1. Architectuur Overzicht</h2>
+        
+        <h3>Simpel Overzicht (voor Business)</h3>
+        <div class="mermaid">
+flowchart LR
+    START(["📁 CAD Bestanden"]) --> PIPELINE["⚙️ Pipeline"]
+    PIPELINE --> ERP["📊 ERP Check"]
+    ERP --> DECISION{"✓ OK?"}
+    DECISION -->|Ja| ERP_SYS["🔗 ERP Systeem"]
+    DECISION -->|Nee| REVIEW["👀 Review Queue"]
+    
+    style START fill:#f5f5f5,stroke:#000000,stroke-width:3px
+    style PIPELINE fill:#ffffff,stroke:#000000,stroke-width:2px
+    style ERP fill:#f5f5f5,stroke:#000000,stroke-width:2px
+    style DECISION fill:#ffffcc,stroke:#000000,stroke-width:2px
+    style ERP_SYS fill:#ccffcc,stroke:#000000,stroke-width:2px
+    style REVIEW fill:#ffcccc,stroke:#000000,stroke-width:2px
+        </div>
+
+        <h3>Technisch Detail (5 Lagen)</h3>
+        <p>Data stroomt van links naar rechts door 5 gegroepeerde lagen:</p>
+        <div class="mermaid">
+flowchart LR
+    subgraph Input["📥 INPUT"]
+        A1[STEP CAD Bestanden]
+        A2[OCP Format]
+    end
+    
+    subgraph Analysis["🔧 ANALYSE"]
+        B1[STEP Loader]
+        B2[Gaten Detect]
+        B3[Zettingen]
+        B4[ISO Data]
+        B5[AAG Graph]
+    end
+    
+    subgraph Processing["💾 CACHE"]
+        C1[MD5 Hash]
+        C2[SQLite DB]
+        C3[Unfold]
+    end
+    
+    subgraph Compare["📊 ERP"]
+        D1[Excel]
+        D2[XML]
+        D3[Matching]
+        D4[Check]
+    end
+    
+    subgraph Output["📤 OUTPUT"]
+        E1[PDF]
+        E2[CSV]
+        E3[JSON]
+        E4[Logs]
+    end
+    
+    A1 --> B1
+    B1 --> B2
+    B1 --> B3
+    B1 --> C1
+    C1 --> C2
+    C1 --> D1
+    D1 --> D4
+    D4 --> E1
+    D4 --> E2
+    
+    style Input fill:#f5f5f5,stroke:#000,stroke-width:3px
+    style Analysis fill:#fff,stroke:#000,stroke-width:2px
+    style Processing fill:#f5f5f5,stroke:#000,stroke-width:2px
+    style Compare fill:#fff,stroke:#000,stroke-width:2px
+    style Output fill:#f5f5f5,stroke:#000,stroke-width:3px
+        </div>
+
+        <h3>Data Flow Beschrijving (Links → Rechts)</h3>
+        
+        <p><strong>📥 Input Laag (Links):</strong> Ruwe STEP CAD bestanden (ISO 10303-21 formaat) worden ingelezen. Ondersteunt zowel enkele bestanden als batch verwerking van hele folders.</p>
+        
+        <p><strong>🔧 Analyse Engine:</strong> De kern van de pipeline. Gebruikt CadQuery (gebaseerd op OpenCASCADE) voor geometrische berekeningen. Detecteert automatisch:
+        <br/>• <strong>Gaten</strong> - via cylindrische face analyse (holes_count)
+        <br/>• <strong>Zettingen</strong> - bends met radius en hoek (bends_count)  
+        <br/>• <strong>ISO data</strong> - toleranties, passingen, oppervlakte afwerking
+        <br/>• <strong>Features</strong> - AAG topology graph voor complexe shapes</p>
+        
+        <p><strong>💾 Data Verwerking:</strong> Optimalisatie laag. Cache systeem (MD5 hash) voorkomt herberekening van ongewijzigde bestanden. SQLite database bewaart historie. FreeCAD genereert platte patronen (unfold) voor laser/snijmachines.</p>
+        
+        <p><strong>📊 ERP Vergelijking:</strong> Validatie laag. Leest ERP data uit Excel (ArtikelNr, ZetAantal, Snijgaten) en SpaceClaim XML exports. Matcht onderdelen via volume. Vergelijkt met ±5% tolerantie en flagt afwijkingen.</p>
+        
+        <p><strong>📤 Output Laag (Rechts):</strong> 4 parallelle outputs:
+        <br/>• <strong>PDF</strong> - Professionele rapporten voor mensen
+        <br/>• <strong>CSV</strong> - Machine-readable voor ERP import
+        <br/>• <strong>JSON</strong> - API formaat voor integratie
+        <br/>• <strong>Logs</strong> - Audit trail voor compliance</p>
+
+        <h2>2. Technische Componenten Detail</h2>
+
+        <div class="component-grid">
+            <div class="component-card">
+                <div class="component-header">
+                    <span class="component-name">🔧 STEP Processing Module</span>
+                    <span class="component-status ready">WERKT ✓</span>
+                </div>
+                <div class="component-details">
+                    <p><strong>Bestand:</strong> <code>analysis/step_processing.py</code></p>
+                    <p><strong>Functie:</strong> Laadt STEP bestanden via CadQuery/OCP en extraheert geometrische data.</p>
+                    <ul>
+                        <li>Gaten detectie via cylindrische face analyse</li>
+                        <li>Bend detectie met radius en hoek berekening</li>
+                        <li>Volumetrische en oppervlakte berekeningen</li>
+                        <li>SVG visualisatie generatie</li>
+                    </ul>
+                    <p class="note"><strong>Windows Impact:</strong> Geen wijzigingen nodig - CadQuery werkt cross-platform.</p>
+                </div>
+            </div>
+
+            <div class="component-card">
+                <div class="component-header">
+                    <span class="component-name">📐 Sheet Metal Analysis</span>
+                    <span class="component-status ready">WERKT ✓</span>
+                </div>
+                <div class="component-details">
+                    <p><strong>Bestand:</strong> <code>analysis/sheetmetal_analysis.py</code></p>
+                    <p><strong>Functie:</strong> Analyseert plaatwerk componenten voor dikte, bends, en profielen.</p>
+                    <ul>
+                        <li>Dikte detectie uit parallelle planar faces</li>
+                        <li>Profiel classificatie (koker, U-profiel, hoekprofiel)</li>
+                        <li>Bend telling voor ERP kostencalculatie</li>
+                        <li>Onderscheid gekocht vs gefabriceerd</li>
+                    </ul>
+                    <p class="note"><strong>Windows Impact:</strong> Geen wijzigingen nodig - pure geometrische analyse.</p>
+                </div>
+            </div>
+
+            <div class="component-card">
+                <div class="component-header">
+                    <span class="component-name">🗂️ ISO Standards Module</span>
+                    <span class="component-status ready">WERKT ✓</span>
+                </div>
+                <div class="component-details">
+                    <p><strong>Bestand:</strong> <code>analysis/iso_standards.py</code></p>
+                    <p><strong>Functie:</strong> Implementeert Nederlandse/ISO maakstandaarden.</p>
+                    <ul>
+                        <li>ISO 2768: Algemene toleranties (f/m/c/v klassen)</li>
+                        <li>ISO 286: Passingen (H7/h6, etc.)</li>
+                        <li>ISO 1302: Oppervlakteruwheid (Ra/Rz)</li>
+                        <li>ISO 68-1: Metrische schroefdraden</li>
+                        <li>EN 10025/573: Materiaal dichtheden</li>
+                    </ul>
+                    <p class="note"><strong>Windows Impact:</strong> Geen wijzigingen nodig - lookup tables en berekeningen.</p>
+                </div>
+            </div>
+
+            <div class="component-card">
+                <div class="component-header">
+                    <span class="component-name">📦 FreeCAD Unfold</span>
+                    <span class="component-status change">WIJZIGING NODIG ⚠</span>
+                </div>
+                <div class="component-details">
+                    <p><strong>Bestand:</strong> <code>analysis/freecad_unfold.py</code></p>
+                    <p><strong>Functie:</strong> Genereert platte patronen via FreeCAD SheetMetal workbench.</p>
+                    <ul>
+                        <li>Automatische base face selectie</li>
+                        <li>Multi-attempt unfold strategie</li>
+                        <li>DXF export voor laser/snijmachines</li>
+                        <li>Theoretische unfold als backup</li>
+                    </ul>
+                    <p class="note"><strong>Windows Impact:</strong> <strong>HARDGECODEERD MAC PAD</strong> in config.py moet worden vervangen door Windows pad detectie.</p>
+                </div>
+            </div>
+
+            <div class="component-card">
+                <div class="component-header">
+                    <span class="component-name">🔗 ERP Compare Tool</span>
+                    <span class="component-status change">WIJZIGING NODIG ⚠</span>
+                </div>
+                <div class="component-details">
+                    <p><strong>Bestand:</strong> <code>scripts/compare_erp.py</code></p>
+                    <p><strong>Functie:</strong> Vergelijkt pipeline analyse met ERP/SpaceClaim data.</p>
+                    <ul>
+                        <li>Excel parsing (pandas) voor ERP data</li>
+                        <li>XML parsing voor SpaceClaim exports</li>
+                        <li>Volume matching voor assemblage onderdelen</li>
+                        <li>Afwijkingsrapport generatie</li>
+                    </ul>
+                    <p class="note"><strong>Windows Impact:</strong> <strong>FREECAD_PYTHON pad</strong> moet worden aangepast voor Windows. Functionaliteit werkt al.</p>
+                </div>
+            </div>
+
+            <div class="component-card">
+                <div class="component-header">
+                    <span class="component-name">💾 Cache Manager</span>
+                    <span class="component-status change">OPTIMALISATIE NODIG ⚠</span>
+                </div>
+                <div class="component-details">
+                    <p><strong>Bestanden:</strong> <code>core/utils.py</code> (cache functies)</p>
+                    <p><strong>Functie:</strong> Voorkomt herberekening via MD5 hash tracking.</p>
+                    <ul>
+                        <li>File-based cache (.pipeline_cache.json)</li>
+                        <li>Stage-based cache (.pipeline_cache/ directory)</li>
+                        <li>Automatische invalidatie bij wijzigingen</li>
+                    </ul>
+                    <p class="note"><strong>Windows Impact:</strong> Paden werken via pathlib, maar consistentie tussen cache systemen kan beter.</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>3. Wat Moet Er Nog Gebeuren?</h2>
+
+        <h3>Kritieke Wijzigingen voor Windows</h3>
+
+        <div class="requirement-box">
+            <div class="requirement-title">
+                <span class="change-icon">1</span>
+                <span>FreeCAD Pad Configuratie</span>
+            </div>
+            <p>Huidige situatie: Hardcoded macOS pad in meerdere bestanden.</p>
+            <div class="code-block">
+<span class="code-comment"># HUIDIG (config.py regel 17)</span>
+freecad_path: str = "/opt/homebrew/Caskroom/freecad/1.0.2/FreeCAD.app"
+
+<span class="code-comment"># OOK IN (compare_erp.py regel 33)</span>
+FREECAD_PYTHON = "/opt/homebrew/Caskroom/freecad/1.0.2/FreeCAD.app/Contents/Resources/bin/python"
+            </div>
+            <p><strong>Oplossing:</strong> Implementeer pad detectie logica die werkt op Windows:</p>
+            <div class="code-block">
+<span class="code-comment"># NIEUW - Windows compatibel</span>
+import os
+import sys
+
+def get_freecad_path():
+    <span class="code-comment"># 1. Check omgevingsvariabele (preferred voor ALES)</span>
+    env_path = os.environ.get("FREECAD_PATH")
+    if env_path:
+        return env_path
+    
+    <span class="code-comment"># 2. Windows standaard locaties</span>
+    if sys.platform == "win32":
+        windows_paths = [
+            r"C:\Program Files\FreeCAD 1.0",
+            r"C:\Program Files (x86)\FreeCAD 1.0",
+        ]
+        for path in windows_paths:
+            if os.path.exists(path):
+                return path
+    
+    <span class="code-comment"># 3. macOS (bestaand gedrag)</span>
+    return "/opt/homebrew/Caskroom/freecad/1.0.2/FreeCAD.app"
+            </div>
+        </div>
+
+        <div class="requirement-box">
+            <div class="requirement-title">
+                <span class="change-icon">2</span>
+                <span>Foutafhandeling & Logging</span>
+            </div>
+            <p><strong>Probleem:</strong> Pipeline crasht bij corrupte STEP bestanden of ERP data mismatches.</p>
+            <p><strong>Oplossing:</strong> Implementeer try/except blokken met logging naar bestanden:</p>
+            <ul class="change-list">
+                <li><span class="change-icon">!</span><span>Try/except rondom STEP loading - log corrupte bestanden</span></li>
+                <li><span class="change-icon">!</span><span>Try/except voor Excel parsing - log formaat errors</span></li>
+                <li><span class="change-icon">!</span><span>Try/except voor FreeCAD unfold - log geometry errors</span></li>
+                <li><span class="change-icon">!</span><span>Logging naar dagelijkse files: <code>logs/pipeline_2025_01_15.log</code></span></li>
+            </ul>
+            <p class="note">Belangrijk voor ALES: Pipeline moet onbemand uren kunnen draaien zonder menselijke interventie.</p>
+        </div>
+
+        <div class="requirement-box">
+            <div class="requirement-title">
+                <span class="change-icon">3</span>
+                <span>Dependency Management</span>
+            </div>
+            <p><strong>Probleem:</strong> requirements.txt heeft geen gepinde versies.</p>
+            <div class="code-block">
+<span class="code-comment"># HUIDIG - niet reproduceerbaar</span>
+cadquery>=2.4.0
+cadquery-ocp
+numpy
+pymupdf
+
+<span class="code-comment"># NODIG voor ALES - reproduceerbaar</span>
+cadquery==2.4.0
+cadquery-ocp==7.7.2
+numpy==1.24.3
+pandas==2.0.3
+pymupdf==1.23.5
+openpyxl==3.1.2
+            </div>
+        </div>
+
+        <div class="requirement-box">
+            <div class="requirement-title">
+                <span class="change-icon">4</span>
+                <span>Input Validatie & Security</span>
+            </div>
+            <ul class="change-list">
+                <li><span class="change-icon">!</span><span>Bestandsgrootte limiet: max 500MB per STEP file</span></li>
+                <li><span class="change-icon">!</span><span>Pad sanitizatie: voorkom directory traversal attacks</span></li>
+                <li><span class="change-icon">!</span><span>STEP formaat validatie: check header (ISO-10303-21)</span></li>
+                <li><span class="change-icon">!</span><span>ERP schema validatie: verplichte kolommen check</span></li>
+            </ul>
+        </div>
+
+        <h2>4. ERP Integratie bij ALES</h2>
+
+        <h3>Huidige ERP Workflow bij ALES</h3>
+        <p>De pipeline moet als <strong>shadow process</strong> naast het bestaande ERP systeem draaien zonder de hoofdprocessen te verstoren.</p>
+
+        <div class="integration-diagram">
+            <h4>Huidige Situatie (SpaceClaim)</h4>
+            <div class="mermaid">
+flowchart LR
+    A[CAD Designer] --> B[SpaceClaim]
+    B --> C[Manual Export]
+    C --> D[Excel/XML]
+    D --> E[ERP System]
+    
+    style A fill:#f5f5f5,stroke:#000000
+    style B fill:#ffffff,stroke:#000000
+    style C fill:#ffcccc,stroke:#000000
+    style D fill:#f5f5f5,stroke:#000000
+    style E fill:#ffffff,stroke:#000000
+            </div>
+            <p class="note">Probleem: Handmatige export uit SpaceClaim is tijdrovend en foutgevoelig.</p>
+        </div>
+
+        <div class="integration-diagram">
+            <h4>Toekomstige Situatie (met Pipeline)</h4>
+            <div class="mermaid">
+flowchart LR
+    A[CAD Designer] --> B[STEP Export]
+    B --> C[Pipeline]
+    C --> D[Automatische Analyse]
+    D --> E[Afwijkings Check]
+    E -->|OK| F[ERP System]
+    E -->|Afwijking| G[Review Queue]
+    
+    style A fill:#f5f5f5,stroke:#000000
+    style B fill:#ffffff,stroke:#000000
+    style C fill:#ccffcc,stroke:#000000
+    style D fill:#ccffcc,stroke:#000000
+    style E fill:#ffffcc,stroke:#000000
+    style F fill:#ffffff,stroke:#000000
+    style G fill:#ffcccc,stroke:#000000
+            </div>
+            <p class="note">Voordeel: Automatische validatie vangt afwijkingen op voordat ze in ERP komen.</p>
+        </div>
+
+        <h3>Vereisten voor ALES ERP Integratie</h3>
+
+        <div class="erp-flow">
+            <div class="erp-step">
+                <div class="erp-number">1</div>
+                <div class="erp-content">
+                    <div class="erp-title">Input Folder Monitoring</div>
+                    <div class="erp-desc">De pipeline moet een specifieke ALES input folder scannen op nieuwe STEP bestanden. Bijvoorbeeld: <code>S:\ALES\CAD_Input\</code></div>
+                </div>
+            </div>
+            <div class="erp-step">
+                <div class="erp-number">2</div>
+                <div class="erp-content">
+                    <div class="erp-title">ERP Data Matching</div>
+                    <div class="erp-desc">Match pipeline resultaten met ALES ERP data via ArtikelNr. ERP levert Excel met kolommen: ArtikelNr, ZetAantal, Snijgaten, Dikte, etc.</div>
+                </div>
+            </div>
+            <div class="erp-step">
+                <div class="erp-number">3</div>
+                <div class="erp-content">
+                    <div class="erp-title">Tolerantie Checks</div>
+                    <div class="erp-desc">Vergelijk met ±5% tolerantie (afwijkend) of ±1 stuk (counts). Bij grote afwijkingen: flag voor handmatige review.</div>
+                </div>
+            </div>
+            <div class="erp-step">
+                <div class="erp-number">4</div>
+                <div class="erp-content">
+                    <div class="erp-title">Output naar ALES Systemen</div>
+                    <div class="erp-desc">Genereer 3 outputs: (1) PDF rapport voor mensen, (2) CSV voor ERP import, (3) JSON voor API integratie.</div>
+                </div>
+            </div>
+            <div class="erp-step">
+                <div class="erp-number">5</div>
+                <div class="erp-content">
+                    <div class="erp-title">Logging & Audit Trail</div>
+                    <div class="erp-desc">Log alle verwerkingen voor compliance. Bewaar hashes van STEP bestanden voor traceability.</div>
+                </div>
+            </div>
+        </div>
+
+        <h3>Data Formaat Mapping</h3>
+
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Pipeline Output</th>
+                    <th>ERP Kolom</th>
+                    <th>Tolerantie</th>
+                    <th>Actie bij Afwijking</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>holes_count</td>
+                    <td>Snijgaten</td>
+                    <td>±1 stuk</td>
+                    <td>Flag voor review</td>
+                </tr>
+                <tr>
+                    <td>bends_count</td>
+                    <td>ZetAantal</td>
+                    <td>±1 stuk</td>
+                    <td>Flag voor review</td>
+                </tr>
+                <tr>
+                    <td>thickness_mm</td>
+                    <td>Dikte</td>
+                    <td>±5%</td>
+                    <td>Auto-correctie mogelijk</td>
+                </tr>
+                <tr>
+                    <td>volume_cm3</td>
+                    <td>Volume</td>
+                    <td>±3%</td>
+                    <td>Flag voor review</td>
+                </tr>
+                <tr>
+                    <td>surface_area_cm2</td>
+                    <td>Oppervlakte</td>
+                    <td>±5%</td>
+                    <td>Info only</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>5. Implementatie Roadmap voor ALES</h2>
+
+        <div class="action-box">
+            <h3>Fase 1: Windows Voorbereiding (Week 1)</h3>
+            <ul>
+                <li>FreeCAD 1.0 installeren op ALES Windows Server</li>
+                <li>FREECAD_PATH omgevingsvariabele instellen in System Properties</li>
+                <li>Python 3.10+ installeren en toevoegen aan PATH</li>
+                <li>Git repository clonen naar <code>C:\ALES\pipeline\</code></li>
+                <li>Netwerk toegang regelen voor input/output folders</li>
+            </ul>
+        </div>
+
+        <div class="action-box">
+            <h3>Fase 2: Code Migratie (Week 1-2)</h3>
+            <ul>
+                <li>config.py aanpassen: Windows pad detectie implementeren</li>
+                <li>compare_erp.py aanpassen: FREECAD_PYTHON pad voor Windows</li>
+                <li>Alle pad operaties omzetten naar pathlib (cross-platform)</li>
+                <li>requirements.txt versies pinnen voor reproduceerbaarheid</li>
+                <li>Test run op 1 representatief ALES STEP bestand</li>
+            </ul>
+        </div>
+
+        <div class="action-box">
+            <h3>Fase 3: Stabiliteit & Error Handling (Week 2-3)</h3>
+            <ul>
+                <li>Error handling toevoegen: try/except rondom alle I/O operaties</li>
+                <li>Logging implementeren: dagelijkse logfiles in <code>logs/</code></li>
+                <li>Input validatie: bestandsgrootte limieten, pad sanitizatie</li>
+                <li>Batch processing testen met 10-20 ALES onderdelen</li>
+                <li>Vergelijking met SpaceClaim: handmatige validatie</li>
+            </ul>
+        </div>
+
+        <div class="action-box">
+            <h3>Fase 4: ERP Integratie & Productie (Week 4)</h3>
+            <ul>
+                <li>Input folder koppelen aan ALES CAD export workflow</li>
+                <li>ERP Excel formaat afstemmen met ALES ERP team</li>
+                <li>Tolerantie thresholds finetunen op basis van tests</li>
+                <li>Documentatie schrijven: installatie, configuratie, troubleshooting</li>
+                <li>Overdracht aan ALES ERP team met training</li>
+            </ul>
+        </div>
+
+        <h2>6. Samenvatting</h2>
+
+        <div class="intro">
+            <p><strong>Conclusie:</strong> De pipeline is functioneel en goed gestructureerd, maar momenteel macOS-gecentreerd.</p>
+            <p style="margin-top: 12px;"><strong>Voor ALES Windows productie moeten we:</strong></p>
+            <ol style="margin-top: 8px; margin-left: 20px;">
+                <li>FreeCAD paden aanpassen (1 dag werk)</li>
+                <li>Error handling toevoegen voor onbemeden operatie (2 dagen)</li>
+                <li>Dependencies pinnen voor reproduceerbaarheid (0.5 dag)</li>
+                <li>ERP data mapping afstemmen met ALES (1 dag)</li>
+                <li>Testen & valideren met ALES dataset (2-3 dagen)</li>
+            </ol>
+            <p style="margin-top: 12px;"><strong>Totale inspanning: ~1 week ontwikkeling + 1 week testing/integratie</strong></p>
+            <p style="margin-top: 8px;"><strong>Risico's:</strong> Laag - de meeste componenten werken al, alleen configuratie en error handling moeten worden aangepast.</p>
+        </div>
+
+        <h3>Wat Werkt Nu Al (Geen Wijzigingen Nodig)</h3>
+        <ul class="change-list">
+            <li><span class="change-icon">✓</span><span>STEP bestand inlezen via CadQuery (cross-platform)</span></li>
+            <li><span class="change-icon">✓</span><span>Gaten detectie via cylindrische face analyse</span></li>
+            <li><span class="change-icon">✓</span><span>Zettingen detectie via sheet metal analyse</span></li>
+            <li><span class="change-icon">✓</span><span>ISO standaarden berekeningen ( toleranties, etc.)</span></li>
+            <li><span class="change-icon">✓</span><span>ERP Excel parsing via pandas</span></li>
+            <li><span class="change-icon">✓</span><span>Vergelijkings logica en afwijkingsdetectie</span></li>
+            <li><span class="change-icon">✓</span><span>PDF rapport generatie</span></li>
+            <li><span class="change-icon">✓</span><span>JSON output voor API integratie</span></li>
+        </ul>
+    </div>
+
+    <div class="footer">
+        <p>ALES Manufacturing Pipeline - Architectuur & ERP Integratie Analyse</p>
+        <p style="margin-top: 8px; font-size: 0.9rem; opacity: 0.8;">Technische Documentatie • Februari 2026</p>
+    </div>
+
+    <script>
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'base',
+            themeVariables: {
+                primaryColor: '#ffffff',
+                primaryTextColor: '#000000',
+                primaryBorderColor: '#000000',
+                lineColor: '#000000',
+                secondaryColor: '#f5f5f5',
+                tertiaryColor: '#ffffff',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            }
+        });
+    </script>
+</body>
+</html>

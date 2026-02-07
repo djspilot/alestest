@@ -7,8 +7,8 @@ and early-exit command handling.
 import os
 from typing import Optional, Tuple
 
-from .config import PipelineConfig, apply_module_toggles, print_module_status, MODULE_GROUPS, MODULE_NAMES
-from .cache_manager import CacheManager, PipelineStage
+from manufacturing_pipeline.core.config import PipelineConfig, apply_module_toggles, print_module_status, MODULE_GROUPS, MODULE_NAMES
+from manufacturing_pipeline.data.cache_manager import CacheManager, PipelineStage
 
 
 def normalize_args(args) -> None:
