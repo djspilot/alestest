@@ -1,137 +1,215 @@
 # ALES Manufacturing Pipeline
 
-Automated analysis of STEP CAD files for manufacturing. Extracts geometry, detects features (holes, bends, threads), classifies parts, and generates production-ready reports with Dutch/ISO manufacturing standards.
+Geautomatiseerde analyse van STEP CAD-bestanden voor productie. Extraheert geometrie, detecteert features (gaten, zettingen, draad), classificeert onderdelen en genereert productieklare rapporten volgens Nederlandse/ISO-normen.
 
-Built for sheet metal fabrication shops that need fast, accurate work preparation data from 3D models.
+Gebouwd voor plaatwerk- en metaalbewerkingsbedrijven die snel en nauwkeurig werkvoorbereidingsdata uit 3D-modellen willen halen.
 
-## What It Does
+> Voor een uitgebreide technische beschrijving van hoe de engine werkt en hoe deze zich verhoudt tot SpaceClaim, zie **[docs/ENGINE.md](docs/ENGINE.md)**.
+
+---
+
+## Wat doet het?
 
 ```
 ┌─────────────┐     ┌──────────────────────────────────────────────────────┐     ┌──────────────┐
 │             │     │            Manufacturing Pipeline                    │     │              │
-│  STEP File  │────▶│                                                      │────▶│   Reports    │
-│  (.step)    │     │  1. Load & parse 3D geometry (CadQuery/OCP)          │     │              │
-│             │     │  2. Classify part type (sheet metal / profile / etc) │     │  - PDF       │
-└─────────────┘     │  3. Detect features:                                 │     │  - Excel     │
-                    │     - Holes (cylindrical + shaped)                   │     │  - XML       │
-                    │     - Bends (radius, angle, K-factor)               │     │  - JSON      │
-                    │     - Threads (M3–M68, ISO 68-1)                    │     │  - Database   │
-                    │  4. Unfold sheet metal (FreeCAD)                     │     │              │
-                    │  5. Apply ISO standards                              │     └──────────────┘
-                    │  6. Generate reports                                 │
+│  STEP File  │────▶│                                                      │────▶│  Rapporten   │
+│  (.step)    │     │  1. Laad & parse 3D-geometrie (CadQuery/OCP)        │     │              │
+│             │     │  2. Classificeer onderdeel (plaatwerk/profiel/etc)   │     │  - PDF       │
+└─────────────┘     │  3. Detecteer features:                              │     │  - Excel     │
+                    │     - Gaten (cilindrisch + vormgaten)                │     │  - XML       │
+                    │     - Zettingen (radius, hoek, K-factor)            │     │  - JSON      │
+                    │     - Draad (M3–M68, ISO 68-1)                      │     │  - Database   │
+                    │  4. Ontvouw plaatwerk (FreeCAD)                      │     │              │
+                    │  5. Pas ISO-normen toe                               │     └──────────────┘
+                    │  6. Genereer rapporten                               │
                     └──────────────────────────────────────────────────────┘
 ```
 
-### Key Features
+### Belangrijkste features
 
-- **Part Classification** — Automatically identifies sheet metal, turned parts, profiles, assemblies
-- **Hole Detection** — Cylindrical face detection + inner wire method for slots and shaped cutouts
-- **Bend Analysis** — Counts production-relevant bends, excludes profiles and fillets
-- **Sheet Metal Unfold** — FreeCAD SheetMetal workbench integration with multi-attempt strategy
-- **AAG Feature Recognition** — Attributed Adjacency Graph for topology-based feature detection
-- **ISO Standards** — ISO 2768, ISO 286, ISO 1302, ISO 68-1, ISO 13715, EN 10025/573
-- **ERP Integration** — XML/Excel export in SpaceClaim format, Windows file watcher service
-- **Batch Processing** — Parallel analysis of entire folders with caching
+- **Onderdeelclassificatie** — Herkent automatisch plaatwerk, draaidelen, profielen, samenstellingen
+- **Gatdetectie** — Cilindrische vlakken + inner wire methode voor sleuven en vormgaten
+- **Zetanalyse** — Telt productierelevante zettingen, sluit profielen en afrondingen uit
+- **Plaatwerk ontvouwen** — FreeCAD SheetMetal workbench met multi-poging strategie
+- **AAG Feature Recognition** — Attributed Adjacency Graph voor topologie-gebaseerde herkenning
+- **ISO-normen** — ISO 2768, ISO 286, ISO 1302, ISO 68-1, ISO 13715, EN 10025/573
+- **ERP-integratie** — XML/Excel export in SpaceClaim-formaat, Windows file watcher service
+- **Batchverwerking** — Parallelle analyse van hele mappen met caching
 
-## Quick Start
+---
 
-### Prerequisites
+## Snel aan de slag
+
+### Vereisten
 
 - Python 3.10+
-- [FreeCAD](https://www.freecad.org/) (optional, for sheet metal unfolding)
+- [FreeCAD](https://www.freecad.org/) (optioneel, voor plaatwerk ontvouwen)
 
-### Installation
+### Installatie
 
 ```bash
-git clone https://github.com/your-org/ales-manufacturing-pipeline.git
-cd ales-manufacturing-pipeline
-
+git clone https://github.com/djspilot/alestest.git
+cd alestest
 pip install -r requirements.txt
 ```
 
-### Analyze a Part
+### Eerste analyse draaien
 
 ```bash
-# Interactive file selection
+# Interactieve bestandsselectie
 python run.py
 
-# Analyze a specific file
-python run.py -f data/input/mypart.step
+# Specifiek bestand analyseren
+python run.py -f data/input/mijnonderdeel.step
 
-# AAG topology analysis with verbose output
-python run.py -f mypart.step --aag -v
+# AAG topologie-analyse met uitgebreide output
+python run.py -f mijnonderdeel.step --aag -v
 ```
 
-Output goes to `data/output/<partname>/` — includes PDF report, SVG images, and analysis data.
+Output verschijnt in `data/output/<onderdeelnaam>/` — bevat PDF-rapport, SVG-afbeeldingen en analysedata.
 
-## Usage Modes
+---
 
-### 1. Quick Mode (Default)
+## Gebruiksmodi
 
-Fast analysis with PDF report generation. Best for day-to-day work preparation.
+### 1. Quick Mode (standaard)
+
+Snelle analyse met PDF-rapport. Ideaal voor dagelijkse werkvoorbereiding.
 
 ```bash
-python run.py -f mypart.step              # Basic analysis
-python run.py -f mypart.step --aag        # With AAG feature recognition
-python run.py -f mypart.step --excel      # Excel export (SpaceClaim format)
-python run.py -f mypart.step --analyze    # Show detailed reasoning
-python run.py -f mypart.step --debug      # Debug hole detection
+python run.py -f part.step              # Basisanalyse
+python run.py -f part.step --aag        # Met AAG feature recognition
+python run.py -f part.step --excel      # Excel export (SpaceClaim-formaat)
+python run.py -f part.step --analyze    # Toon gedetailleerde redenering
+python run.py -f part.step --debug      # Debug gatdetectie
+python run.py -f part.step --no-unfold  # Sla ontvouwen over
+python run.py --list                    # Toon beschikbare STEP-bestanden
 ```
 
-### 2. Batch Processing
+### 2. Batchverwerking
 
-Process entire folders. Results cached for fast re-runs.
+Verwerk hele mappen. Resultaten worden gecacht voor snelle heranalyse.
 
 ```bash
-python run.py --batch                             # All files in data/input/
-python run.py -f ./folder --batch -p 4            # Parallel (4 workers)
-python run.py --batch --json                      # JSON output for ERP
-python run.py --batch --excel --reference ref.xlsx # With SpaceClaim comparison
-python run.py --batch --no-cache                  # Force re-analysis
+python run.py --batch                             # Alle bestanden in data/input/
+python run.py -f ./map --batch -p 4               # Parallel (4 workers)
+python run.py --batch --json                      # JSON output voor ERP
+python run.py --batch --excel --reference ref.xlsx # Met SpaceClaim-vergelijking
+python run.py --batch --no-cache                  # Forceer heranalyse
 ```
 
 ### 3. Full ISO Pipeline
 
-Complete analysis with database storage and all ISO standard checks.
+Volledige analyse met database-opslag en alle ISO-normcontroles.
 
 ```bash
-python run.py -f mypart.step --full                    # Full pipeline
-python run.py -f mypart.step --full --production-info  # With production table
-python run.py --full --status                          # Show cache status
-python run.py --full --from threads                    # Resume from stage
-python run.py --full --list-stages                     # List all stages
+python run.py -f part.step --full                    # Volledige pipeline
+python run.py -f part.step --full --production-info  # Met productietabel
+python run.py --full --status                        # Toon cache-status
+python run.py --full --from threads                  # Hervat vanaf stage
+python run.py --full --list-stages                   # Toon alle stages
+python run.py --full --clear-cache                   # Wis cache
 ```
 
 ### 4. REST API (Docker)
 
-Deploy as a web service for remote analysis.
+Deploy als webservice voor analyse op afstand.
 
 ```bash
+# Start
 docker compose up -d
-```
 
-```bash
-# Upload a file for analysis
+# Analyseer een bestand
 curl -X POST http://localhost:8000/api/v1/analyze \
-  -H "X-API-Key: your-key" \
-  -F "file=@mypart.step"
+  -H "X-API-Key: jouw-key" \
+  -F "file=@mijnonderdeel.step"
 
-# Poll for results
-curl http://localhost:8000/api/v1/jobs/{job_id} \
-  -H "X-API-Key: your-key"
+# Haal resultaten op
+curl http://localhost:8000/api/v1/jobs/{job_id} -H "X-API-Key: jouw-key"
 
-# Get results in different formats
+# Verschillende formaten
 curl "http://localhost:8000/api/v1/jobs/{job_id}?format=excel"
 curl "http://localhost:8000/api/v1/jobs/{job_id}?format=xml"
 ```
 
-## Architecture
+---
+
+## Geautomatiseerd draaien
+
+### Optie A: Windows File Watcher (ERP-integratie)
+
+Monitort automatisch een map op nieuwe STEP-bestanden, analyseert ze en exporteert XML voor ERP-import. Draait als achtergrondservice.
+
+```bash
+# 1. Configureer .env
+cp .env.example .env
+# Zet WATCHED_FOLDER naar je offerte-map, bijv:
+# WATCHED_FOLDER=G:\ALES\Offerte-ALES
+
+# 2. Test met een enkel bestand
+python deploy/file_watcher_service.py --test --file pad/naar/bestand.step
+
+# 3. Start de watcher
+python deploy/file_watcher_service.py
+```
+
+Installeer als Windows-service (draait automatisch bij opstarten):
+```bash
+deploy\install_windows_service.bat
+```
+
+Werkwijze:
+```
+┌──────────────────┐     ┌──────────────┐     ┌──────────────┐     ┌─────────────┐
+│  Offerte-map     │     │  File        │     │  Pipeline    │     │  XML naar   │
+│  (netwerk/lokaal)│────▶│  Watcher     │────▶│  Analyse     │────▶│  ERP-map    │
+│                  │     │  (watchdog)  │     │              │     │             │
+│  Nieuw .step     │     │  Detecteert  │     │  Gaten,      │     │  SpaceClaim │
+│  bestand ↓       │     │  wijzigingen │     │  zettingen,  │     │  compatible │
+└──────────────────┘     └──────────────┘     │  ontvouwen   │     │  XML output │
+                                              └──────────────┘     └─────────────┘
+```
+
+### Optie B: Docker API met automatische verwerking
+
+Voor VPS/server deployment. Bestanden uploaden via HTTP, resultaten ophalen als JSON/XML/Excel.
+
+```bash
+# 1. Configureer
+cp .env.example .env
+echo "API_KEYS=mijn-geheime-key" >> .env
+
+# 2. Start
+docker compose up -d
+
+# 3. Automatiseer vanuit je eigen systeem
+curl -X POST http://jouw-server:8000/api/v1/analyze \
+  -H "X-API-Key: mijn-geheime-key" \
+  -F "file=@onderdeel.step"
+```
+
+### Optie C: Cron/scheduled batch
+
+Draai periodiek een batchanalyse op een inputmap:
+
+```bash
+# Elk uur alle nieuwe bestanden analyseren (crontab -e)
+0 * * * * cd /opt/ales-pipeline && python run.py --batch --json --no-cache >> /var/log/ales.log 2>&1
+
+# Of op Windows (Taakplanner):
+python run.py -f G:\ALES\Input --batch --excel --reference G:\ALES\spaceclaim.xml
+```
+
+---
+
+## Architectuur
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                        Entry Points                              │
+│                        Ingangspunten                             │
 │                                                                  │
-│  run.py ──────────────┐                                          │
+│  python run.py ───────┐                                          │
 │  python -m mfg_pipe ──┤                                          │
 │                       ▼                                          │
 │               manufacturing_pipeline/cli.py                      │
@@ -149,90 +227,72 @@ curl "http://localhost:8000/api/v1/jobs/{job_id}?format=xml"
 │                 │ aag      │                                     │
 │                 └──────────┘                                     │
 │                                                                  │
-│  api/app.py ──▶ api/routes.py ──▶ manufacturing_pipeline (same) │
-│  file_watcher ──▶ monitors folder ──▶ manufacturing_pipeline     │
+│  api/app.py ──▶ routes.py ──▶ manufacturing_pipeline (zelfde)   │
+│  file_watcher ──▶ map monitoren ──▶ manufacturing_pipeline       │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### Analysis Pipeline Flow
+### Analyse-flow
 
 ```
-                    Quick Mode                              Full Mode
-                    ──────────                              ─────────
+              Quick Mode (standaard)                    Full Mode (--full)
+              ──────────────────────                    ──────────────────
 
               ┌──────────────┐                      ┌──────────────────┐
-              │  Load STEP   │                      │    Load STEP     │
+              │  Laad STEP   │                      │    Laad STEP     │
               └──────┬───────┘                      └────────┬─────────┘
                      │                                       │
               ┌──────▼───────┐                      ┌────────▼─────────┐
-              │ Classify Part│                      │  Detect Holes    │
-              │  (type, thk) │                      │  & Bends         │
+              │ Classificeer │                      │  Detecteer gaten │
+              │ (type, dikte)│                      │  & zettingen     │
               └──────┬───────┘                      └────────┬─────────┘
                      │                                       │
               ┌──────▼───────┐                      ┌────────▼─────────┐
-              │   Detect     │                      │  Geometry &      │
-              │   Features   │                      │  Face Analysis   │
+              │  Detecteer   │                      │  Geometrie &     │
+              │  Features    │                      │  vlakanalyse     │
               └──────┬───────┘                      └────────┬─────────┘
                      │                                       │
               ┌──────▼───────┐                      ┌────────▼─────────┐
-              │  Unfold      │                      │  Part            │
-              │ (if sheet)   │                      │  Classification  │
+              │  Ontvouw     │                      │  Onderdeel-      │
+              │ (als plaat)  │                      │  classificatie   │
               └──────┬───────┘                      └────────┬─────────┘
                      │                                       │
               ┌──────▼───────┐                      ┌────────▼─────────┐
-              │ Generate PDF │                      │  ISO Standards   │
-              │              │                      │  (2768/286/etc)  │
-              └──────────────┘                      └────────┬─────────┘
+              │ Genereer PDF │                      │  ISO-normen      │
+              └──────────────┘                      │  (2768/286/etc)  │
+                                                    └────────┬─────────┘
                                                              │
                                                     ┌────────▼─────────┐
-                                                    │  Report + DB     │
+                                                    │  Rapport + DB    │
                                                     └──────────────────┘
 ```
 
-## ISO Standards
+---
 
-The pipeline implements the following manufacturing standards:
+## API-referentie
 
-| Standard | What It Does |
-|----------|-------------|
-| **ISO 2768** | General tolerances — linear (f/m/c/v) and geometric (H/K/L) |
-| **ISO 286** | Limits and fits — H7/h6, H7/g6, IT grades |
-| **ISO 1302** | Surface texture — Ra/Rz values by manufacturing process |
-| **ISO 68-1/261** | Metric threads — M3 to M68, coarse/fine pitch, tap drill sizes |
-| **ISO 13715** | Edge conditions — chamfer/fillet detection |
-| **EN 10025** | Steel grades — S235, S275, S355, C45, 42CrMo4, 304/316 SS |
-| **EN 573** | Aluminum alloys — 1050, 5083, 6061, 6082, 7075 |
-
-## API Reference
-
-### Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/v1/analyze` | Upload STEP file, returns `job_id` |
-| `GET` | `/api/v1/jobs/{job_id}` | Get results (JSON by default) |
-| `GET` | `/api/v1/jobs/{job_id}?format=csv` | Results as CSV |
-| `GET` | `/api/v1/jobs/{job_id}?format=xml` | Results as SpaceClaim XML |
-| `GET` | `/api/v1/jobs/{job_id}?format=excel` | Results as Excel (.xlsx) |
+| Methode | Endpoint | Beschrijving |
+|---------|----------|-------------|
+| `POST` | `/api/v1/analyze` | Upload STEP-bestand, retourneert `job_id` |
+| `GET` | `/api/v1/jobs/{job_id}` | Resultaten ophalen (standaard JSON) |
+| `GET` | `/api/v1/jobs/{job_id}?format=csv` | Resultaten als CSV |
+| `GET` | `/api/v1/jobs/{job_id}?format=xml` | Resultaten als SpaceClaim XML |
+| `GET` | `/api/v1/jobs/{job_id}?format=excel` | Resultaten als Excel (.xlsx) |
 | `GET` | `/api/v1/health` | Health check |
 
-### Authentication
+**Authenticatie:** Zet `API_KEYS` in `.env` (komma-gescheiden voor meerdere keys). Stuur mee als `X-API-Key` header. Leeg = geen auth (alleen dev).
 
-Set the `API_KEYS` environment variable (comma-separated for multiple keys). Pass the key via the `X-API-Key` header. Leave `API_KEYS` empty for development mode (no auth).
+---
 
 ## Deployment
 
-### Docker (Recommended)
+### Docker (aanbevolen)
 
 ```bash
-# Configure
 cp .env.example .env
-# Edit .env — set API_KEYS at minimum
+# Bewerk .env — zet minimaal API_KEYS
 
-# Run
 docker compose up -d
-
-# Verify
 curl http://localhost:8000/api/v1/health
 ```
 
@@ -241,113 +301,96 @@ curl http://localhost:8000/api/v1/health
 ```bash
 apt update && apt install docker.io docker-compose-v2 nginx certbot python3-certbot-nginx
 
-git clone <repo> /opt/manufacturing-api
+git clone https://github.com/djspilot/alestest.git /opt/manufacturing-api
 cd /opt/manufacturing-api
-echo "API_KEYS=your-secret-key" > .env
+echo "API_KEYS=jouw-geheime-key" > .env
 docker compose up -d
 
 # Nginx reverse proxy
 cp deploy/nginx.conf /etc/nginx/sites-available/manufacturing-api
 ln -s /etc/nginx/sites-available/manufacturing-api /etc/nginx/sites-enabled/
-certbot --nginx -d api.yourdomain.com
+certbot --nginx -d api.jouwdomein.nl
 ```
 
-### Windows ERP Integration (File Watcher)
+### Omgevingsvariabelen
 
-Monitors a folder for new STEP files, processes them automatically, and exports XML for ERP import.
+| Variabele | Standaard | Beschrijving |
+|-----------|-----------|-------------|
+| `API_KEYS` | _(leeg)_ | Komma-gescheiden API-keys |
+| `FREECAD_PATH` | `/usr/lib/freecad` | FreeCAD-installatiepad |
+| `UPLOAD_DIR` | `/tmp/manufacturing-uploads` | Uploadmap |
+| `MAX_FILE_SIZE_MB` | `100` | Max uploadgrootte |
+| `JOB_TTL_SECONDS` | `3600` | Hoe lang resultaten bewaard blijven |
+| `WATCHED_FOLDER` | — | Map voor file watcher |
+| `ENABLE_UNFOLD` | `True` | FreeCAD ontvouwen aan/uit |
 
-```bash
-# Configure in .env
-WATCHED_FOLDER=G:\ALES\Offerte-ALES
+---
 
-# Run
-python deploy/file_watcher_service.py
-
-# Test with a single file
-python deploy/file_watcher_service.py --test --file path/to/file.step
-```
-
-Install as a Windows service with `deploy/install_windows_service.bat` (uses NSSM).
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `API_KEYS` | _(empty)_ | Comma-separated API keys |
-| `FREECAD_PATH` | `/usr/lib/freecad` | FreeCAD installation path |
-| `UPLOAD_DIR` | `/tmp/manufacturing-uploads` | Upload directory |
-| `MAX_FILE_SIZE_MB` | `100` | Max upload size |
-| `JOB_TTL_SECONDS` | `3600` | Job result TTL |
-| `WATCHED_FOLDER` | — | Folder for file watcher |
-| `ENABLE_UNFOLD` | `True` | Enable FreeCAD unfold |
-
-## Project Structure
+## Projectstructuur
 
 ```
-├── run.py                              # Entry point
-├── Dockerfile                          # Docker image
-├── docker-compose.yml                  # Docker orchestration
-├── requirements.txt                    # Python dependencies
+├── run.py                              # Startpunt
+├── Dockerfile                          # Docker-image
+├── docker-compose.yml                  # Docker-orchestratie
+├── requirements.txt                    # Python-dependencies
 │
-├── manufacturing_pipeline/             # Core package
-│   ├── cli.py                          # CLI interface
-│   ├── core/                           # Config, models, utilities
-│   ├── analysis/                       # Business logic
-│   │   ├── step_processing.py          #   STEP parsing, hole/bend detection
-│   │   ├── sheetmetal_analysis.py      #   Sheet metal classification
-│   │   ├── part_analyzer.py            #   Part type classification
-│   │   ├── iso_standards.py            #   ISO/NEN standards
-│   │   ├── freecad_unfold.py           #   FreeCAD unfold integration
+├── manufacturing_pipeline/             # Kernpakket
+│   ├── cli.py                          # CLI-interface
+│   ├── core/                           # Config, modellen, utilities
+│   ├── analysis/                       # Businesslogica
+│   │   ├── step_processing.py          #   STEP-parsing, gat/zetdetectie
+│   │   ├── sheetmetal_analysis.py      #   Plaatwerk classificatie
+│   │   ├── part_analyzer.py            #   Onderdeeltype classificatie
+│   │   ├── iso_standards.py            #   ISO/NEN-normen
+│   │   ├── freecad_unfold.py           #   FreeCAD ontvouw-integratie
 │   │   └── ...
 │   ├── data/                           # Caching, database
 │   ├── reporting/                      # PDF, Excel, XML, CLI output
-│   └── scripts/                        # AAG analyzer, ERP comparison
+│   └── scripts/                        # AAG analyzer, ERP vergelijking
 │
 ├── api/                                # REST API (FastAPI)
-│   ├── app.py                          # Application setup
-│   ├── routes.py                       # Endpoints
-│   └── static/index.html              # Web frontend
-│
-├── deploy/                             # Deployment
-│   ├── file_watcher_service.py         # Windows ERP file watcher
-│   ├── nginx.conf                      # Reverse proxy config
-│   └── install.sh                      # VPS setup script
-│
-├── tests/                              # Test suite
+├── deploy/                             # Deployment (file watcher, nginx, etc.)
+├── tests/                              # Testsuite
+├── docs/                               # Documentatie
+│   └── ENGINE.md                       # Technische engine-beschrijving
 └── data/                               # Runtime data (gitignored)
-    ├── input/                          # STEP files to analyze
-    ├── output/                         # Analysis results
+    ├── input/                          # STEP-bestanden voor analyse
+    ├── output/                         # Analyseresultaten
     └── db/                             # SQLite database
 ```
 
-## Development
+---
 
-### Running Tests
+## Ontwikkeling
+
+### Tests draaien
 
 ```bash
 python -m pytest tests/
 ```
 
-### ERP Comparison Tool
+### ERP-vergelijkingstool
 
-Validate pipeline output against SpaceClaim reference data:
+Valideer pipeline-output tegen SpaceClaim-referentiedata:
 
 ```bash
 python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/
 python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ --aag -v
 ```
 
-### Key Dependencies
+### Dependencies
 
-| Package | Purpose |
-|---------|---------|
-| `cadquery` / `cadquery-ocp` | CAD kernel — STEP file parsing and geometry |
-| `FreeCAD` + SheetMetal workbench | Sheet metal unfolding |
+| Package | Doel |
+|---------|------|
+| `cadquery` / `cadquery-ocp` | CAD-kernel — STEP-parsing en geometrie |
+| `FreeCAD` + SheetMetal workbench | Plaatwerk ontvouwen |
 | `fastapi` + `uvicorn` | REST API |
-| `openpyxl` | Excel export |
-| `numpy` | Numerical operations |
-| `reportlab` | PDF generation |
+| `openpyxl` | Excel-export |
+| `numpy` | Numerieke berekeningen |
 
-## License
+---
 
-Proprietary. Internal use only.
+## Meer informatie
+
+- **[docs/ENGINE.md](docs/ENGINE.md)** — Uitgebreide technische beschrijving van de analyse-engine en vergelijking met SpaceClaim
+- **CLAUDE.md** — Instructies voor AI-assistenten die met deze codebase werken
