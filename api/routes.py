@@ -1,6 +1,7 @@
 """API route definitions."""
 
 import csv
+import hashlib
 import io
 import os
 import uuid
@@ -13,10 +14,16 @@ from api.schemas import (
     AnalysisResult,
     HealthResponse,
     JobCreated,
+    JobListItem,
+    JobListResponse,
+    JobStats,
     JobStatus,
 )
 from api.job_manager import jobs
 from api.analysis_service import run_step_analysis
+from manufacturing_pipeline.reporting.xml_exporter import export_to_xml
+from pathlib import Path
+import tempfile
 
 router = APIRouter(prefix="/api/v1")
 
@@ -70,16 +77,36 @@ async def analyze(
         f.write(content)
 
     # Create job and queue analysis
-    job = jobs.create(job_id, step_path)
+    file_hash = hashlib.md5(content).hexdigest()
+    job = jobs.create(job_id, step_path,
+                      file_name=file.filename or "upload.step",
+                      file_hash=file_hash,
+                      file_size_bytes=len(content))
     background_tasks.add_task(_run_analysis_job, job_id, step_path, aag)
 
     return JobCreated(job_id=job_id, created_at=job.created_at)
 
 
+@router.get("/jobs", response_model=JobListResponse)
+async def list_jobs(
+    limit: int = Query(20, ge=1, le=100, description="Items per page"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
+    status: str = Query(None, description="Filter by status: queued, processing, completed, failed"),
+):
+    """List all analysis jobs (paginated)."""
+    items, total = jobs.list_jobs(limit=limit, offset=offset, status=status)
+    return JobListResponse(
+        items=[JobListItem(**item) for item in items],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
 @router.get("/jobs/{job_id}")
 async def get_job(
     job_id: str,
-    format: str = Query("json", description="Response format: json or csv"),
+    format: str = Query("json", description="Response format: json, csv, xml, or excel"),
 ):
     """Get the status and result of an analysis job."""
     job = jobs.get(job_id)
@@ -88,6 +115,12 @@ async def get_job(
 
     if format == "csv" and job.status == "completed" and job.result:
         return _result_to_csv(job.result)
+
+    if format == "xml" and job.status == "completed" and job.result:
+        return _result_to_xml(job.result)
+
+    if format == "excel" and job.status == "completed" and job.result:
+        return _result_to_excel(job.result)
 
     response = JobStatus(
         job_id=job.job_id,
@@ -108,6 +141,13 @@ async def get_job(
 async def health():
     """Health check endpoint."""
     return HealthResponse()
+
+
+@router.get("/stats", response_model=JobStats)
+async def stats():
+    """Get aggregated job statistics."""
+    data = jobs.get_stats()
+    return JobStats(**data)
 
 
 def _result_to_csv(result: dict) -> str:
@@ -152,3 +192,62 @@ def _result_to_csv(result: dict) -> str:
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={result.get('file', 'result')}.csv"},
     )
+
+
+def _result_to_xml(result: dict) -> str:
+    """Convert analysis result dict to XML string response."""
+    from fastapi.responses import Response
+
+    # Create temporary file for XML export
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.xml') as tmp:
+        tmp_path = Path(tmp.name)
+
+    try:
+        # Export to XML using the exporter module
+        export_to_xml(result, tmp_path)
+
+        # Read the XML content
+        xml_content = tmp_path.read_text(encoding='utf-8')
+
+        # Clean up temp file
+        tmp_path.unlink()
+
+        # Return as XML response
+        filename = Path(result.get('file', 'result')).stem
+        return Response(
+            content=xml_content,
+            media_type="application/xml",
+            headers={"Content-Disposition": f"attachment; filename={filename}.xml"},
+        )
+
+    except Exception as e:
+        # Clean up temp file on error
+        if tmp_path.exists():
+            tmp_path.unlink()
+        raise HTTPException(status_code=500, detail=f"XML export failed: {str(e)}")
+
+
+def _result_to_excel(result: dict):
+    """Convert analysis result dict to Excel (SpaceClaim format) response."""
+    from fastapi.responses import Response
+    from manufacturing_pipeline.reporting.excel_exporter import export_to_excel
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+        tmp_path = Path(tmp.name)
+
+    try:
+        export_to_excel([result], tmp_path)
+        excel_content = tmp_path.read_bytes()
+        tmp_path.unlink()
+
+        filename = Path(result.get('file', 'result')).stem
+        return Response(
+            content=excel_content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}.xlsx"},
+        )
+
+    except Exception as e:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        raise HTTPException(status_code=500, detail=f"Excel export failed: {str(e)}")

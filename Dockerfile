@@ -25,9 +25,8 @@ ENV FREECAD_PATH=/usr/lib/freecad
 WORKDIR /app
 
 # Install Python dependencies (cached layer)
-COPY requirements.txt requirements-api.txt ./
-RUN pip3 install --no-cache-dir --break-system-packages \
-    -r requirements.txt -r requirements-api.txt
+COPY requirements.txt ./
+RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Copy application code
 COPY manufacturing_pipeline/ manufacturing_pipeline/
@@ -35,7 +34,7 @@ COPY api/ api/
 COPY run.py ./
 
 # Create necessary directories
-RUN mkdir -p /tmp/manufacturing-uploads resources/output resources/data
+RUN mkdir -p /tmp/manufacturing-uploads data/output data/db
 
 EXPOSE 8000
 

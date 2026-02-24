@@ -83,3 +83,34 @@ class JobStatus(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     version: str = "1.0.0"
+
+
+class JobListItem(BaseModel):
+    """Lightweight job summary for list view (no full result blob)."""
+    job_id: str
+    file_name: str
+    file_hash: Optional[str] = None
+    file_size_bytes: Optional[int] = None
+    status: str
+    created_at: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    error: Optional[str] = None
+
+
+class JobListResponse(BaseModel):
+    """Paginated job list response."""
+    items: list[JobListItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class JobStats(BaseModel):
+    """Aggregated job statistics."""
+    total_jobs: int = 0
+    jobs_completed: int = 0
+    jobs_failed: int = 0
+    jobs_queued: int = 0
+    jobs_processing: int = 0
+    jobs_last_24h: int = 0

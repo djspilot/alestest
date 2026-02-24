@@ -1,18 +1,30 @@
 __pycache__/
 *.pyc
 .DS_Store
-output/
-parts/
-AI-voorbeelden/
 .venv/
 venv/
+
+# Runtime data
+data/input/
+data/output/
+data/parts/
+data/db/
+data/cache/
+.pipeline_cache/
+.pipeline_cache.json
+
+# CAD files (large binary files)
 *.step
 *.STEP
 *.stp
 *.STP
 *.dxf
 *.DXF
-.pipeline_cache.json
 
-# Local Netlify folder
-.netlify
+# Legacy paths
+output/
+parts/
+AI-voorbeelden/
+
+# Environment
+.env

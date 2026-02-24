@@ -13,12 +13,12 @@ from datetime import datetime
 # Project paths
 # This file is now in PROJECT_ROOT/manufacturing_pipeline/core/
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-RESOURCES_DIR = os.path.join(PROJECT_ROOT, "resources")
-DATA_DIR = os.path.join(RESOURCES_DIR, "data")
-CONFIG_DIR = os.path.join(RESOURCES_DIR, "config")
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+CONFIG_DIR = os.path.join(DATA_DIR, "config")
+DB_DIR = os.path.join(DATA_DIR, "db")
 
-PARTS_DIR = os.path.join(RESOURCES_DIR, "input")
-OUTPUT_DIR = os.path.join(RESOURCES_DIR, "output")
+PARTS_DIR = os.path.join(DATA_DIR, "input")
+OUTPUT_DIR = os.path.join(DATA_DIR, "output")
 PIPELINE_DIR = os.path.join(PROJECT_ROOT, "manufacturing_pipeline")
 SCRIPTS_DIR = os.path.join(PIPELINE_DIR, "scripts")
 
@@ -34,8 +34,8 @@ if PIPELINE_DIR not in sys.path:
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
-# Cache file location (moved to data directory)
-CACHE_FILE = os.path.join(DATA_DIR, "pipeline_cache.json")
+# Cache file location
+CACHE_FILE = os.path.join(DB_DIR, "pipeline_cache.json")
 
 
 # =============================================================================

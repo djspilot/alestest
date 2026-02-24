@@ -6,298 +6,213 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a **manufacturing analysis pipeline** that processes STEP CAD files to extract geometric data, analyze components, detect holes/features, and generate reports. The pipeline includes comprehensive **Dutch/ISO manufacturing standards** analysis for tolerances, fits, threads, surface finish, and material calculations.
 
-The project provides three analysis modes:
-1. **Quick mode** (default via `run.py`) - Fast AAG-based analysis with simple reports
-2. **Full mode** (`run.py --full` or `manufacturing_pipeline/cli.py`) - Complete ISO pipeline with database storage
-3. **API mode** (`api/app.py`) - REST API for VPS deployment, accepts STEP uploads, returns JSON/CSV
+The project provides three usage modes:
+
+| Mode | Command | Description |
+|------|---------|-------------|
+| **Quick** (default) | `python run.py` | Fast AAG-based analysis with PDF reports |
+| **Full** | `python run.py --full` | Complete ISO pipeline with database storage |
+| **API** (Docker) | `docker compose up -d` | REST API for VPS deployment |
 
 ## Key Commands
 
 ### Installation
 ```bash
-# Install dependencies (pip - quick start)
-pip install -r requirements.txt
-
-# Install dependencies (conda - recommended for stability)
-conda create -n manufacturing python=3.10
-conda activate manufacturing
-conda install -c conda-forge cadquery
 pip install -r requirements.txt
 ```
 
-### Quick Mode (Default - Fast Analysis)
+### Quick Mode (Default)
 ```bash
-# Interactive file selection
-python run.py
-
-# Analyze specific file
-python run.py -f mypart.step
-
-# Run AAG topology-based feature recognition
-python run.py -f mypart.step --aag
-
-# AAG with verbose output (hole/bend details)
-python run.py -f mypart.step --aag -v
-
-# Show detailed analysis reasoning
-python run.py --analyze
-
-# Debug hole detection
-python run.py --debug
-
-# Skip automatic unfolding
-python run.py --no-unfold
-
-# List available STEP files
-python run.py --list
+python run.py                              # Interactive file selection
+python run.py -f mypart.step               # Analyze specific file
+python run.py -f mypart.step --aag         # AAG topology-based feature recognition
+python run.py -f mypart.step --aag -v      # AAG with verbose hole/bend details
+python run.py --analyze                    # Show detailed analysis reasoning
+python run.py --debug                      # Debug hole detection
+python run.py --no-unfold                  # Skip automatic unfolding
+python run.py --list                       # List available STEP files
 ```
 
 ### Batch Processing
 ```bash
-# Process all files in default parts folder
-python run.py --batch
+python run.py --batch                      # Process all files in data/input/
+python run.py -f ./folder --batch -p 4     # Parallel batch (4 workers)
+python run.py -f ./folder --batch --json   # JSON output for ERP integration
+python run.py --batch --no-cache           # Skip cache, force re-analysis
+```
 
-# Process folder with parallel workers
-python run.py -f ./folder --batch -p 4
-
-# JSON output for ERP integration
-python run.py -f ./folder --batch --json
-
-# Skip cache, force re-analysis
-python run.py --batch --no-cache
+### Excel Export (SpaceClaim Comparison)
+```bash
+python run.py -f mypart.step --excel                        # Excel in SpaceClaim format
+python run.py -f mypart.step --aag --excel                  # With AAG cut length data
+python run.py -f mypart.step --excel --reference ref.xlsx   # Side-by-side with SpaceClaim
+python run.py --batch --excel                               # Excel for batch results
+python run.py --batch --excel --reference spaceclaim.xml    # Batch + comparison
 ```
 
 ### Full Mode (Complete ISO Pipeline)
 ```bash
-# Full ISO pipeline with database storage
-python run.py -f mypart.step --full
-
-# Or use the CLI directly
-python -m manufacturing_pipeline.cli -f mypart.step
-
-# Show production information table
-python run.py -f mypart.step --full --production-info
-
-# Legacy entry point (backward compatible)
-python manufacturing_pipeline/main.py -f mypart.step
+python run.py -f mypart.step --full                    # Full ISO pipeline
+python run.py -f mypart.step --full --production-info  # With production table
+python run.py --full --status                          # Show cache status
+python run.py --full --clear-cache                     # Clear cached data
+python run.py --full --from threads                    # Resume from specific stage
+python run.py --full --list-stages                     # List pipeline stages
+python run.py --full --list-modules                    # List available modules
+python run.py --full --disable cost_estimation         # Disable specific module
 ```
 
-### Full Mode - Cache Management
-```bash
-# Show cache status
-python -m manufacturing_pipeline.cli --status
-
-# Clear cache
-python -m manufacturing_pipeline.cli --clear-cache
-
-# Resume from specific stage
-python -m manufacturing_pipeline.cli --from threads
-
-# Run without caching
-python -m manufacturing_pipeline.cli --no-cache
-
-# List available stages
-python -m manufacturing_pipeline.cli --list-stages
-```
-
-### Full Mode - Module Control
-```bash
-# List available modules
-python -m manufacturing_pipeline.cli --list-modules
-
-# Disable specific module
-python -m manufacturing_pipeline.cli --disable cost_estimation
-
-# Enable/disable combinations
-python -m manufacturing_pipeline.cli --enable iso --disable cost_estimation
-
-# Show current configuration
-python -m manufacturing_pipeline.cli --show-config
-```
+You can also use `python -m manufacturing_pipeline` instead of `python run.py`.
 
 ### ERP Comparison Tool
 ```bash
-# Compare pipeline results with ERP/Spaceclaim data
-python manufacturing_pipeline/scripts/compare_erp.py AI-voorbeelden/
-
-# Use AAG feature recognition
-python manufacturing_pipeline/scripts/compare_erp.py AI-voorbeelden/ --aag
-
-# Process specific subfolder
-python manufacturing_pipeline/scripts/compare_erp.py AI-voorbeelden/ --subfolder "Subfolder Name"
-
-# Verbose output
-python manufacturing_pipeline/scripts/compare_erp.py AI-voorbeelden/ -v
+python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/
+python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ --aag
+python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ -v
 ```
 
-### API Mode (VPS Deployment)
+### Docker / API Deployment
 ```bash
-# Install API dependencies
-pip install -r requirements-api.txt
-
-# Start API server (development)
-API_KEYS=your-key uvicorn api.app:app --reload --port 8000
-
-# Docker deployment
+# Start API server
 docker compose up -d
 
-# Upload a STEP file for analysis
+# Or local dev mode
+API_KEYS=your-key uvicorn api.app:app --reload --port 8000
+
+# Use the API
 curl -X POST http://localhost:8000/api/v1/analyze \
-  -H "X-API-Key: your-key" \
-  -F "file=@mypart.step"
-
-# Poll job result (JSON)
-curl http://localhost:8000/api/v1/jobs/{job_id} \
-  -H "X-API-Key: your-key"
-
-# Get result as CSV
-curl http://localhost:8000/api/v1/jobs/{job_id}?format=csv \
-  -H "X-API-Key: your-key"
-
-# Health check
+  -H "X-API-Key: your-key" -F "file=@mypart.step"
+curl http://localhost:8000/api/v1/jobs/{job_id} -H "X-API-Key: your-key"
 curl http://localhost:8000/api/v1/health
+```
+
+### Windows File Watcher (ERP Integration)
+```bash
+# Run from project root
+python deploy/file_watcher_service.py
+python deploy/file_watcher_service.py --test --file path/to/file.step
 ```
 
 ### Testing
 ```bash
-# Run basic tests
 python -m pytest tests/
-
-# Test specific file
-python tests/test_basic.py
 ```
 
 ## Project Structure
 
 ```
 /
-├── run.py                            # Unified entry point (Quick + Full modes)
-├── requirements.txt                  # Python dependencies
-├── requirements-api.txt              # API-specific dependencies (FastAPI, uvicorn)
-├── CLAUDE.md                         # Project documentation (this file)
-├── Dockerfile                        # Docker container image definition
-├── docker-compose.yml                # Docker orchestration for VPS deployment
+├── run.py                          # Entry point (thin wrapper → cli.py)
+├── Dockerfile                      # Docker image (API deployment)
+├── docker-compose.yml              # Docker orchestration
+├── requirements.txt                # All Python dependencies
+├── .env.example                    # Environment config template
+├── CLAUDE.md                       # This file
 │
-├── api/                              # REST API Service (VPS deployment)
+├── manufacturing_pipeline/         # Core analysis package
 │   ├── __init__.py
-│   ├── app.py                        # FastAPI application, middleware, CORS
-│   ├── config.py                     # API configuration (env vars)
-│   ├── schemas.py                    # Pydantic request/response models
-│   ├── routes.py                     # API endpoints (analyze, jobs, health)
-│   ├── analysis_service.py           # Bridge to manufacturing pipeline
-│   └── job_manager.py                # In-memory job state management
-│
-├── deployment/                       # VPS Deployment Configuration
-│   └── nginx.conf                    # Example nginx reverse proxy config
-│
-├── manufacturing_pipeline/           # Core Application Package
-│   ├── __init__.py
-│   ├── main.py                       # Legacy entry point (backward compat shim)
-│   ├── cli.py                        # Full pipeline CLI with caching
-│   ├── README.md                     # Package documentation
+│   ├── __main__.py                 # Enables: python -m manufacturing_pipeline
+│   ├── cli.py                      # Unified CLI (quick + full + batch modes)
 │   │
-│   ├── core/                         # Core infrastructure
-│   │   ├── config.py                 # Pipeline configuration, module settings
-│   │   ├── models.py                 # Data models and types
-│   │   ├── pipeline_init.py          # Pipeline initialization helpers
-│   │   └── utils.py                  # Shared utilities, constants, helpers
+│   ├── core/                       # Infrastructure
+│   │   ├── config.py               # Pipeline configuration, module settings
+│   │   ├── models.py               # Data models and types
+│   │   ├── pipeline_init.py        # Pipeline initialization helpers
+│   │   └── utils.py                # Shared utilities, constants, path definitions
 │   │
-│   ├── analysis/                     # Analysis modules (Business Logic)
-│   │   ├── step_processing.py        # STEP parsing, hole/bend detection, geometry
-│   │   ├── sheetmetal_analysis.py    # Sheet metal: thickness, bends, profiles
-│   │   ├── part_analyzer.py          # Part classification, reasoning system
-│   │   ├── iso_standards.py          # ISO/NEN standards (tolerances, fits, threads)
-│   │   ├── freecad_unfold.py         # FreeCAD SheetMetal workbench integration
-│   │   ├── assembly_analysis.py      # Assembly/BOM analysis
-│   │   ├── pipeline_stages.py        # Pipeline stage definitions
-│   │   ├── correlation.py            # Dimension correlation
-│   │   └── werkvoorbereiding.py      # Work preparation analysis
+│   ├── analysis/                   # Analysis modules (business logic)
+│   │   ├── step_processing.py      # STEP parsing, hole/bend detection, geometry
+│   │   ├── sheetmetal_analysis.py  # Sheet metal: thickness, bends, profiles
+│   │   ├── part_analyzer.py        # Part classification, reasoning system
+│   │   ├── iso_standards.py        # ISO/NEN standards (tolerances, fits, threads)
+│   │   ├── freecad_unfold.py       # FreeCAD SheetMetal workbench integration
+│   │   ├── assembly_analysis.py    # Assembly/BOM analysis
+│   │   ├── pipeline_stages.py      # Pipeline stage definitions
+│   │   ├── correlation.py          # Dimension correlation
+│   │   └── werkvoorbereiding.py    # Work preparation analysis
 │   │
-│   ├── data/                         # Data layer
-│   │   ├── cache_manager.py          # Pipeline caching system
-│   │   ├── database.py               # SQLite database manager
-│   │   └── sql/                      # SQL schema files
-│   │       └── schema.sql
+│   ├── data/                       # Data layer
+│   │   ├── cache_manager.py        # Pipeline caching system
+│   │   ├── database.py             # SQLite database manager
+│   │   └── sql/schema.sql          # Database schema
 │   │
-│   ├── reporting/                    # Output generation
-│   │   ├── report_generator.py       # PDF report generation
-│   │   ├── cli_output.py             # CLI output formatting
-│   │   └── pdf_processing.py         # PDF parsing utilities
+│   ├── reporting/                  # Output generation
+│   │   ├── report_generator.py     # PDF report generation
+│   │   ├── cli_output.py           # CLI output formatting
+│   │   ├── xml_exporter.py         # XML export for ERP integration
+│   │   ├── excel_exporter.py       # Excel export in SpaceClaim format
+│   │   └── pdf_processing.py       # PDF parsing utilities
 │   │
-│   ├── scripts/                      # Utility scripts
-│   │   ├── __init__.py
-│   │   ├── README.md
-│   │   ├── aag_analyzer.py           # AAG feature recognition
-│   │   ├── compare_erp.py            # ERP validation tool
-│   │   └── batch_process.py          # Batch processing runner
-│   │
-│   ├── resources/                    # Package-specific resources
-│   └── .pipeline_cache/              # Cache directory (auto-created)
+│   └── scripts/                    # Standalone analysis scripts
+│       ├── aag_analyzer.py         # AAG feature recognition
+│       └── compare_erp.py          # ERP validation tool
 │
-├── resources/                        # Project Resources & Data
-│   ├── parts/                        # Default input folder for STEP files
-│   ├── input/                        # Additional input files
-│   ├── output/                       # Analysis results (Reports, Images, JSON)
-│   ├── data/                         # Database and reference files
-│   ├── config/                       # Configuration files
-│   └── docs/                         # Additional documentation
+├── api/                            # REST API (Docker/VPS deployment)
+│   ├── app.py                      # FastAPI application, middleware, CORS
+│   ├── routes.py                   # API endpoints (analyze, jobs, health)
+│   ├── analysis_service.py         # Bridge to manufacturing pipeline
+│   ├── job_manager.py              # In-memory job state management
+│   ├── schemas.py                  # Pydantic request/response models
+│   ├── config.py                   # API configuration (env vars)
+│   └── static/index.html           # Web frontend
 │
-├── tests/                            # Test suite
-│   └── test_basic.py                 # Basic functionality tests
+├── deploy/                         # Deployment configs
+│   ├── nginx.conf                  # Nginx reverse proxy config
+│   ├── install.sh                  # VPS setup script
+│   ├── file_watcher_service.py     # Windows ERP file watcher service
+│   ├── install_windows_service.bat # Windows service installer (NSSM)
+│   └── requirements-watcher.txt    # File watcher dependencies
 │
-├── docs/                             # Project documentation
-│   └── dev/                          # Developer documentation
+├── tests/                          # Test suite
+│   ├── test_basic.py
+│   └── test_xml_export.py
 │
-└── archive/                          # Archived/deprecated code
-    ├── README.md
-    ├── scripts/                      # Old utility scripts
-    └── modules/                      # Old modules
+└── data/                           # Runtime data (gitignored)
+    ├── input/                      # STEP files for analysis
+    ├── output/                     # Analysis results (per-part subdirs)
+    ├── parts/                      # Quick-access sample parts
+    ├── config/                     # pipeline_config.json
+    └── db/                         # manufacturing_data.db, pipeline_cache.json
 ```
 
 ## Architecture
 
-### Package Structure
+### How It Works
 
-The `manufacturing_pipeline` package is organized into logical subpackages:
+**Local usage (CLI):**
+```
+run.py → manufacturing_pipeline/cli.py → core/utils.py functions
+                                       → analysis/ modules
+                                       → reporting/ modules
+```
 
-| Subpackage | Purpose |
-|------------|---------|
-| `core/` | Configuration, models, utilities, constants |
-| `analysis/` | All analysis algorithms (STEP processing, ISO standards, sheet metal) |
-| `data/` | Data persistence (caching, database) |
-| `reporting/` | Output generation (PDF reports, CLI output) |
-| `scripts/` | Standalone utility scripts (AAG, ERP comparison) |
+**Docker deployment (API):**
+```
+Dockerfile → api/app.py → api/routes.py → manufacturing_pipeline (same engine)
+```
+
+**Windows ERP integration:**
+```
+deploy/file_watcher_service.py → monitors folder → manufacturing_pipeline → XML export
+```
 
 ### Entry Points
 
-1. **`run.py`** - Unified entry point (recommended)
-   - Quick mode (default): Fast AAG-based analysis
-   - Full mode (`--full`): Complete ISO pipeline
-   - Batch mode (`--batch`): Process multiple files
-
-2. **`manufacturing_pipeline/cli.py`** - Full pipeline CLI
-   - Direct access to full pipeline with all options
-   - Module enable/disable control
-   - Cache management commands
-
-3. **`manufacturing_pipeline/main.py`** - Legacy shim
-   - Maintained for backward compatibility
-   - Redirects to `cli.py`
-
-4. **`api/app.py`** - REST API (VPS deployment)
-   - Accepts STEP file uploads via HTTP POST
-   - Async job processing via FastAPI BackgroundTasks
-   - Returns JSON or CSV results
-   - API key authentication via `X-API-Key` header
+| Entry Point | Purpose |
+|-------------|---------|
+| `run.py` | Thin wrapper, delegates to `manufacturing_pipeline.cli.main()` |
+| `python -m manufacturing_pipeline` | Same as `run.py` (via `__main__.py`) |
+| `api/app.py` | FastAPI REST API (Docker/VPS) |
+| `deploy/file_watcher_service.py` | Windows folder watcher for ERP |
 
 ### Analysis Flow
 
-**Quick Mode** (`run.py`):
+**Quick Mode** (default):
 ```
 Load STEP → Classify part → Detect features → Unfold (if applicable) → Generate PDF
 ```
 
-**Full Mode** (`run.py --full` or `cli.py`):
+**Full Mode** (`--full`):
 ```
 Load STEP → Detect holes/bends → Classify part type → Apply ISO standards →
 Generate report → Store in database
@@ -333,7 +248,7 @@ Generate report → Store in database
 **AAG Analyzer** (`scripts/aag_analyzer.py`):
 - Builds Attributed Adjacency Graph (nodes=faces, arcs=edges with convexity)
 - Topology-based feature recognition (more robust than geometry-only)
-- Isoperimetric Quotient for hole/slot classification (Q=4πA/P², Q≈1 for circles)
+- Isoperimetric Quotient for hole/slot classification (Q=4piA/P^2, Q~1 for circles)
 - K-factor based bend allowance/deduction calculations
 - Laser cutting time estimation
 
@@ -402,10 +317,10 @@ Multi-attempt strategy:
 
 **Business rule**: Not all bends count for production cost estimation:
 
-- ✅ **Count**: Bends on fabricated sheet metal (angle 45-135°, radius 0.3-15mm)
-- ❌ **Don't count**: Bends on purchased profiles (koker, U-profiel, hoekprofiel)
-- ❌ **Don't count**: Very small radii (<0.3mm) - likely fillets/chamfers
-- ❌ **Don't count**: Very large radii (>15mm) - likely formed features
+- **Count**: Bends on fabricated sheet metal (angle 45-135 deg, radius 0.3-15mm)
+- **Don't count**: Bends on purchased profiles (koker, U-profiel, hoekprofiel)
+- **Don't count**: Very small radii (<0.3mm) - likely fillets/chamfers
+- **Don't count**: Very large radii (>15mm) - likely formed features
 
 ### Assembly Handling
 
@@ -455,28 +370,28 @@ The full pipeline supports checkpoint/resume functionality.
 
 ## Key Dependencies
 
+All in `requirements.txt`:
+
 - **cadquery** / **cadquery-ocp**: CAD kernel for STEP file processing
 - **reportlab**: PDF report generation
 - **svglib**: SVG to PDF conversion
 - **pymupdf**: PDF parsing
 - **numpy**: Numerical operations
-
-### API Dependencies (requirements-api.txt)
-
-- **fastapi**: Web framework for REST API
+- **openpyxl**: Excel export (SpaceClaim format comparison)
+- **fastapi**: REST API framework
 - **uvicorn**: ASGI server
-- **python-multipart**: File upload handling
 - **pydantic**: Request/response validation
 
-## Docker / VPS Deployment
+File watcher dependencies (separate, in `deploy/requirements-watcher.txt`):
+- **watchdog**: Filesystem monitoring
+- **python-dotenv**: Environment variable loading
+
+## Docker / API Deployment
 
 ### Quick Start
 ```bash
-# Set API key and start
 export API_KEYS=your-secret-key
 docker compose up -d
-
-# Verify
 curl http://localhost:8000/api/v1/health
 ```
 
@@ -485,19 +400,20 @@ curl http://localhost:8000/api/v1/health
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/v1/analyze` | Upload STEP file, returns job_id |
-| GET | `/api/v1/jobs/{job_id}` | Poll job status, get results |
+| GET | `/api/v1/jobs/{job_id}` | Poll job status, get results (JSON) |
+| GET | `/api/v1/jobs/{job_id}?format=csv` | Results as CSV |
+| GET | `/api/v1/jobs/{job_id}?format=xml` | Results as SpaceClaim XML |
+| GET | `/api/v1/jobs/{job_id}?format=excel` | Results as Excel (.xlsx, SpaceClaim format) |
 | GET | `/api/v1/health` | Health check |
 
 ### VPS Setup (Ubuntu)
 ```bash
-# On VPS
 apt update && apt install docker.io docker-compose-v2 nginx certbot python3-certbot-nginx
 git clone <repo> /opt/manufacturing-api
 cd /opt/manufacturing-api
 echo "API_KEYS=your-key" > .env
 docker compose up -d
-
-# Configure nginx (copy deployment/nginx.conf to /etc/nginx/sites-available/)
+# Configure nginx: copy deploy/nginx.conf to /etc/nginx/sites-available/
 # Add SSL: certbot --nginx -d api.example.com
 ```
 
@@ -524,14 +440,9 @@ docker compose up -d
 ### Testing Changes
 
 ```bash
-# Run tests
 python -m pytest tests/
-
-# Test specific part
-python run.py -f parts/mypart.step --analyze
-
-# Compare with Spaceclaim
-python manufacturing_pipeline/scripts/compare_erp.py AI-voorbeelden/ -v
+python run.py -f mypart.step --analyze
+python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ -v
 ```
 
 ### Common Debugging
@@ -554,9 +465,8 @@ python run.py -f mypart.step --debug
 
 ## Notes
 
-- **STEP files**: Place in `resources/parts/` for `run.py`
-- **ERP data**: Organize as `resources/parts/AI-voorbeelden/subfolder/` with STEP + Excel + XML files
-- **Generated outputs**: Go to `resources/output/`
-- **Database**: `resources/data/manufacturing_data.db`
+- **STEP files**: Place in `data/input/` or `data/parts/`
+- **Generated outputs**: Go to `data/output/`
+- **Database**: `data/db/manufacturing_data.db`
 - **Cache**: `.pipeline_cache/` (safe to delete for fresh analysis)
 - **FreeCAD path**: Hardcoded for macOS; update for other platforms
