@@ -1,7 +1,7 @@
 """
-Pipeline Configuration Module
+Pipeline configuratie module
 
-Allows enabling/disabling of analysis modules via CLI or config file.
+Maakt in- en uitschakelen van analysemodule(s) mogelijk via CLI of configbestand.
 """
 
 from dataclasses import dataclass, field, asdict
@@ -13,22 +13,22 @@ import sys
 
 @dataclass
 class SystemConfig:
-    """System configuration (paths, environment)."""
+    """Systeemconfiguratie (paden, omgeving)."""
     freecad_path: str = "/opt/homebrew/Caskroom/freecad/1.0.2/FreeCAD.app"
 
     @property
     def freecad_python(self) -> str:
-        """Path to FreeCAD's Python executable."""
-        # Mac OS specific path construction
+        """Pad naar de Python executable van FreeCAD."""
+        # Mac OS specifieke padopbouw
         if sys.platform == 'darwin':
             return os.path.join(self.freecad_path, "Contents/Resources/bin/python")
         else:
-            # Linux/Windows assumption (can be refined)
+            # Linux/Windows aanname (kan worden verfijnd)
             return os.path.join(self.freecad_path, "bin", "python")
 
     @property
     def freecad_lib(self) -> str:
-        """Path to FreeCAD's library."""
+        """Pad naar de bibliotheek van FreeCAD."""
         if sys.platform == 'darwin':
             return os.path.join(self.freecad_path, "Contents/Resources/lib")
         else:
@@ -36,7 +36,7 @@ class SystemConfig:
 
     @property
     def freecad_mod(self) -> str:
-        """Path to FreeCAD's Mod directory."""
+        """Pad naar de Mod-map van FreeCAD."""
         if sys.platform == 'darwin':
             return os.path.join(self.freecad_path, "Contents/Resources/Mod")
         else:
@@ -44,7 +44,7 @@ class SystemConfig:
 
     @classmethod
     def from_env(cls) -> "SystemConfig":
-        """Load from environment variables."""
+        """Laad uit omgevingsvariabelen."""
         path = os.environ.get("FREECAD_PATH")
         if path:
             return cls(freecad_path=path)
@@ -60,43 +60,43 @@ class SystemConfig:
 
 @dataclass
 class ModuleConfig:
-    """Configuration for individual analysis modules."""
+    """Configuratie voor individuele analysemodule."""
 
-    # Basic Analysis (always on by default)
+    # Basisanalyse (standaard altijd aan)
     geometry: bool = True
     topology: bool = True
     holes: bool = True
     faces: bool = True
 
-    # ISO Standards
+    # ISO-standaarden
     iso2768_tolerances: bool = True
     iso286_fits: bool = True
     iso68_threads: bool = True
     iso1302_surface: bool = True
     iso13715_edges: bool = True
 
-    # Manufacturing
+    # Productie
     mass_estimation: bool = True
     component_classification: bool = True
     detailed_parts: bool = True
 
-    # Werkvoorbereiding (can be individually toggled)
+    # Werkvoorbereiding (kan individueel aan/uit)
     cost_estimation: bool = True
     tool_list: bool = True
     outsourcing: bool = True
     surface_treatment: bool = True
     purchase_spec: bool = True
 
-    # Plaatwerk / Sheet Metal
+    # Plaatwerk
     sheetmetal_analysis: bool = True
     bend_detection: bool = True
     kantbank_tooling: bool = True
     flat_pattern: bool = True
 
-    # PDF Sections
+    # PDF-secties
     pdf_correlation: bool = True
 
-    # Report options
+    # Rapportopties
     simple_cost_report: bool = True      # Eenvoudig kostenoverzicht per onderdeel
     detailed_iso_report: bool = False    # Gedetailleerd ISO rapport
     per_part_breakdown: bool = True      # Kosten per onderdeel uitsplitsen
@@ -109,19 +109,19 @@ class ModuleConfig:
         return cls(**{k: v for k, v in data.items() if hasattr(cls, k)})
 
     def get_enabled_modules(self) -> list:
-        """Return list of enabled module names."""
+        """Geef lijst met ingeschakelde modulenamen terug."""
         return [k for k, v in self.to_dict().items() if v]
 
     def get_disabled_modules(self) -> list:
-        """Return list of disabled module names."""
+        """Geef lijst met uitgeschakelde modulenamen terug."""
         return [k for k, v in self.to_dict().items() if not v]
 
 
 @dataclass
 class PricingConfig:
-    """Configuration for hourly rates and material prices."""
+    """Configuratie voor uurtarieven en materiaalprijzen."""
 
-    # CNC operations (€/hour)
+    # CNC-bewerkingen (€/uur)
     cnc_draaien_klein: float = 55.0
     cnc_draaien_middel: float = 65.0
     cnc_draaien_groot: float = 85.0
@@ -129,7 +129,7 @@ class PricingConfig:
     cnc_frezen_4as: float = 75.0
     cnc_frezen_5as: float = 95.0
 
-    # Sheet metal (€/hour)
+    # Plaatwerk (€/uur)
     laser_snijden: float = 70.0
     plasma_snijden: float = 55.0
     waterstraal: float = 85.0
@@ -138,7 +138,7 @@ class PricingConfig:
     lassen_mig: float = 50.0
     lassen_tig: float = 65.0
 
-    # Finishing (€/hour)
+    # Nabewerking (€/uur)
     slijpen_vlak: float = 55.0
     slijpen_rond: float = 60.0
     ontbramen_hand: float = 35.0
@@ -149,7 +149,7 @@ class PricingConfig:
 
     @classmethod
     def from_dict(cls, data: Dict[str, float]) -> "PricingConfig":
-        # Filter only known fields and non-comment keys
+        # Filter alleen bekende velden en geen commentaar-sleutels
         valid_data = {k: v for k, v in data.items()
                       if hasattr(cls, k) and not k.startswith('_')}
         return cls(**valid_data)
@@ -157,7 +157,7 @@ class PricingConfig:
 
 @dataclass
 class MaterialPricesConfig:
-    """Configuration for material prices (€/kg)."""
+    """Configuratie voor materiaalprijzen (€/kg)."""
 
     steel_s235: float = 1.20
     steel_s355: float = 1.35
@@ -176,7 +176,7 @@ class MaterialPricesConfig:
         return asdict(self)
 
     def get_price(self, material: str) -> float:
-        """Get price for material, with fallback to default."""
+        """Geef prijs voor materiaal terug, met fallback naar standaard."""
         return getattr(self, material, 1.50)
 
     @classmethod
@@ -188,7 +188,7 @@ class MaterialPricesConfig:
 
 @dataclass
 class CostColumnsConfig:
-    """Configuration for which cost columns to show in simple report."""
+    """Configuratie voor kostenkolommen in eenvoudig rapport."""
 
     snijden: bool = True
     ink_per_stuk: bool = True
@@ -204,7 +204,7 @@ class CostColumnsConfig:
         return asdict(self)
 
     def get_enabled_columns(self) -> list:
-        """Return list of enabled column names."""
+        """Geef lijst met ingeschakelde kolomnamen terug."""
         return [k for k, v in self.to_dict().items() if v]
 
     @classmethod
@@ -216,32 +216,32 @@ class CostColumnsConfig:
 
 @dataclass
 class PipelineConfig:
-    """Full pipeline configuration."""
+    """Volledige pipelineconfiguratie."""
     
-    # System Settings
+    # Systeeminstellingen
     system: SystemConfig = field(default_factory=SystemConfig)
 
-    # Input/Output
+    # Invoer/Uitvoer
     step_file: str = ""
     pdf_file: Optional[str] = None
     output_dir: str = "."
 
-    # Material & Quantity (for cost estimation)
+    # Materiaal en hoeveelheid (voor kostprijs)
     material: str = "steel_s235"
     quantity: int = 1
     surface_treatment: Optional[str] = None
 
-    # Module settings
+    # Module-instellingen
     modules: ModuleConfig = field(default_factory=ModuleConfig)
 
-    # Pricing configuration
+    # Tariefconfiguratie
     hourly_rates: PricingConfig = field(default_factory=PricingConfig)
     material_prices: MaterialPricesConfig = field(default_factory=MaterialPricesConfig)
 
-    # Cost columns for simple report
+    # Kostenkolommen voor eenvoudig rapport
     cost_columns: CostColumnsConfig = field(default_factory=CostColumnsConfig)
 
-    # Cache settings
+    # Cache-instellingen
     use_cache: bool = True
     cache_dir: str = ".pipeline_cache"
     from_stage: Optional[str] = None
@@ -251,24 +251,24 @@ class PipelineConfig:
         return result
 
     def save(self, filepath: str):
-        """Save configuration to JSON file."""
+        """Sla configuratie op naar JSON-bestand."""
         with open(filepath, 'w') as f:
             json.dump(self.to_dict(), f, indent=2)
 
     @classmethod
     def load(cls, filepath: str) -> "PipelineConfig":
-        """Load configuration from JSON file."""
+        """Laad configuratie uit JSON-bestand."""
         with open(filepath, 'r') as f:
             data = json.load(f)
 
-        # Extract nested configs
+        # Haal geneste configs op
         system_data = data.pop('system', {})
         modules_data = data.pop('modules', {})
         hourly_rates_data = data.pop('hourly_rates', {})
         material_prices_data = data.pop('material_prices', {})
         cost_columns_data = data.pop('cost_columns', {})
 
-        # Filter out comment keys from main config
+        # Filter commentaar-sleutels uit hoofdconfig
         filtered_data = {k: v for k, v in data.items()
                          if not k.startswith('_') and hasattr(cls, k)}
 
@@ -281,18 +281,18 @@ class PipelineConfig:
         return config
 
 
-# Module groupings for easy enable/disable
+# Modulegroepen voor eenvoudig aan/uit zetten
 MODULE_GROUPS = {
     "basic": ["geometry", "topology", "holes", "faces"],
     "iso": ["iso2768_tolerances", "iso286_fits", "iso68_threads", "iso1302_surface", "iso13715_edges"],
     "manufacturing": ["mass_estimation", "component_classification", "detailed_parts"],
     "werkvoorbereiding": ["cost_estimation", "tool_list", "outsourcing", "surface_treatment", "purchase_spec"],
     "plaatwerk": ["sheetmetal_analysis", "bend_detection", "kantbank_tooling", "flat_pattern"],
-    "all": None,  # Special: all modules
+    "all": None,  # Speciaal: alle modules
 }
 
 
-# Human-readable module names (Dutch/English)
+# Leesbare modulenamen (NL/EN)
 MODULE_NAMES = {
     "geometry": "Geometrie / Geometry",
     "topology": "Topologie / Topology",
@@ -320,14 +320,14 @@ MODULE_NAMES = {
 
 
 def create_default_config(step_file: str = "") -> PipelineConfig:
-    """Create default configuration with all modules enabled."""
+    """Maak standaardconfiguratie met alle modules ingeschakeld."""
     return PipelineConfig(step_file=step_file)
 
 
 def create_minimal_config(step_file: str = "") -> PipelineConfig:
-    """Create minimal configuration (basic analysis only)."""
+    """Maak minimale configuratie (alleen basisanalyse)."""
     config = PipelineConfig(step_file=step_file)
-    # Disable advanced modules
+    # Schakel geavanceerde modules uit
     config.modules.iso2768_tolerances = False
     config.modules.iso286_fits = False
     config.modules.iso68_threads = False
@@ -343,18 +343,18 @@ def create_minimal_config(step_file: str = "") -> PipelineConfig:
 
 def apply_module_toggles(config: ModuleConfig, enable: list = None, disable: list = None):
     """
-    Apply module enable/disable toggles.
+    Pas module-toggles voor aan/uit toe.
 
     Args:
-        config: ModuleConfig to modify
-        enable: List of module names or groups to enable
-        disable: List of module names or groups to disable
+        config: ModuleConfig om te wijzigen
+        enable: Lijst met modulenamen of -groepen om in te schakelen
+        disable: Lijst met modulenamen of -groepen om uit te schakelen
     """
     enable = enable or []
     disable = disable or []
 
     def resolve_modules(names: list) -> list:
-        """Resolve group names to individual modules."""
+        """Los groepsnamen op naar individuele modules."""
         result = []
         for name in names:
             if name in MODULE_GROUPS:
@@ -366,7 +366,7 @@ def apply_module_toggles(config: ModuleConfig, enable: list = None, disable: lis
                 result.append(name)
         return result
 
-    # Apply enables first, then disables
+    # Pas eerst inschakelen toe, daarna uitschakelen
     for module in resolve_modules(enable):
         if hasattr(config, module):
             setattr(config, module, True)
@@ -379,7 +379,7 @@ def apply_module_toggles(config: ModuleConfig, enable: list = None, disable: lis
 
 
 def print_module_status(config: ModuleConfig):
-    """Print current module status to console."""
+    """Print huidige modulestatus naar de console."""
     print("\n" + "="*50)
     print("MODULE CONFIGURATIE / MODULE CONFIGURATION")
     print("="*50)
