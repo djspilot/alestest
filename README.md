@@ -6,6 +6,8 @@ Gebouwd voor plaatwerk- en metaalbewerkingsbedrijven die snel en nauwkeurig werk
 
 > Voor een uitgebreide technische beschrijving van hoe de engine werkt en hoe deze zich verhoudt tot SpaceClaim, zie **[docs/ENGINE.md](docs/ENGINE.md)**.
 
+> Voor het nieuwe feature-detection traject (v3) en de geplande stappen, zie **[docs/FEATURE_DETECTION_ROADMAP.md](docs/FEATURE_DETECTION_ROADMAP.md)**.
+
 ---
 
 ## Wat doet het?
