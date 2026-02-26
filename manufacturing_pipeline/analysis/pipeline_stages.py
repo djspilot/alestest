@@ -340,7 +340,7 @@ def run_assembly_bom_stage(
     assembly_data = runner.get_or_run(
         PipelineStage.ASSEMBLY_BOM,
         analyze_assembly_bom,
-        shape, part_name_for_bom, config.material
+        shape, part_name_for_bom, config.material, step_file
     )
 
     print_assembly_summary(assembly_data, production_only)

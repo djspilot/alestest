@@ -1651,7 +1651,7 @@ def analyze_sheetmetal(cq_object, thickness: float = None, material: str = "stee
 # ASSEMBLY ANALYSIS FUNCTIONS
 # =============================================================================
 
-def analyze_assembly_bom(cq_object, assembly_name: str = "Assembly", material: str = "steel_s235"):
+def analyze_assembly_bom(cq_object, assembly_name: str = "Assembly", material: str = "steel_s235", step_file_path: str = None):
     """
     Analyze a STEP assembly and generate Bill of Materials (BOM).
 
@@ -1666,6 +1666,7 @@ def analyze_assembly_bom(cq_object, assembly_name: str = "Assembly", material: s
         cq_object: CadQuery workplane or compound
         assembly_name: Name for the assembly
         material: Default material for cost calculation
+        step_file_path: Path to STEP file for accurate assembly structure parsing
 
     Returns:
         Dict with complete assembly/BOM analysis
@@ -1673,5 +1674,6 @@ def analyze_assembly_bom(cq_object, assembly_name: str = "Assembly", material: s
     return assembly_analysis.analyze_assembly_complete(
         cq_object,
         assembly_name=assembly_name,
-        material=material
+        material=material,
+        step_file_path=step_file_path
     )
