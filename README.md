@@ -43,6 +43,30 @@ Gebouwd voor plaatwerk- en metaalbewerkingsbedrijven die snel en nauwkeurig werk
 
 ---
 
+## ⚙️ Tuning: Alle Classificatie-Parameters (importance!)
+
+**⭐ BELANGRIJK:** Alle machine learning en regelgebaseerde classificatie-parameters zijn gecentraliseerd in **ÉÉN bestand:**
+
+```
+manufacturing_pipeline/analysis/classification_variables.py
+```
+
+**Waarom dit belangrijk is:**
+- Alle thresholds op één plek → makkelijk aanpassen
+- Geen code-wijzigingen elders nodig
+- Overzicht van wat je kan tunen
+- Versiecontrole via Git
+
+**Wat je daar vindt:**
+- V3 feature thresholds (planar ratio, aspect ratio, cylindrical ratio)
+- Cross-section profile detection (perimeter, L/D verhouding, hollow ratio)
+- V2 legacy profile thresholds
+- ISO-normen instellingen
+
+👉 **Zie onderaan voor gedetailleerde thresholds en hoe te tunen!**
+
+---
+
 ## Snel aan de slag
 
 ### Vereisten
