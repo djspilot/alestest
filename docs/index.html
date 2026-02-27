@@ -167,7 +167,316 @@
   </div>
 </nav>
 
-<!-- SECTIONS GO HERE -->
+<!-- ── HERO ──────────────────────────────────────── -->
+<section id="hero">
+  <div class="hero-label">Manufacturing Pipeline</div>
+  <h1 class="hero-title">Analyse STEP-bestanden.<br>Automatisch.</h1>
+  <p class="hero-sub">ALES extraheert geometrie, detecteert gaten, zettingen en draad, ontvouwt plaatwerk en genereert productieklare rapporten — volgens Nederlandse en ISO-normen.</p>
+  <div class="btn-group">
+    <a class="btn btn-primary" href="#start">Aan de slag</a>
+    <a class="btn btn-secondary" href="https://github.com/djspilot/alestest" target="_blank">GitHub →</a>
+  </div>
+</section>
+
+<!-- ── WAT DOET HET ───────────────────────────────── -->
+<section id="wat-doet-het">
+  <h2>Wat doet het?</h2>
+  <p>Geef een STEP-bestand in. ALES parseert de 3D-geometrie, classificeert het onderdeel, detecteert features en exporteert alles in het gewenste formaat.</p>
+  <div class="pipeline-wrap">
+<pre>
+┌─────────────┐     ┌──────────────────────────────────────────────────────┐     ┌──────────────┐
+│             │     │            Manufacturing Pipeline                    │     │              │
+│  STEP File  │────▶│                                                      │────▶│  Rapporten   │
+│  (.step)    │     │  1. Laad &amp; parse 3D-geometrie (CadQuery/OCP)        │     │              │
+│             │     │  2. Classificeer onderdeel (plaatwerk/profiel/etc)   │     │  - PDF       │
+└─────────────┘     │  3. Detecteer features:                              │     │  - Excel     │
+                    │     - Gaten (cilindrisch + vormgaten)                │     │  - XML       │
+                    │     - Zettingen (radius, hoek, K-factor)             │     │  - JSON      │
+                    │     - Draad (M3–M68, ISO 68-1)                      │     │  - Database  │
+                    │  4. Ontvouw plaatwerk (FreeCAD)                      │     │              │
+                    │  5. Pas ISO-normen toe                               │     └──────────────┘
+                    │  6. Genereer rapporten                               │
+                    └──────────────────────────────────────────────────────┘
+</pre>
+  </div>
+</section>
+
+<!-- ── FEATURES ──────────────────────────────────── -->
+<section id="features">
+  <h2>Wat het kan</h2>
+  <p>Acht jaar aan ISO-normen, tientallen onderdelen per dag — ALES handelt het af.</p>
+
+  <div class="feature-grid">
+    <div class="feature-card">
+      <div class="feature-icon">◈</div>
+      <h3>Onderdeelclassificatie</h3>
+      <p>Herkent automatisch plaatwerk, draaidelen, profielen en samenstellingen.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">○</div>
+      <h3>Gatdetectie</h3>
+      <p>Cilindrische vlakken én inner wire methode — gaten, sleuven, vormgaten.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">∠</div>
+      <h3>Zetanalyse</h3>
+      <p>Telt productierelevante zettingen. Sluit profielen en afrondingen automatisch uit.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">⬡</div>
+      <h3>Plaatwerk ontvouwen</h3>
+      <p>FreeCAD SheetMetal workbench met multi-poging strategie. Exporteert DXF voor laser.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">≡</div>
+      <h3>ISO-normen</h3>
+      <p>ISO 2768, ISO 286, ISO 1302, ISO 68-1, ISO 13715, EN 10025/573 — allemaal ingebouwd.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">⇄</div>
+      <h3>ERP-integratie</h3>
+      <p>XML/Excel export in SpaceClaim-formaat. Windows file watcher service voor automatische verwerking.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── HOE HET WERKT ─────────────────────────────── -->
+<section id="hoe-het-werkt">
+  <h2>Hoe het werkt</h2>
+  <p>Van STEP-bestand naar productierapport in zes stappen.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h3>Laad het STEP-bestand</h3>
+        <p>CadQuery/OCP parseert de geometrie. Ondersteunt enkelvoudige onderdelen en assemblages.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h3>Classificeer het onderdeel</h3>
+        <p>Bepaalt automatisch: plaatwerk, draaideel, gekocht profiel, of samengesteld onderdeel.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h3>Detecteer features</h3>
+        <p>Gaten via cilindrische vlakken én inner wires. Zettingen op radius, hoek en K-factor. Draad op ISO 68-1. AAG-topologie voor robuuste herkenning.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h3>Ontvouw plaatwerk</h3>
+        <p>FreeCAD SheetMetal workbench met meerdere pogingen. Bij falen: theoretisch ontvouwen op basis van zetgeometrie.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <h3>Pas ISO-normen toe</h3>
+        <p>Toleranties (ISO 2768), passingen (ISO 286), oppervlakteruwheid (ISO 1302), draad (ISO 68-1), materiaal (EN 10025/573).</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">6</div>
+      <div class="step-body">
+        <h3>Genereer rapporten</h3>
+        <p>PDF, Excel (SpaceClaim-formaat), XML voor ERP-import, JSON voor integratie, SQLite voor historiek.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── GEBRUIK ───────────────────────────────────── -->
+<section id="gebruik">
+  <h2>Gebruik</h2>
+  <p>Vier modi — van snelle dagelijkse analyse tot volledig geautomatiseerde ERP-integratie.</p>
+
+  <div class="tabs">
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="tab-quick">Quick</button>
+      <button class="tab-btn" data-tab="tab-full">Full ISO</button>
+      <button class="tab-btn" data-tab="tab-batch">Batch</button>
+      <button class="tab-btn" data-tab="tab-api">API</button>
+    </div>
+
+    <div class="tab-panel active" id="tab-quick">
+      <p style="margin-bottom:12px">Snelle analyse met PDF-rapport. Ideaal voor dagelijkse werkvoorbereiding.</p>
+<pre>
+# Interactieve bestandsselectie
+python run.py
+
+# Specifiek bestand analyseren
+python run.py -f onderdeel.step
+
+# Met AAG topologie-analyse (nauwkeuriger)
+python run.py -f onderdeel.step --aag -v
+
+# Excel export in SpaceClaim-formaat
+python run.py -f onderdeel.step --excel
+
+# Vergeleken met SpaceClaim-referentie
+python run.py -f onderdeel.step --excel --reference ref.xlsx</pre>
+    </div>
+
+    <div class="tab-panel" id="tab-full">
+      <p style="margin-bottom:12px">Volledige ISO pipeline met database-opslag en alle normcontroles.</p>
+<pre>
+# Volledige pipeline
+python run.py -f onderdeel.step --full
+
+# Met productietabel
+python run.py -f onderdeel.step --full --production-info
+
+# Cache-status bekijken
+python run.py --full --status
+
+# Hervat vanaf een specifieke stage
+python run.py -f onderdeel.step --full --from threads
+
+# Toon alle stages
+python run.py --full --list-stages</pre>
+    </div>
+
+    <div class="tab-panel" id="tab-batch">
+      <p style="margin-bottom:12px">Verwerk hele mappen parallel. Resultaten worden gecacht voor snelle heranalyse.</p>
+<pre>
+# Alle bestanden in data/input/
+python run.py --batch
+
+# Parallel verwerking (4 workers)
+python run.py -f ./map --batch -p 4
+
+# JSON output voor ERP-integratie
+python run.py --batch --json
+
+# Excel + SpaceClaim-vergelijking
+python run.py --batch --excel --reference spaceclaim.xml
+
+# Forceer heranalyse (negeer cache)
+python run.py --batch --no-cache</pre>
+    </div>
+
+    <div class="tab-panel" id="tab-api">
+      <p style="margin-bottom:12px">Deploy als REST API via Docker. Analyseer op afstand, haal resultaten op in meerdere formaten.</p>
+<pre>
+# Start de API
+docker compose up -d
+
+# Upload en analyseer een STEP-bestand
+curl -X POST http://localhost:8000/api/v1/analyze \
+  -H "X-API-Key: jouw-key" \
+  -F "file=@onderdeel.step"
+
+# Resultaten ophalen
+curl http://localhost:8000/api/v1/jobs/{job_id} \
+  -H "X-API-Key: jouw-key"
+
+# Als Excel
+curl "http://localhost:8000/api/v1/jobs/{job_id}?format=excel"
+
+# Als SpaceClaim XML
+curl "http://localhost:8000/api/v1/jobs/{job_id}?format=xml"</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ── TECHNISCH ────────────────────────────────── -->
+<section id="technisch">
+  <h2>Technisch</h2>
+  <p>Voor ontwikkelaars die de pipeline willen begrijpen, uitbreiden of integreren.</p>
+
+  <h3 style="margin-top:40px;margin-bottom:16px">Architectuur</h3>
+<pre>
+run.py ──────────────────────▶ manufacturing_pipeline/cli.py
+                                          │
+                   ┌──────────────────────┼──────────────────────┐
+                   ▼                      ▼                      ▼
+              core/                  analysis/             reporting/
+              ├── config.py          ├── step_processing   ├── report_generator (PDF)
+              ├── models.py          ├── sheetmetal_analysis├── excel_exporter
+              └── utils.py           ├── part_analyzer      ├── xml_exporter
+                                     ├── iso_standards      └── cli_output
+                                     ├── freecad_unfold
+                                     └── aag_analyzer
+
+api/app.py ──▶ routes.py ──▶ manufacturing_pipeline (zelfde engine)
+file_watcher ──▶ map monitoren ──▶ manufacturing_pipeline
+</pre>
+
+  <h3 style="margin-top:40px;margin-bottom:16px">Sleutelmodules</h3>
+  <table>
+    <thead>
+      <tr><th>Module</th><th>Verantwoordelijkheid</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>analysis/step_processing.py</code></td><td>STEP-parsing, gat/zetdetectie, vlakclassificatie</td></tr>
+      <tr><td><code>analysis/sheetmetal_analysis.py</code></td><td>Dikte, profielclassificatie, zetentelling voor ERP</td></tr>
+      <tr><td><code>analysis/part_analyzer.py</code></td><td>Onderdeelclassificatie, bedrijfslogica, redeneerssysteem</td></tr>
+      <tr><td><code>analysis/iso_standards.py</code></td><td>ISO 2768, ISO 286, ISO 1302, ISO 68-1, ISO 13715</td></tr>
+      <tr><td><code>analysis/freecad_unfold.py</code></td><td>FreeCAD SheetMetal integratie, DXF-export</td></tr>
+      <tr><td><code>scripts/aag_analyzer.py</code></td><td>Attributed Adjacency Graph, topologie-feature herkenning</td></tr>
+      <tr><td><code>reporting/report_generator.py</code></td><td>PDF-rapporten met ISO-secties en afbeeldingen</td></tr>
+      <tr><td><code>data/cache_manager.py</code></td><td>Stage-gebaseerd caching, MD5 bestandsdetectie</td></tr>
+      <tr><td><code>api/app.py</code></td><td>FastAPI REST API, job management</td></tr>
+    </tbody>
+  </table>
+
+  <h3 style="margin-top:40px;margin-bottom:16px">Pipeline stages (Full Mode)</h3>
+  <table>
+    <thead>
+      <tr><th>Stage</th><th>Beschrijving</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>load_step</code></td><td>STEP-bestand laden en parsen</td></tr>
+      <tr><td><code>detect_holes</code></td><td>Cilindrische gaten detecteren</td></tr>
+      <tr><td><code>geometry_analysis</code></td><td>Volume, oppervlak, bounding box</td></tr>
+      <tr><td><code>face_analysis</code></td><td>Vlaktypes classificeren</td></tr>
+      <tr><td><code>component_classification</code></td><td>Onderdeeltype bepalen</td></tr>
+      <tr><td><code>manufacturing_requirements</code></td><td>ISO 2768 toleranties, oppervlakteafwerking</td></tr>
+      <tr><td><code>holes_with_fits</code></td><td>ISO 286 passingen</td></tr>
+      <tr><td><code>threads</code></td><td>ISO 68-1 draaddetectie</td></tr>
+      <tr><td><code>mass_properties</code></td><td>Materiaalgewicht berekeningen</td></tr>
+      <tr><td><code>complete</code></td><td>Pipeline afgerond</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ── AAN DE SLAG ───────────────────────────────── -->
+<section id="start">
+  <h2>Aan de slag</h2>
+  <p>Vereisten: Python 3.10+ en optioneel FreeCAD (voor plaatwerk ontvouwen).</p>
+
+<pre>
+# Kloon de repository
+git clone https://github.com/djspilot/alestest.git
+cd alestest
+
+# Installeer dependencies
+pip install -r requirements.txt
+
+# Analyseer een STEP-bestand
+python run.py -f data/input/mijnonderdeel.step
+
+# Of met AAG voor nauwkeurigere herkenning
+python run.py -f mijnonderdeel.step --aag -v</pre>
+
+  <p style="margin-top:24px">Output verschijnt in <code>data/output/&lt;onderdeelnaam&gt;/</code> — PDF-rapport, SVG-afbeeldingen en analysedata.</p>
+
+  <div class="btn-group" style="margin-top:40px">
+    <a class="btn btn-primary" href="https://github.com/djspilot/alestest" target="_blank">Bekijk op GitHub</a>
+    <a class="btn btn-secondary" href="https://github.com/djspilot/alestest/blob/main/docs/ENGINE.md" target="_blank">Engine documentatie</a>
+  </div>
+</section>
+
+<footer>
+  <span>ALES Manufacturing Pipeline</span>
+  <span><a href="https://github.com/djspilot/alestest" target="_blank">GitHub</a> · <a href="https://github.com/djspilot/alestest/blob/main/docs/ENGINE.md" target="_blank">Docs</a></span>
+</footer>
 
 <script>
   // Tab switching
