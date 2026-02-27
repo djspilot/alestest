@@ -1,5 +1,7 @@
 # ALES Manufacturing Pipeline
 
+**Laatste update:** 27 februari 2026
+
 Geautomatiseerde analyse van STEP CAD-bestanden voor productie. Extraheert geometrie, detecteert features (gaten, zettingen, draad), classificeert onderdelen en genereert productieklare rapporten volgens Nederlandse/ISO-normen.
 
 Gebouwd voor plaatwerk- en metaalbewerkingsbedrijven die snel en nauwkeurig werkvoorbereidingsdata uit 3D-modellen willen halen.
