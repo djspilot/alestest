@@ -328,6 +328,67 @@ certbot --nginx -d api.jouwdomein.nl
 
 ---
 
+## Classification Variables (Centralized Tuning)
+
+**Alle classificatie-parameters zijn gecentraliseerd in:** `manufacturing_pipeline/analysis/classification_variables.py`
+
+Dit bestand bevat alle thresholds en instellingen voor de machine learning en regelgebaseerde classificatie. **Pas hier waarden aan om de nauwkeurigheid te tunen** — geen wijzigingen elders in de codebase nodig!
+
+### V3 Classification Thresholds (Feature-based)
+
+```python
+# manufacturing_pipeline/analysis/classification_variables.py
+
+# Planar surface detection (highest priority)
+v3_planar_ratio_min = 0.74                # Minimaal 74% planaire oppervlakte
+
+# Top-2 faces + aspect ratio
+v3_top2_ratio_min = 0.70                  # Top 2 vlakken >= 70% totaal oppervlak
+v3_aspect_ratio_min_top2 = 2.8            # L/D voor plaatwerk
+
+v3_aspect_ratio_min_features = 5.0        # L/D voor onderdelen met features
+
+# Extreme aspect ratio detection
+v3_aspect_ratio_min_extreme = 8.0         # Zeer elongated
+
+# Cylindrical ratio threshold
+v3_cyl_ratio_profile_threshold = 0.40     # >=40% cylindrisch → profiel
+```
+
+### Cross-Section Profile Detection (Hollow Profiles)
+
+```python
+# Perimeter & length/diameter for holle profielen (koker, buis)
+cross_section_perimeter_min_mm = 40       # Minimale perimeter
+cross_section_perimeter_max_mm = 1000     # Maximale perimeter
+cross_section_length_ratio_min = 1.0      # L/D >= 1.0 (L >= smallest dimension)
+cross_section_perim_area_ratio_min = 9.0  # Perimeter/sqrt(area) voor holle detectie
+```
+
+### V2 Profile Thresholds (Legacy)
+
+```python
+v2_profile_min_thickness_mm = 5.0
+v2_profile_length_ratio_min = 5.0
+v2_profile_cross_ratio_min = 0.5
+v2_profile_cross_ratio_max = 2.0
+v2_profile_volume_ratio_min = 0.5
+v2_profile_volume_ratio_ambiguous_min = 0.15
+v2_profile_sa_v_ratio_max = 1.2
+```
+
+### Hoe te tunen?
+
+1. **Openen:** `manufacturing_pipeline/analysis/classification_variables.py`
+2. **Pas waarden aan** voor je industrie/producttype
+3. **Test:** `python export_classification_excel_v3.py mijnbestand.stp`
+4. **Check:** Excel output en `debug_*.py` scripts
+5. **Commit:** `git add -A && git commit -m "Tuning: aangepaste thresholds"`
+
+**Voorbeeld:** Wil je meer plaatwerk detecteren? Verhoog `v3_planar_ratio_min` van 0.74 naar 0.72.
+
+---
+
 ## Projectstructuur
 
 ```
@@ -339,12 +400,14 @@ certbot --nginx -d api.jouwdomein.nl
 ├── manufacturing_pipeline/             # Kernpakket
 │   ├── cli.py                          # CLI-interface
 │   ├── core/                           # Config, modellen, utilities
-│   ├── analysis/                       # Businesslogica
-│   │   ├── step_processing.py          #   STEP-parsing, gat/zetdetectie
-│   │   ├── sheetmetal_analysis.py      #   Plaatwerk classificatie
-│   │   ├── part_analyzer.py            #   Onderdeeltype classificatie
-│   │   ├── iso_standards.py            #   ISO/NEN-normen
-│   │   ├── freecad_unfold.py           #   FreeCAD ontvouw-integratie
+│   ├── analysis/
+│   │   ├── classification_variables.py  # ⭐ CENTRALIZE TUNING (zie boven)
+│   │   ├── cross_section_profile.py     # Holle profiel detectie
+│   │   ├── step_processing.py           # STEP-parsing, gat/zetdetectie
+│   │   ├── sheetmetal_analysis.py       # Plaatwerk classificatie
+│   │   ├── part_analyzer.py             # Onderdeeltype classificatie
+│   │   ├── iso_standards.py             # ISO/NEN-normen
+│   │   ├── freecad_unfold.py            # FreeCAD ontvouw-integratie
 │   │   └── ...
 │   ├── data/                           # Caching, database
 │   ├── reporting/                      # PDF, Excel, XML, CLI output
