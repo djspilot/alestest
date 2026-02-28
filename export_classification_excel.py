@@ -186,11 +186,8 @@ def main():
     """Process both test files."""
     workspace = Path(__file__).parent.parent
     test_files = [
-        workspace / "stepfiles" / "10040852_1.stp",
         workspace / "stepfiles" / "10040878_1.stp",
-        workspace / "stepfiles" / "2006020_A-00.STEP",
-        workspace / "stepfiles" / "MD-16-03698_R2.stp",
-        workspace / "stepfiles" / "31686-080.stp",
+        workspace / "stepfiles" / "3001-28608.stp",
     ]
     
     print("=" * 60)

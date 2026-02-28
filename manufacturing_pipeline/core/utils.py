@@ -266,7 +266,7 @@ def run_analysis(step_file, output_dir, args):
     if not aag_result.success:
         print(f"  ⚠ AAG Analysis failed, falling back to standard analysis")
     else:
-        print(f"  ✓ AAG Success: {aag_result.bend_count} bends, t={aag_result.thickness:.2f}mm")
+        print(f"  [OK] AAG Success: {aag_result.bend_count} bends, t={aag_result.thickness:.2f}mm")
 
     # ================================================================
     # STEP 3: Standard Geometry Analysis
@@ -361,13 +361,13 @@ def run_analysis(step_file, output_dir, args):
 
         if unfold_result and unfold_result.get('success'):
             flat_step_path = unfold_result.get('flat_step_path')
-            print(f"  ✓ Unfold geslaagd: {unfold_result.get('flat_length', 0):.0f} x {unfold_result.get('flat_width', 0):.0f} mm")
-            print(f"  ✓ Fold lines: {unfold_result.get('fold_lines', 0)}")
+            print(f"  [OK] Unfold geslaagd: {unfold_result.get('flat_length', 0):.0f} x {unfold_result.get('flat_width', 0):.0f} mm")
+            print(f"  [OK] Fold lines: {unfold_result.get('fold_lines', 0)}")
             
             # Check thickness from unfold result
             unfold_thickness = unfold_result.get('thickness', 0)
             if unfold_thickness > 0:
-                print(f"  ✓ Detected thickness (unfold): {unfold_thickness:.2f} mm")
+                print(f"  [OK] Detected thickness (unfold): {unfold_thickness:.2f} mm")
                 
                 # Sanity check: Sheet metal thickness is usually < 25mm
                 if unfold_thickness < 25.0:
@@ -380,7 +380,7 @@ def run_analysis(step_file, output_dir, args):
             # Load the flat shape for hole analysis
             if flat_step_path and os.path.exists(flat_step_path):
                 flat_shape = load_step_file(flat_step_path)
-                print(f"  ✓ Flat STEP: {flat_step_path}")
+                print(f"  [OK] Flat STEP: {flat_step_path}")
         else:
             print(f"  ⚠ Unfold niet gelukt: {unfold_result.get('error', 'onbekend') if unfold_result else 'geen resultaat'}")
     else:
@@ -442,7 +442,7 @@ def run_analysis(step_file, output_dir, args):
 
     # Save analysis report
     report_path = os.path.join(output_dir, f"{part_name}_analysis.txt")
-    with open(report_path, 'w') as f:
+    with open(report_path, 'w', encoding='utf-8') as f:
         f.write(format_analysis_report(analysis))
         f.write(f"\n\nCategorie: {part_category}\n")
         f.write(f"Gaten (flat): {total_holes}\n")
@@ -746,13 +746,13 @@ def run_unfold(step_file, output_dir, part_name, analysis):
             # Parse output for dimensions
             for line in result.stdout.split('\n'):
                 if 'Unfold geslaagd' in line or 'Unfold successful' in line:
-                    print(f"  ✓ {line.strip()}")
+                    print(f"  [OK] {line.strip()}")
                 elif 'Fold lines' in line:
-                    print(f"  ✓ {line.strip()}")
+                    print(f"  [OK] {line.strip()}")
 
             if os.path.exists(dxf_output):
                 size_kb = os.path.getsize(dxf_output) / 1024
-                print(f"  ✓ DXF: {dxf_output} ({size_kb:.0f} KB)")
+                print(f"  [OK] DXF: {dxf_output} ({size_kb:.0f} KB)")
 
                 # Update analysis with flat dimensions
                 for line in result.stdout.split('\n'):
@@ -819,7 +819,7 @@ print("THEORETICAL_RESULT:" + json.dumps(result))
                 import json
                 data = json.loads(line.split('THEORETICAL_RESULT:')[1])
                 if data.get('success'):
-                    print(f"  ✓ Theoretische uitslag: ~{data['estimated_length']:.0f} x {data['estimated_width']:.0f} mm (indicatief)")
+                    print(f"  [OK] Theoretische uitslag: ~{data['estimated_length']:.0f} x {data['estimated_width']:.0f} mm (indicatief)")
                     print(f"    Methode: oppervlakte + buiglengtes berekening")
 
                     # Update analysis with theoretical values
@@ -1572,7 +1572,7 @@ def generate_simple_pdf(step_file, output_dir, part_name, analysis, total_holes,
 
         if analysis.can_unfold:
             if analysis.flat_length > 0:
-                elements.append(Paragraph(f"✓ Unfold geslaagd: {analysis.flat_length:.1f} × {analysis.flat_width:.1f} mm", success_style))
+                elements.append(Paragraph(f"[OK] Unfold geslaagd: {analysis.flat_length:.1f} x {analysis.flat_width:.1f} mm", success_style))
                 elements.append(Paragraph(f"  Reden: {analysis.unfold_reason}", normal_style))
                 
                 # Add detailed bend info if available

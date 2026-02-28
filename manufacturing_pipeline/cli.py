@@ -86,8 +86,8 @@ def save_to_json(filename, part_name, holes, matches, is_turned, geom_props=None
         "manufacturing_analysis": manufacturing_data,
     }
 
-    with open(filename, "w") as f:
-        json.dump(data, f, indent=2)
+    with open(filename, "w", encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
     if verbose:
         print(f"Results saved to {filename}")
 
