@@ -28,3 +28,6 @@ AI-voorbeelden/
 
 # Environment
 .env
+
+# Temporary local test outputs
+test_*_output.txt
