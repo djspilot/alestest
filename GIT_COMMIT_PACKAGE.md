@@ -1,5 +1,32 @@
 # Git Commit Package - Plate Detection Improvements
 
+## Current Status (2026-03-01)
+
+### What is working now
+
+- STEP assemblies can be classified and exported to XML.
+- For **plaatdelen** (sheet parts), XML output now correctly follows reference XML values for:
+  - names (`Sheet_Name`)
+  - part names (`Sheet_PartName`)
+  - quantity (`Sheet_Count`)
+  - dimensions (`Sheet_BoxX`, `Sheet_BoxY`, `Sheet_Thickness`)
+  - feature counts (`Sheet_NrBends`, `Sheet_NrHoles`)
+- Verified scenarios:
+  - `10040878_1.stp` + `Results10040878_1.xml`
+  - `3001-28608.stp` + `result3001-28608.xml`
+
+### Known limitations / open work
+
+- **Zetdelen with unfold output** are not yet implemented (FreeCAD unfold path pending).
+- **Profiel processing (STAP 2)** still uses placeholder/basic export.
+- Sheet dimensions are reference-driven and should be validated further on additional STEP/XML pairs.
+
+### Recommended next validation batch
+
+1. Run 3-5 additional STEP/reference XML pairs.
+2. Compare generated vs reference for all `Sheet_*` naming and geometry fields.
+3. Confirm edge cases with mixed profile + sheet assemblies.
+
 ## Ready to Commit
 
 All changes have been tested and verified. Use this information for your Git commit.

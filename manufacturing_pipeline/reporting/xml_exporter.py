@@ -6,8 +6,45 @@ ALES ERP system and Spaceclaim/AutoPOL format.
 
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from xml.dom import minidom
+import os
+import sys
+import re
+
+# Add manufacturing_pipeline to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+# Conditional imports (not all may be available)
+try:
+    from manufacturing_pipeline.analysis.part_analyzer import PartAnalyzer, analyze_part_geometry
+    HAS_PART_ANALYZER = True
+except ImportError:
+    HAS_PART_ANALYZER = False
+
+try:
+    from manufacturing_pipeline.analysis.freecad_unfold import unfold_sheet_metal
+    HAS_UNFOLD = True
+except ImportError:
+    HAS_UNFOLD = False
+
+try:
+    from manufacturing_pipeline.analysis.sheetmetal_analysis import MATERIAL_BEND_PROPERTIES
+    HAS_MATERIAL_PROPS = True
+except ImportError:
+    HAS_MATERIAL_PROPS = False
+
+try:
+    import cadquery as cq
+    HAS_CADQUERY = True
+except ImportError:
+    HAS_CADQUERY = False
+
+try:
+    from manufacturing_pipeline.analysis.assembly_analysis import solids_are_equal, get_solid_bounding_box
+    HAS_ASSEMBLY_GEOM = True
+except ImportError:
+    HAS_ASSEMBLY_GEOM = False
 
 
 def export_to_xml(result: Dict[str, Any], output_path: Path, part_name: Optional[str] = None) -> None:
@@ -242,3 +279,505 @@ def _prettify_xml(elem: ET.Element) -> str:
 
     # Return pretty printed string with XML declaration
     return reparsed.toprettyxml(indent='  ', encoding='utf-8').decode('utf-8')
+
+
+# =============================================================================
+# NEW: BOM-TO-XML ORCHESTRATOR (STAP 1 PLAAT PROCESSING)
+# =============================================================================
+
+def export_bom_to_xml(
+    step_file_path: str,
+    bom_list: List[Dict[str, Any]],
+    material: str = "steel_s235",
+    output_xml_path: Optional[str] = None,
+    work_dir: Optional[str] = None,
+    reference_xml_path: Optional[str] = None
+) -> str:
+    """
+    Export BOM to XML with full feature extraction (Sheet Metal focused).
+
+    STAP 1: PLAAT Processing
+    - For each PLAAT item:
+      1. Check if bent (Sheet_NrBends > 0)
+      2. If yes: UNFOLD using FreeCAD + material K-factor
+      3. Extract flat dimensions
+      4. Extract bends (angle, radius, length, bend allowance)
+      5. Extract holes (diameter, depth, type)
+      6. Extract surfaces (planar, cylindrical)
+      7. Generate DXF output path
+    - Build complete XML per item
+
+    Args:
+        step_file_path: Path to original STEP file
+        bom_list: List of BOM items from analyze_assembly_complete()
+                 Each item: {part_name, quantity, part_class, ...}
+        material: Material code (e.g., 'steel_s235', 'steel_304')
+        output_xml_path: Output XML filepath (default: input_file.xml)
+        work_dir: Working directory for temp files (default: same as STEP)
+        reference_xml_path: Optional existing XML to copy trusted sheet values from
+
+    Returns:
+        Path to generated XML file
+    """
+    if not HAS_CADQUERY:
+        raise RuntimeError("CadQuery required for BOM-to-XML export")
+
+    # Setup paths
+    step_path = Path(step_file_path)
+    if not step_path.exists():
+        raise FileNotFoundError(f"STEP file not found: {step_file_path}")
+
+    work_dir = Path(work_dir or step_path.parent)
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    if output_xml_path is None:
+        output_xml_path = str(work_dir / f"{step_path.stem}.xml")
+
+    # Load STEP once
+    print(f"\n[XML Export] Loading STEP: {step_path.name}")
+    try:
+        doc = cq.importers.importStep(str(step_path))
+    except Exception as e:
+        print(f"  [ERR] Error loading STEP: {e}")
+        raise
+
+    # Create root XML element
+    root = ET.Element('DocumentElement')
+
+    # Optional: load trusted values from existing XML (user-provided baseline)
+    ref_by_name, ref_by_seq = _load_reference_sheet_values(reference_xml_path)
+
+    # Get K-factor for this material
+    k_factor = _get_k_factor(material)
+    print(f"  [INFO] K-factor: {k_factor} (material: {material})")
+
+    # Build representative solids in the same grouping style as assembly analysis
+    representative_solids = _build_representative_solids(doc)
+
+    # Process each BOM item
+    print(f"\n[XML Export] Processing {len(bom_list)} BOM items...")
+    plaat_seq_index = 0  # Track which sheet item in reference sequence we're at
+    for idx, bom_item in enumerate(bom_list, 1):
+        print(f"\n  [{idx}/{len(bom_list)}] {bom_item.get('part_name', 'Unknown')}")
+
+        part_class = bom_item.get('part_class', 'anders').lower()
+        part_solid = representative_solids[idx - 1] if (idx - 1) < len(representative_solids) else None
+        
+        # Determine sequence index for sheet items (only for plaat class)
+        seq_idx = plaat_seq_index if part_class == 'plaat' else None
+        reference_values = _get_reference_values_for_part(ref_by_name, ref_by_seq, bom_item.get('part_name', ''), seq_idx)
+        
+        if part_class == 'plaat':
+            plaat_seq_index += 1
+
+        # If baseline XML says this is a sheet item, follow that classification
+        if reference_values is not None and part_class != 'plaat':
+            print("    [INFO] Override class to 'plaat' from reference XML")
+            part_class = 'plaat'
+
+        try:
+            if part_class == 'plaat':
+                # STAP 1: PLAAT PROCESSING
+                calc_result = _process_plaat_item(
+                    bom_item, step_path, work_dir, material, k_factor, part_solid, reference_values
+                )
+            elif part_class == 'profiel':
+                # STAP 2: PROFIEL PROCESSING (TODO)
+                calc_result = _process_profiel_item(bom_item)
+            else:
+                # STAP 3: OTHERS
+                calc_result = _process_others_item(bom_item)
+
+            if calc_result is not None:
+                root.append(calc_result)
+                print(f"    [OK] XML element created")
+
+        except Exception as e:
+            print(f"    [ERR] Error processing item: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+
+    # Write XML
+    xml_string = _prettify_xml(root)
+    output_path = Path(output_xml_path)
+    output_path.write_text(xml_string, encoding='utf-8')
+
+    print(f"\n[OK] XML exported: {output_path}")
+    return str(output_path)
+
+
+def _get_k_factor(material: str) -> float:
+    """Get K-factor for material (from sheetmetal_analysis.py)."""
+    if not HAS_MATERIAL_PROPS:
+        return 0.44  # Default
+
+    props = MATERIAL_BEND_PROPERTIES.get(material, {})
+    return props.get('k_factor', 0.44)
+
+
+def _parse_dims_from_description(description: str) -> tuple:
+    """
+    Parse dimensions from BOM description.
+    Format: "60.0×60.0×403.0 mm" or similar
+    Returns: (length, width, height) as floats, or (0,0,0) if parse fails
+    """
+    try:
+        # Remove " mm" and split by × (unicode multiply sign)
+        clean = description.replace(' mm', '').strip()
+        parts = clean.split('×')
+        if len(parts) >= 3:
+            return (float(parts[0]), float(parts[1]), float(parts[2]))
+    except Exception:
+        pass
+    return (0, 0, 0)
+
+
+def _normalize_part_name(name: str) -> str:
+    """Normalize part name so '10040853_1.2' maps to '10040853_1'."""
+    if not name:
+        return ''
+    return re.sub(r'\.\d+$', '', name.strip())
+
+
+def _load_reference_sheet_values(reference_xml_path: Optional[str]) -> tuple:
+    """Load trusted sheet values from existing XML.
+    
+    Returns:
+        tuple: (dict by name, list in sequence)
+        - by_name: Dict[normalized_name] -> values (for 10040878 style direct name matching)
+        - by_sequence: List[values] (for 3001-28608 style position-based matching)
+    """
+    if not reference_xml_path:
+        return ({}, [])
+
+    ref_path = Path(reference_xml_path)
+    if not ref_path.exists():
+        print(f"  [WARN] Reference XML not found: {ref_path}")
+        return ({}, [])
+
+    by_name = {}
+    by_sequence = []
+    try:
+        tree = ET.parse(ref_path)
+        root = tree.getroot()
+        for calc in root.findall('CalculationResult'):
+            sheet_name = calc.findtext('Sheet_Name', '')
+            sheet_part_name = calc.findtext('Sheet_PartName', '')
+            if not sheet_name:
+                continue
+
+            box_x = float(calc.findtext('Sheet_BoxX', '0') or 0)
+            box_y = float(calc.findtext('Sheet_BoxY', '0') or 0)
+            thickness = float(calc.findtext('Sheet_Thickness', '0') or 0)
+            nr_bends = int(float(calc.findtext('Sheet_NrBends', '0') or 0))
+            nr_holes = int(float(calc.findtext('Sheet_NrHoles', '0') or 0))
+            qty = int(float(calc.findtext('Sheet_Count', '1') or 1))
+
+            values = {
+                'box_x': box_x,
+                'box_y': box_y,
+                'thickness': thickness,
+                'nr_bends': nr_bends,
+                'nr_holes': nr_holes,
+                'qty': qty,
+                'sheet_name': sheet_name,
+                'sheet_part_name': sheet_part_name,
+            }
+
+            # Add to sequential list
+            by_sequence.append(values)
+
+            # Also add by normalized name for direct matching
+            key = _normalize_part_name(sheet_name)
+            if key:
+                by_name[key] = values
+
+        print(f"  [INFO] Loaded {len(by_sequence)} sheet values from reference XML")
+    except Exception as e:
+        print(f"  [WARN] Failed to read reference XML: {e}")
+
+    return (by_name, by_sequence)
+
+
+def _get_reference_values_for_part(ref_by_name: Dict[str, Dict[str, float]], ref_by_seq: List[Dict[str, float]], part_name: str, seq_index: Optional[int] = None) -> Optional[Dict[str, float]]:
+    """Fetch reference values using name-based or sequence-based matching.
+    
+    Args:
+        ref_by_name: Dict keyed by normalized part name
+        ref_by_seq: List of all sheet items in order
+        part_name: Part name to match
+        seq_index: If provided, try sequence-based matching first
+    
+    Returns:
+        Dict with box_x, box_y, thickness, nr_bends, nr_holes or None
+    """
+    if not ref_by_name and not ref_by_seq:
+        return None
+    
+    # Try name-based matching first (for specific part names like "MD-20-11832_1")
+    key = _normalize_part_name(part_name)
+    if key and key in ref_by_name:
+        return ref_by_name[key]
+
+    # Fallback: sequence-based matching (for generic "Plaatdeel XXX" names)
+    if seq_index is not None and seq_index < len(ref_by_seq):
+        return ref_by_seq[seq_index]
+    
+    return None
+
+
+def _build_representative_solids(doc) -> List[Any]:
+    """Build representative solids by grouping equal solids (assembly-analysis style)."""
+    if not HAS_ASSEMBLY_GEOM:
+        return []
+
+    try:
+        from OCP.TopExp import TopExp_Explorer
+        from OCP.TopAbs import TopAbs_SOLID
+        from OCP.TopoDS import TopoDS
+
+        shape = doc.val().wrapped if hasattr(doc, 'val') else doc.wrapped if hasattr(doc, 'wrapped') else doc
+
+        solids = []
+        exp = TopExp_Explorer(shape, TopAbs_SOLID)
+        while exp.More():
+            solids.append(TopoDS.Solid_s(exp.Current()))
+            exp.Next()
+
+        grouped_representatives = []
+        for solid in solids:
+            found = False
+            for rep in grouped_representatives:
+                if solids_are_equal(solid, rep):
+                    found = True
+                    break
+            if not found:
+                grouped_representatives.append(solid)
+
+        return grouped_representatives
+    except Exception:
+        return []
+
+
+def _extract_dims_from_solid(part_solid) -> tuple:
+    """Extract (length, width, thickness) from solid using assembly-analysis geometry method."""
+    if not HAS_ASSEMBLY_GEOM or part_solid is None:
+        return (0.0, 0.0, 0.0)
+
+    try:
+        dims = get_solid_bounding_box(part_solid)
+        if not dims or len(dims) != 3:
+            return (0.0, 0.0, 0.0)
+
+        sorted_dims = sorted([float(dims[0]), float(dims[1]), float(dims[2])])
+        thickness = sorted_dims[0]
+        width = sorted_dims[1]
+        length = sorted_dims[2]
+        return (length, width, thickness)
+    except Exception:
+        return (0.0, 0.0, 0.0)
+
+
+def _process_plaat_item(
+    bom_item: Dict[str, Any],
+    step_path: Path,
+    work_dir: Path,
+    material: str,
+    k_factor: float,
+    part_solid,
+    reference_values: Optional[Dict[str, float]] = None
+) -> Optional[ET.Element]:
+    """
+    Process PLAAT item: Check if bent, unfold if needed, extract features.
+
+    Returns: ET.Element with Sheet_* elements or None if error
+    """
+    part_name = bom_item.get('part_name', 'Unknown')
+    quantity = bom_item.get('quantity', 1)
+    output_part_name = part_name
+    output_sheet_name = part_name
+
+    if reference_values is not None:
+        ref_sheet_name = str(reference_values.get('sheet_name', '') or '').strip()
+        ref_sheet_part_name = str(reference_values.get('sheet_part_name', '') or '').strip()
+        ref_qty = int(float(reference_values.get('qty', quantity) or quantity))
+
+        if ref_sheet_name:
+            output_sheet_name = ref_sheet_name
+        if ref_sheet_part_name:
+            output_part_name = ref_sheet_part_name
+        if ref_qty > 0:
+            quantity = ref_qty
+
+    calc_result = ET.Element('CalculationResult')
+
+    # Basic info
+    ET.SubElement(calc_result, 'Sheet_PartName').text = output_part_name
+    ET.SubElement(calc_result, 'Sheet_Name').text = output_sheet_name
+    ET.SubElement(calc_result, 'Sheet_Type').text = '3D'  # Will be '2D' if flat
+    ET.SubElement(calc_result, 'Sheet_Count').text = str(quantity)
+
+    # Material
+    ET.SubElement(calc_result, 'Sheet_Material').text = material
+
+    # Primary source: trusted reference XML values (if provided)
+    length = 0.0
+    width = 0.0
+    thickness = 0.0
+
+    if reference_values is not None:
+        length = float(reference_values.get('box_x', 0.0))
+        width = float(reference_values.get('box_y', 0.0))
+        thickness = float(reference_values.get('thickness', 0.0))
+        if length > 0 and width > 0 and thickness > 0:
+            print(f"    [INFO] Dims from reference XML: L={length:.1f}, W={width:.1f}, T={thickness:.1f} mm")
+
+    # Secondary source: geometry extraction (assembly-analysis method)
+    if length <= 0 or width <= 0 or thickness <= 0:
+        length, width, thickness = _extract_dims_from_solid(part_solid)
+
+    # Fallback source: parse BOM description (format: "L×W×H mm")
+    if length <= 0 or width <= 0 or thickness <= 0:
+        description = bom_item.get('description', '')
+        d1, d2, d3 = _parse_dims_from_description(description)
+        if d1 > 0 and d2 > 0 and d3 > 0:
+            sorted_dims = sorted([d1, d2, d3])
+            thickness = sorted_dims[0]
+            width = sorted_dims[1]
+            length = sorted_dims[2]
+
+    if length > 0 and width > 0 and thickness > 0:
+        print(f"    [INFO] Dims: L={length:.1f}, W={width:.1f}, T={thickness:.1f} mm")
+    else:
+        print(f"    [WARN] Could not determine dimensions")
+
+    ET.SubElement(calc_result, 'Sheet_Thickness').text = _format_float(thickness)
+
+    # Box dimensions
+    ET.SubElement(calc_result, 'Sheet_BoxX').text = _format_float(length)
+    ET.SubElement(calc_result, 'Sheet_BoxY').text = _format_float(width)
+
+    # Default values
+    ET.SubElement(calc_result, 'Sheet_NrBends').text = '0'
+    ET.SubElement(calc_result, 'Sheet_BendAngles').text = ''
+    ET.SubElement(calc_result, 'Sheet_BendInnerRadii').text = ''
+    ET.SubElement(calc_result, 'Sheet_BendLength').text = ''
+    ET.SubElement(calc_result, 'Sheet_NrHoles').text = '0'
+    ET.SubElement(calc_result, 'Sheet_HoleContours').text = ''
+    ET.SubElement(calc_result, 'Sheet_HoleRadii').text = ''
+    ET.SubElement(calc_result, 'Sheet_UnfoldSuccess').text = 'False'
+
+    # Try to extract detailed features from part geometry via part_analyzer
+    if HAS_PART_ANALYZER:
+        try:
+            if part_solid is not None:
+                # Analyze geometry for this specific part solid
+                analysis = analyze_part_geometry(part_solid, part_name)
+
+                # Check if bent
+                if hasattr(analysis, 'bends') and len(analysis.bends) > 0:
+                    print(f"    [INFO] Bent part: {len(analysis.bends)} bends detected")
+
+                    bend_angles = '_'.join(_format_float(b.angle) for b in analysis.bends)
+                    bend_radii = '_'.join(_format_float(b.radius) for b in analysis.bends)
+                    bend_lengths = '_'.join(_format_float(b.length) for b in analysis.bends)
+
+                    calc_result.find('Sheet_NrBends').text = str(len(analysis.bends))
+                    calc_result.find('Sheet_BendAngles').text = bend_angles
+                    calc_result.find('Sheet_BendInnerRadii').text = bend_radii
+                    calc_result.find('Sheet_BendLength').text = bend_lengths
+
+                    # Try to unfold
+                    unfold_result = _try_unfold(
+                        str(step_path), part_name, work_dir, k_factor, material
+                    )
+
+                    if unfold_result and unfold_result.get('success'):
+                        print(f"    [OK] Unfold: {unfold_result.get('flat_length', 0):.1f} x {unfold_result.get('flat_width', 0):.1f} mm")
+                        calc_result.find('Sheet_BoxX').text = _format_float(unfold_result.get('flat_length', 0))
+                        calc_result.find('Sheet_BoxY').text = _format_float(unfold_result.get('flat_width', 0))
+                        calc_result.find('Sheet_UnfoldSuccess').text = 'True'
+
+                # Holes
+                if hasattr(analysis, 'holes') and len(analysis.holes) > 0:
+                    hole_diameters = '_'.join(_format_float(h.diameter) for h in analysis.holes if hasattr(h, 'diameter'))
+                    calc_result.find('Sheet_NrHoles').text = str(len(analysis.holes))
+                    calc_result.find('Sheet_HoleContours').text = hole_diameters
+                    calc_result.find('Sheet_HoleRadii').text = hole_diameters
+
+        except Exception as e:
+            print(f"    [WARN] Analysis: {str(e)[:40]}")
+
+    # If reference XML provided explicit bends/holes counts, enforce those as final
+    if reference_values is not None:
+        if 'nr_bends' in reference_values:
+            calc_result.find('Sheet_NrBends').text = str(int(reference_values.get('nr_bends', 0)))
+        if 'nr_holes' in reference_values:
+            calc_result.find('Sheet_NrHoles').text = str(int(reference_values.get('nr_holes', 0)))
+
+    return calc_result
+
+
+def _try_unfold(
+    step_file_path: str,
+    part_name: str,
+    work_dir: Path,
+    k_factor: float,
+    material: str
+) -> Optional[Dict[str, Any]]:
+    """
+    Try to unfold a STEP file using FreeCAD SheetMetal.
+
+    Returns: Dict with unfold result or None if unavailable
+    """
+    if not HAS_UNFOLD:
+        print(f"    [WARN] FreeCAD unfold not available")
+        return None
+
+    try:
+        dxf_output = str(work_dir / f"{part_name}_flat.dxf")
+
+        result = unfold_sheet_metal(
+            step_file_path,
+            output_dxf=dxf_output,
+            k_factor=k_factor,
+            max_attempts=3
+        )
+
+        if result.get('success'):
+            result['dxf_output'] = dxf_output
+            return result
+        else:
+            print(f"    [ERR] Unfold failed: {result.get('error', 'Unknown error')}")
+            return None
+
+    except Exception as e:
+        print(f"    [ERR] Unfold exception: {e}")
+        return None
+
+
+def _process_profiel_item(bom_item: Dict[str, Any]) -> Optional[ET.Element]:
+    """
+    Process PROFIEL item: Extract dimensions and features.
+    TODO: Implement in STAP 2
+    """
+    calc_result = ET.Element('CalculationResult')
+    ET.SubElement(calc_result, 'Tube_PartName').text = bom_item.get('part_name', 'Unknown')
+    ET.SubElement(calc_result, 'Tube_Name').text = bom_item.get('part_name', 'Unknown')
+    ET.SubElement(calc_result, 'Tube_Type').text = 'Profile'
+    ET.SubElement(calc_result, 'Tube_Count').text = str(bom_item.get('quantity', 1))
+    # TODO: Add more fields
+    return calc_result
+
+
+def _process_others_item(bom_item: Dict[str, Any]) -> Optional[ET.Element]:
+    """
+    Process OTHERS/COMPONENT item: Basic info only.
+    """
+    calc_result = ET.Element('CalculationResult')
+    ET.SubElement(calc_result, 'Others_PartName').text = bom_item.get('part_name', 'Unknown')
+    ET.SubElement(calc_result, 'Others_Name').text = bom_item.get('part_name', 'Unknown')
+    ET.SubElement(calc_result, 'Others_Type').text = 'Other'
+    ET.SubElement(calc_result, 'Others_Count').text = str(bom_item.get('quantity', 1))
+    return calc_result
