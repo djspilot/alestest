@@ -1,6 +1,6 @@
 # ALES Manufacturing Pipeline
 
-**Laatste update:** 27 februari 2026
+**Laatste update:** 2 maart 2026
 
 Geautomatiseerde analyse van STEP CAD-bestanden voor productie. Extraheert geometrie, detecteert features (gaten, zettingen, draad), classificeert onderdelen en genereert productieklare rapporten volgens Nederlandse/ISO-normen.
 
@@ -520,4 +520,23 @@ python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ 
 ---
 
 **Laatste update:** 2 maart 2026  
-**Versie:** 2.1 (Standard Profile Detection met geometry fallback)
+**Versie:** 2.1 ✓ COMMITTED (Standard Profile Detection met geometry fallback)
+
+### v2.1 Changelog (2 maart 2026)
+
+**Nieuwe features:**
+- ✓ Hollow tube detection (EN 10210-2, etc.): cylindrical ≥60% + volume_ratio <0.7
+- ✓ Variable thickness profile detection (DIN 1026 UNP, I-beams): face area diff >20%
+- ✓ Bent sheet exclusion: voorkomt false positives op gezette platen
+- ✓ Generic geometry-based fallback: werkt ook als STEP parser names mist
+
+**Gebruik voor validatie:**
+```bash
+python validate_classification_only.py  # Test alle 5 referentie files
+python analyze_two_parts.py             # Debug EN 10210-2 + DIN 1026 detection
+```
+
+**Documentatie:**
+- [CLASSIFICATION_DECISION_TREE.md](docs/CLASSIFICATION_DECISION_TREE.md) - Complete 3-step beslisboom
+- [CLASSIFICATION_ARCHITECTURE.md](docs/CLASSIFICATION_ARCHITECTURE.md) - Naam vs geometrie strategie
+- [classification_variables.py](manufacturing_pipeline/analysis/classification_variables.py) - Alle v2.1 thresholds
