@@ -390,6 +390,48 @@ def _is_plate_by_face_analysis(solid, threshold: float = 60.0) -> bool:
         return False
 
 
+def _is_shell_solid(solid, max_thickness_mm: float = 20.0) -> bool:
+    """
+    Detect if solid is a thin shell/sheet metal part (including bent sheets).
+    
+    Uses volume-to-surface-area ratio to detect thin shells.
+    Sheet metal parts have high surface area relative to their volume.
+    
+    Args:
+        solid: The solid to analyze
+        max_thickness_mm: Maximum typical sheet metal thickness (default 20mm)
+    
+    Returns:
+        True if solid appears to be thin shell/sheet metal
+    """
+    try:
+        volume = get_solid_volume(solid)
+        surface_area = _get_solid_surface_area(solid)
+        
+        if volume <= 0 or surface_area <= 0:
+            return False
+        
+        # For a thin shell: surface_area ≈ 2 × area × (top + bottom)
+        # volume ≈ area × thickness
+        # So: SA/V ≈ 2/thickness
+        # If thickness = 3mm: SA/V ≈ 0.67
+        # If thickness = 5mm: SA/V ≈ 0.40
+        # If thickness = 10mm: SA/V ≈ 0.20
+        # If thickness = 20mm: SA/V ≈ 0.10
+        
+        sa_v_ratio = surface_area / volume
+        
+        # Estimate effective thickness from SA/V ratio
+        # For sheet metal: effective_thickness ≈ 2 / SA_V_ratio
+        estimated_thickness = 2.0 / sa_v_ratio if sa_v_ratio > 0 else 999
+        
+        # Sheet metal if estimated thickness < max_thickness_mm
+        return estimated_thickness < max_thickness_mm
+        
+    except:
+        return False
+
+
 def classify_solid(solid) -> str:
     """
     Classify a solid based on its geometry.
@@ -398,13 +440,15 @@ def classify_solid(solid) -> str:
     
     Classification logic:
     - PLAAT: Detected by face analysis (top 2 faces > 60% surface area) OR
-             traditional thin plate criteria (thickness<25mm, thickness_ratio<0.15, aspect>5)
+             traditional thin plate criteria (thickness<25mm, thickness_ratio<0.15, aspect>5) OR
+             sheet metal criteria (thin thickness, high SA/V ratio = bent sheets)
     - PROFIEL: smallest≥5mm, length_ratio≥5.0, cross_ratio 0.5-2.0, constant cross-section
     - ANDERS: everything else (machined parts, complex geometry)
     
     Key insight:
     Face-based detection is more reliable for thick plates (50mm+) that would fail
     bounding box thickness_ratio checks but are still flat plates.
+    Sheet metal (bent) detection uses SA/V ratio to catch formed parts.
     """
     dims = _solid_bbox_sorted(solid)  # [smallest, middle, longest]
     smallest, middle, longest = dims
@@ -429,7 +473,8 @@ def classify_solid(solid) -> str:
     if smallest < 25.0 and thickness_ratio < 0.15 and aspect_ratio > 5.0:
         return "plaat"
     
-    # PROFIEL check: solid beam/profile
+    # PROFIEL check BEFORE sheet metal detection (to avoid false positives)
+    # Profiles/tubes can have similar SA/V as bent sheets, so check profiles first
     # Primary criteria: rectangular cross section (cross_ratio 0.5-2.0), elongated (length_ratio >= 5.0)
     if smallest >= 5.0 and length_ratio >= 5.0 and 0.5 <= cross_ratio <= 2.0:
         # Secondary check: must have significant volume fill
@@ -454,7 +499,14 @@ def classify_solid(solid) -> str:
             except:
                 pass
     
-    # Default: includes formed sheet metal with bends, machined parts, etc.
+    # Sheet metal detection - works for flat AND bent sheets
+    # Detects thin shells using SA/V ratio (independent of bounding box distortion from bends)
+    # This catches bent sheets that fail planar checks
+    # Only after profiel check to avoid false positives on hollow tubes
+    if _is_shell_solid(solid, max_thickness_mm=20.0):
+        return "plaat"
+    
+    # Default: includes machined parts, complex geometry
     return "anders"
 
 

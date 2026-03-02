@@ -668,15 +668,63 @@ def _process_plaat_item(
     ET.SubElement(calc_result, 'Sheet_HoleRadii').text = ''
     ET.SubElement(calc_result, 'Sheet_UnfoldSuccess').text = 'False'
 
+    # PROACTIVE UNFOLD: Try unfold for all sheet metal parts to detect bends
+    # This catches bent sheets that classify as "plaat" via shell detection
+    # but don't get flagged as bent by part_analyzer
+    early_unfold_attempted = False
+    if HAS_UNFOLD and part_solid is not None:
+        try:
+            # Check if this solid is planar (flat plate) or formed (bent)
+            from manufacturing_pipeline.analysis.assembly_analysis import _is_plate_by_face_analysis
+            is_planar = _is_plate_by_face_analysis(part_solid, threshold=50.0)
+            
+            if not is_planar:
+                # Non-planar sheet metal - likely bent, try unfold proactively
+                print(f"    [INFO] Non-planar sheet detected - attempting unfold...")
+                early_unfold_attempted = True
+                unfold_result = _try_unfold(
+                    str(step_path), part_name, work_dir, k_factor, material,
+                    nr_bends=0,  # Unknown yet, unfold will detect
+                    solid_object=part_solid
+                )
+                
+                if unfold_result and unfold_result.get('success'):
+                    # Unfold succeeded - extract bend parameters
+                    bend_angles = unfold_result.get('bend_angles', [])
+                    bend_radii = unfold_result.get('bend_radii', [])
+                    bend_lengths = unfold_result.get('bend_lengths', [])
+                    
+                    nr_bends = len(bend_angles) if bend_angles else 0
+                    if nr_bends > 0:
+                        print(f"    [OK] Unfold: {nr_bends} bends detected")
+                        print(f"        Angles: {bend_angles}")
+                        print(f"        Radii: {bend_radii}")
+                        print(f"        Flat: {unfold_result.get('flat_length', 0):.1f} x {unfold_result.get('flat_width', 0):.1f} mm")
+                        
+                        calc_result.find('Sheet_NrBends').text = str(nr_bends)
+                        calc_result.find('Sheet_BendAngles').text = '_'.join(_format_float(a) for a in bend_angles)
+                        calc_result.find('Sheet_BendInnerRadii').text = '_'.join(_format_float(r) for r in bend_radii)
+                        calc_result.find('Sheet_BendLength').text = '_'.join(_format_float(l) for l in bend_lengths)
+                        calc_result.find('Sheet_BoxX').text = _format_float(unfold_result.get('flat_length', 0))
+                        calc_result.find('Sheet_BoxY').text = _format_float(unfold_result.get('flat_width', 0))
+                        calc_result.find('Sheet_UnfoldSuccess').text = 'True'
+                        
+                        # Update thickness from unfold if available
+                        if unfold_result.get('thickness'):
+                            calc_result.find('Sheet_Thickness').text = _format_float(unfold_result['thickness'])
+        except Exception as e:
+            print(f"    [WARN] Proactive unfold failed: {str(e)[:60]}")
+
     # Try to extract detailed features from part geometry via part_analyzer
+    # Skip bend detection if already done by proactive unfold
     if HAS_PART_ANALYZER:
         try:
             if part_solid is not None:
                 # Analyze geometry for this specific part solid
                 analysis = analyze_part_geometry(part_solid, part_name)
 
-                # Check if bent
-                if hasattr(analysis, 'bends') and len(analysis.bends) > 0:
+                # Check if bent (but skip if already unfolded proactively)
+                if not early_unfold_attempted and hasattr(analysis, 'bends') and len(analysis.bends) > 0:
                     print(f"    [INFO] Bent part: {len(analysis.bends)} bends detected")
 
                     bend_angles = '_'.join(_format_float(b.angle) for b in analysis.bends)
