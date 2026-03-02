@@ -12,6 +12,8 @@ Gebouwd voor plaatwerk- en metaalbewerkingsbedrijven die snel en nauwkeurig werk
 
 > Voor het classificatie-schema (4 categorieën) en unfold-triggering, zie **[docs/CLASSIFICATION_SCHEMA.md](docs/CLASSIFICATION_SCHEMA.md)** ⭐ **START HIER** voor begrip van how parts flow through the pipeline.
 
+> **Classificatie beslisboom:** Welke criteria worden wanneer toegepast? Zie **[docs/CLASSIFICATION_DECISION_TREE.md](docs/CLASSIFICATION_DECISION_TREE.md)** voor complete beslisboom met thresholds en rationale. 🌳
+
 > Voor de huidige, gefaseerde XML-uitrol (plaat vlak → plaat gezet/unfold → profiel → gaten plaat → gaten profiel) met validatie via STEP/XML referentieparen, zie **[docs/FEATURE_DETECTION_ROADMAP.md](docs/FEATURE_DETECTION_ROADMAP.md)**.
 
 ---
@@ -491,5 +493,31 @@ python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ 
 
 ## Meer informatie
 
-- **[docs/ENGINE.md](docs/ENGINE.md)** — Uitgebreide technische beschrijving van de analyse-engine en vergelijking met SpaceClaim
-- **CLAUDE.md** — Instructies voor AI-assistenten die met deze codebase werken
+### Documentatie Overzicht
+
+| Document | Onderwerp | Gebruik Voor |
+|----------|-----------|-------------|
+| **[docs/ENGINE.md](docs/ENGINE.md)** | Technische engine beschrijving | Engine architectuur, vergelijking met SpaceClaim |
+| **[docs/CLASSIFICATION_SCHEMA.md](docs/CLASSIFICATION_SCHEMA.md)** | 4 classificatie categorieën | ⭐ START HIER: Plaat/Profiel/Anders overzicht |
+| **[docs/CLASSIFICATION_DECISION_TREE.md](docs/CLASSIFICATION_DECISION_TREE.md)** | Complete beslisboom met thresholds | 🌳 Welke criteria worden WANNEER toegepast? |
+| **[docs/CLASSIFICATION_ARCHITECTURE.md](docs/CLASSIFICATION_ARCHITECTURE.md)** | Classificatie architectuur | Naam vs geometrie, generieke oplossing |
+| **[docs/FEATURE_DETECTION_ROADMAP.md](docs/FEATURE_DETECTION_ROADMAP.md)** | Gefaseerde XML-uitrol | Feature detection planning, validatie |
+| **[classification_variables.py](manufacturing_pipeline/analysis/classification_variables.py)** | Alle thresholds | ⚙️ Tuning: wijzig waarden hier (single source of truth) |
+| **[CLAUDE.md](CLAUDE.md)** | AI-assistent instructies | Voor AI-tools die met deze codebase werken |
+
+### Snelle Links
+
+**Classificatie begrijpen:**
+1. Start met [CLASSIFICATION_SCHEMA.md](docs/CLASSIFICATION_SCHEMA.md) — 4 categorieën uitgelegd
+2. Bekijk [CLASSIFICATION_DECISION_TREE.md](docs/CLASSIFICATION_DECISION_TREE.md) — volledige beslisboom
+3. Tune thresholds in [classification_variables.py](manufacturing_pipeline/analysis/classification_variables.py)
+
+**Probleem debuggen:**
+- Verkeerde classificatie? → Check [CLASSIFICATION_DECISION_TREE.md](docs/CLASSIFICATION_DECISION_TREE.md) beslisboom
+- Threshold aanpassen? → Edit [classification_variables.py](manufacturing_pipeline/analysis/classification_variables.py)
+- Architectuur begrijpen? → Lees [CLASSIFICATION_ARCHITECTURE.md](docs/CLASSIFICATION_ARCHITECTURE.md)
+
+---
+
+**Laatste update:** 2 maart 2026  
+**Versie:** 2.1 (Standard Profile Detection met geometry fallback)
