@@ -18,6 +18,35 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field, asdict
 from collections import defaultdict
 
+from manufacturing_pipeline.analysis.classification_variables import (
+    PLATE_FACE_TOP2_THRESHOLD_PCT,
+    PLATE_THICK_MAX_MM,
+    PLATE_THICKNESS_RATIO_MAX,
+    PLATE_ASPECT_RATIO_MIN,
+    PROFILE_SMALLEST_MIN_MM,
+    PROFILE_LENGTH_RATIO_MIN,
+    PROFILE_CROSS_RATIO_MIN,
+    PROFILE_CROSS_RATIO_MAX,
+    PROFILE_VOLUME_RATIO_STRONG_MIN,
+    PROFILE_VOLUME_RATIO_WEAK_MIN,
+    PROFILE_SA_V_RATIO_MAX,
+    SCORE_PLATE_TOP2_HIGH_PCT,
+    SCORE_PLATE_TOP2_MIN_PCT,
+    SCORE_PLATE_SUPPORT_TOP2_PCT,
+    SCORE_PLATE_SUPPORT_THICKNESS_RATIO_MAX,
+    SCORE_PLATE_SUPPORT_ASPECT_MIN,
+    SCORE_PROFILE_PRIMARY_POINTS,
+    SCORE_PLATE_PRIMARY_POINTS,
+    SCORE_AMBIGUOUS_MARGIN_MIN,
+    # v2.1: Standard profile detection
+    STANDARD_TUBE_CYLINDRICAL_MIN_PCT,
+    STANDARD_TUBE_VOLUME_RATIO_MAX,
+    STANDARD_TUBE_ASPECT_MIN,
+    STANDARD_PROFILE_FACE_AREA_TOLERANCE,
+    BENT_SHEET_LARGE_RADIUS_MIN_MM,
+    BENT_SHEET_MIN_EDGE_COUNT,
+)
+
 # Try to import CAD libraries
 try:
     from OCP.TopExp import TopExp_Explorer
@@ -105,6 +134,7 @@ class BOMItem:
     total_cost: float = 0.0
     children: List["BOMItem"] = field(default_factory=list)
     level: int = 0
+    classification_trace: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         result = asdict(self)
@@ -361,6 +391,192 @@ def _is_plate_by_face_analysis(solid, threshold: float = 60.0) -> bool:
         True if solid is a plate
     """
     try:
+        top2_percent = _get_top2_face_percent(solid)
+        return top2_percent > threshold
+    except:
+        return False
+
+
+def _detect_hollow_tube(solid, volume: float, dims: Tuple[float, float, float]) -> bool:
+    """Detect hollow cylindrical tubes (purchased standard profiles like EN 10210-2).
+    
+    Hollow tubes have:
+    - High cylindrical face percentage (≥ 60% of surface area)
+    - Low volume ratio (hollow = lot of air inside bbox)
+    - Reasonable aspect ratio (not extremely flat)
+    
+    Example: Ø88.9×4×65mm tube has cylindrical faces ~94% and volume_ratio 0.135
+    
+    Args:
+        solid: The solid to analyze
+        volume: Volume in mm³
+        dims: Sorted bounding box dimensions [smallest, middle, longest]
+    
+    Returns:
+        True if this appears to be a hollow tube
+    """
+    try:
+        min_dim, mid_dim, max_dim = dims
+        
+        # Check aspect ratio - not too flat
+        aspect = mid_dim / max_dim if max_dim > 0 else 0
+        if aspect < STANDARD_TUBE_ASPECT_MIN:
+            return False
+        
+        # Check volume ratio - hollow tubes have low ratio
+        bbox_volume = min_dim * mid_dim * max_dim
+        volume_ratio = volume / bbox_volume if bbox_volume > 0 else 0
+        if volume_ratio > STANDARD_TUBE_VOLUME_RATIO_MAX:
+            return False
+        
+        # Check cylindrical face percentage
+        if not HAS_OCP:
+            return False
+            
+        from OCP.BRepAdaptor import BRepAdaptor_Surface
+        from OCP.GeomAbs import GeomAbs_Cylinder
+        
+        cylindrical_area = 0.0
+        total_area = 0.0
+        
+        face_exp = TopExp_Explorer(solid, TopAbs_FACE)
+        while face_exp.More():
+            face = TopoDS.Face_s(face_exp.Current())
+            surf_adapter = BRepAdaptor_Surface(face)
+            
+            # Calculate face area
+            props = GProp_GProps()
+            BRepGProp.SurfaceProperties_s(face, props)
+            area = props.Mass()
+            total_area += area
+            
+            # Check if cylindrical
+            if surf_adapter.GetType() == GeomAbs_Cylinder:
+                cylindrical_area += area
+            
+            face_exp.Next()
+        
+        if total_area == 0:
+            return False
+        
+        cylindrical_pct = (cylindrical_area / total_area) * 100
+        return cylindrical_pct >= STANDARD_TUBE_CYLINDRICAL_MIN_PCT
+        
+    except:
+        return False
+
+
+def _is_bent_sheet(solid) -> bool:
+    """Detect bent sheet metal parts to exclude from variable thickness check.
+    
+    Bent sheets have:
+    - Many edges (typically > 8) from bends
+    - Large radius edges (≥ 1mm) from bending
+    - Would otherwise trigger false positive on variable thickness
+    
+    Args:
+        solid: The solid to analyze
+    
+    Returns:
+        True if this appears to be a bent sheet
+    """
+    try:
+        if not HAS_OCP:
+            return False
+        
+        from OCP.BRepAdaptor import BRepAdaptor_Curve
+        from OCP.GeomAbs import GeomAbs_Circle
+        
+        large_radius_count = 0
+        edge_count = 0
+        
+        edge_exp = TopExp_Explorer(solid, TopAbs_EDGE)
+        while edge_exp.More():
+            edge_count += 1
+            edge = TopoDS.Edge_s(edge_exp.Current())
+            curve_adapter = BRepAdaptor_Curve(edge)
+            
+            # Check if circular (bend radius)
+            if curve_adapter.GetType() == GeomAbs_Circle:
+                circle = curve_adapter.Circle()
+                radius = circle.Radius()
+                if radius >= BENT_SHEET_LARGE_RADIUS_MIN_MM:
+                    large_radius_count += 1
+            
+            edge_exp.Next()
+        
+        # Bent sheet: many edges and some large radii
+        return edge_count > BENT_SHEET_MIN_EDGE_COUNT and large_radius_count > 0
+        
+    except:
+        return False
+
+
+def _detect_variable_thickness(solid, dims: Tuple[float, float, float]) -> bool:
+    """Detect non-constant thickness profiles (UNP, I-beam, etc.).
+    
+    Variable thickness profiles have:
+    - Top 2 faces with significantly different areas (> 20% difference) 
+    - Elongated shape (length_ratio ≥ 5.0)
+    - NOT bent sheet metal (different failure mode)
+    
+    Example: DIN 1026 UNP160 has faces differing by >20% in area, length_ratio 9.2
+    
+    Args:
+        solid: The solid to analyze
+        dims: Sorted bounding box dimensions [smallest, middle, longest]
+    
+    Returns:
+        True if this appears to be a variable thickness profile
+    """
+    try:
+        # Check if bent sheet first (exclusion)
+        if _is_bent_sheet(solid):
+            return False
+        
+        min_dim, mid_dim, max_dim = dims
+        
+        # Check elongation
+        length_ratio = max_dim / min_dim if min_dim > 0 else 0
+        if length_ratio < PROFILE_LENGTH_RATIO_MIN:
+            return False
+        
+        # Analyze face areas
+        if not HAS_OCP:
+            return False
+        
+        face_areas = []
+        face_exp = TopExp_Explorer(solid, TopAbs_FACE)
+        while face_exp.More():
+            face = TopoDS.Face_s(face_exp.Current())
+            props = GProp_GProps()
+            BRepGProp.SurfaceProperties_s(face, props)
+            area = props.Mass()
+            face_areas.append(area)
+            face_exp.Next()
+        
+        if len(face_areas) < 2:
+            return False
+        
+        # Get top 2 largest faces
+        face_areas_sorted = sorted(face_areas, reverse=True)
+        top_area = face_areas_sorted[0]
+        second_area = face_areas_sorted[1]
+        
+        # Check if they differ significantly
+        if top_area == 0:
+            return False
+        
+        area_diff = abs(top_area - second_area) / top_area
+        return area_diff > STANDARD_PROFILE_FACE_AREA_TOLERANCE
+        
+    except:
+        return False
+
+
+def _get_top2_face_percent(solid) -> float:
+    """Return percentage surface area covered by the two largest faces."""
+    try:
         face_areas = []
         exp = TopExp_Explorer(solid, TopAbs_FACE)
         while exp.More():
@@ -372,84 +588,152 @@ def _is_plate_by_face_analysis(solid, threshold: float = 60.0) -> bool:
                 BRepGProp.SurfaceProperties(face, props)
             face_areas.append(props.Mass())
             exp.Next()
-        
+
         if len(face_areas) < 2:
-            return False
-        
+            return 0.0
+
         face_areas.sort(reverse=True)
         total_area = sum(face_areas)
-        
-        if total_area == 0:
-            return False
-        
-        top2_area = face_areas[0] + face_areas[1]
-        top2_percent = (top2_area / total_area) * 100.0
-        
-        return top2_percent > threshold
-    except:
-        return False
+        if total_area <= 0:
+            return 0.0
+
+        return ((face_areas[0] + face_areas[1]) / total_area) * 100.0
+    except Exception:
+        return 0.0
 
 
-def _is_shell_solid(solid, max_thickness_mm: float = 20.0) -> bool:
-    """
-    Detect if solid is a thin shell/sheet metal part (including bent sheets).
-    
-    Uses volume-to-surface-area ratio to detect thin shells.
-    Sheet metal parts have high surface area relative to their volume.
-    
-    Args:
-        solid: The solid to analyze
-        max_thickness_mm: Maximum typical sheet metal thickness (default 20mm)
-    
-    Returns:
-        True if solid appears to be thin shell/sheet metal
-    """
-    try:
-        volume = get_solid_volume(solid)
-        surface_area = _get_solid_surface_area(solid)
-        
-        if volume <= 0 or surface_area <= 0:
-            return False
-        
-        # For a thin shell: surface_area ≈ 2 × area × (top + bottom)
-        # volume ≈ area × thickness
-        # So: SA/V ≈ 2/thickness
-        # If thickness = 3mm: SA/V ≈ 0.67
-        # If thickness = 5mm: SA/V ≈ 0.40
-        # If thickness = 10mm: SA/V ≈ 0.20
-        # If thickness = 20mm: SA/V ≈ 0.10
-        
-        sa_v_ratio = surface_area / volume
-        
-        # Estimate effective thickness from SA/V ratio
-        # For sheet metal: effective_thickness ≈ 2 / SA_V_ratio
-        estimated_thickness = 2.0 / sa_v_ratio if sa_v_ratio > 0 else 999
-        
-        # Sheet metal if estimated thickness < max_thickness_mm
-        return estimated_thickness < max_thickness_mm
-        
-    except:
-        return False
+def classify_solid_scored(solid) -> Tuple[str, Dict[str, Any]]:
+    """Score-based classification with explainable trace."""
+    dims = _solid_bbox_sorted(solid)
+    smallest, middle, longest = dims
+
+    volume = get_solid_volume(solid)
+    bbox_volume = smallest * middle * longest
+    volume_ratio = volume / bbox_volume if bbox_volume > 0 else 0.0
+
+    aspect_ratio = longest / smallest if smallest > 0 else 0.0
+    thickness_ratio = smallest / middle if middle > 0 else 0.0
+    length_ratio = longest / middle if middle > 0 else 0.0
+    cross_ratio = middle / smallest if smallest > 0 else 0.0
+    top2_percent = _get_top2_face_percent(solid)
+    surface_area = _get_solid_surface_area(solid)
+    sa_v_ratio = surface_area / volume if volume > 0 else 0.0
+
+    scores = {"plaat": 0.0, "profiel": 0.0, "anders": 0.0}
+    reasons = {"plaat": [], "profiel": [], "anders": []}
+
+    if top2_percent >= SCORE_PLATE_TOP2_HIGH_PCT:
+        scores["plaat"] += SCORE_PLATE_PRIMARY_POINTS + 1.0
+        reasons["plaat"].append(f"top2%>=high ({top2_percent:.1f})")
+    elif top2_percent >= SCORE_PLATE_TOP2_MIN_PCT:
+        scores["plaat"] += SCORE_PLATE_PRIMARY_POINTS
+        reasons["plaat"].append(f"top2%>=min ({top2_percent:.1f})")
+
+    if (smallest < PLATE_THICK_MAX_MM and
+        thickness_ratio < PLATE_THICKNESS_RATIO_MAX and
+        aspect_ratio > PLATE_ASPECT_RATIO_MIN):
+        scores["plaat"] += 2.0
+        reasons["plaat"].append("thin-plate-ratios")
+
+    if (top2_percent >= SCORE_PLATE_SUPPORT_TOP2_PCT and
+        thickness_ratio < SCORE_PLATE_SUPPORT_THICKNESS_RATIO_MAX and
+        aspect_ratio > SCORE_PLATE_SUPPORT_ASPECT_MIN):
+        scores["plaat"] += 1.0
+        reasons["plaat"].append("support-plate-shape")
+
+    profile_primary = (
+        smallest >= PROFILE_SMALLEST_MIN_MM and
+        length_ratio >= PROFILE_LENGTH_RATIO_MIN and
+        PROFILE_CROSS_RATIO_MIN <= cross_ratio <= PROFILE_CROSS_RATIO_MAX
+    )
+    if profile_primary:
+        scores["profiel"] += SCORE_PROFILE_PRIMARY_POINTS
+        reasons["profiel"].append("primary-profile-ratios")
+
+        if volume_ratio > PROFILE_VOLUME_RATIO_STRONG_MIN:
+            scores["profiel"] += 2.0
+            reasons["profiel"].append("strong-volume-fill")
+        elif volume_ratio >= PROFILE_VOLUME_RATIO_WEAK_MIN:
+            scores["profiel"] += 1.0
+            reasons["profiel"].append("weak-volume-fill")
+
+        if 0 < sa_v_ratio < PROFILE_SA_V_RATIO_MAX:
+            scores["profiel"] += 1.0
+            reasons["profiel"].append("low-sa-v")
+
+    if top2_percent < SCORE_PLATE_SUPPORT_TOP2_PCT:
+        scores["anders"] += 1.5
+        reasons["anders"].append("low-top2")
+    if not profile_primary:
+        scores["anders"] += 0.5
+        reasons["anders"].append("not-profile-primary")
+    if volume_ratio < PROFILE_VOLUME_RATIO_WEAK_MIN:
+        scores["anders"] += 1.0
+        reasons["anders"].append("low-volume-fill")
+
+    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    best_class, best_score = sorted_scores[0]
+    second_score = sorted_scores[1][1] if len(sorted_scores) > 1 else 0.0
+    margin = best_score - second_score
+
+    if margin < SCORE_AMBIGUOUS_MARGIN_MIN:
+        best_class = "anders"
+        reasons["anders"].append(f"ambiguous-margin<{SCORE_AMBIGUOUS_MARGIN_MIN}")
+
+    trace = {
+        "mode": "score",
+        "features": {
+            "top2_percent": round(top2_percent, 3),
+            "smallest": round(smallest, 3),
+            "middle": round(middle, 3),
+            "longest": round(longest, 3),
+            "aspect_ratio": round(aspect_ratio, 3),
+            "thickness_ratio": round(thickness_ratio, 3),
+            "length_ratio": round(length_ratio, 3),
+            "cross_ratio": round(cross_ratio, 3),
+            "volume_ratio": round(volume_ratio, 3),
+            "sa_v_ratio": round(sa_v_ratio, 6),
+        },
+        "scores": {k: round(v, 3) for k, v in scores.items()},
+        "reasons": reasons,
+        "selected": best_class,
+        "margin": round(margin, 3),
+    }
+    return best_class, trace
 
 
-def classify_solid(solid) -> str:
+def classify_solid(solid, return_trace: bool = False):
     """
     Classify a solid based on its geometry.
     
     Returns one of: "plaat", "profiel", "anders"
     
-    Classification logic:
+    Classification logic (v2.1):
+    
+    STEP 1: STANDARD PROFILE CHECK (purchased items - name-based heuristic failed)
+    - Hollow tube: cylindrical ≥60%, volume_ratio <0.7 → "anders"
+    - Variable thickness: face area diff >20%, elongated ≥5.0 → "anders"
+    
+    STEP 2: PLATE DETECTION
     - PLAAT: Detected by face analysis (top 2 faces > 60% surface area) OR
-             traditional thin plate criteria (thickness<25mm, thickness_ratio<0.15, aspect>5) OR
-             sheet metal criteria (thin thickness, high SA/V ratio = bent sheets)
+             traditional thin plate criteria (thickness<25mm, thickness_ratio<0.15, aspect>5)
+    
+    STEP 3: PROFILE DETECTION
     - PROFIEL: smallest≥5mm, length_ratio≥5.0, cross_ratio 0.5-2.0, constant cross-section
+    
+    STEP 4: DEFAULT
     - ANDERS: everything else (machined parts, complex geometry)
     
-    Key insight:
-    Face-based detection is more reliable for thick plates (50mm+) that would fail
-    bounding box thickness_ratio checks but are still flat plates.
-    Sheet metal (bent) detection uses SA/V ratio to catch formed parts.
+    Key insight (v2.1):
+    Standard profiles (tubes, UNP, I-beams) must be detected BEFORE plate check.
+    Otherwise, tubes with dominant end faces (94%) and UNP with flat web (52%)
+    incorrectly trigger plate classification.
     """
+    mode = os.environ.get("ALES_CLASSIFICATION_MODE", "legacy").strip().lower()
+    if mode == "score":
+        klass, trace = classify_solid_scored(solid)
+        return (klass, trace) if return_trace else klass
+
     dims = _solid_bbox_sorted(solid)  # [smallest, middle, longest]
     smallest, middle, longest = dims
     
@@ -463,28 +747,74 @@ def classify_solid(solid) -> str:
     length_ratio = longest / middle if middle > 0 else 0
     cross_ratio = middle / smallest if smallest > 0 else 0
     
+    trace = {
+        "mode": "legacy",
+        "version": "2.1",
+        "features": {
+            "smallest": round(smallest, 3),
+            "middle": round(middle, 3),
+            "longest": round(longest, 3),
+            "aspect_ratio": round(aspect_ratio, 3),
+            "thickness_ratio": round(thickness_ratio, 3),
+            "length_ratio": round(length_ratio, 3),
+            "cross_ratio": round(cross_ratio, 3),
+            "volume_ratio": round(volume_ratio, 3),
+            "top2_percent": round(_get_top2_face_percent(solid), 3),
+        },
+        "rules": [],
+    }
+    
+    # ============================================================================
+    # STEP 1: STANDARD PROFILE CHECK (v2.1)
+    # Purchased items that name-based heuristics missed (STEP parser failure)
+    # ============================================================================
+    
+    # 1a. Hollow tube detection (EN 10210-2, etc.)
+    # Example: Ø88.9×4×65mm tube has cylindrical faces 94% but top2_faces also 94%
+    # Must check BEFORE plate detection to avoid false positive
+    if _detect_hollow_tube(solid, volume, dims):
+        trace["rules"].append("standard_hollow_tube")
+        return ("anders", trace) if return_trace else "anders"
+    
+    # 1b. Variable thickness profile detection (DIN 1026 UNP, I-beams, etc.)
+    # Example: UNP160 has top2_faces 52% but variable thickness indicates standard profile
+    # Must check BEFORE plate detection to avoid false positive
+    if _detect_variable_thickness(solid, dims):
+        trace["rules"].append("standard_variable_thickness")
+        return ("anders", trace) if return_trace else "anders"
+    
+    # ============================================================================
+    # STEP 2: PLATE DETECTION
+    # ============================================================================
+    
     # PLAAT check: Use face analysis as primary method (more reliable)
     # Lower threshold (50%) for industrial plates with holes/cutouts/weld preparations
-    if _is_plate_by_face_analysis(solid, threshold=50.0):
-        return "plaat"
+    if _is_plate_by_face_analysis(solid, threshold=PLATE_FACE_TOP2_THRESHOLD_PCT):
+        trace["rules"].append("plate_face")
+        return ("plaat", trace) if return_trace else "plaat"
     
     # Fallback: traditional thin plate check for very thin plates (< 25mm)
     # thickness_ratio < 0.15 means thickness is less than 15% of width = flat
-    if smallest < 25.0 and thickness_ratio < 0.15 and aspect_ratio > 5.0:
-        return "plaat"
+    if smallest < PLATE_THICK_MAX_MM and thickness_ratio < PLATE_THICKNESS_RATIO_MAX and aspect_ratio > PLATE_ASPECT_RATIO_MIN:
+        trace["rules"].append("plate_thin")
+        return ("plaat", trace) if return_trace else "plaat"
     
-    # PROFIEL check BEFORE sheet metal detection (to avoid false positives)
-    # Profiles/tubes can have similar SA/V as bent sheets, so check profiles first
+    # ============================================================================
+    # STEP 3: PROFILE DETECTION
+    # ============================================================================
+    
+    # PROFIEL check: solid beam/profile
     # Primary criteria: rectangular cross section (cross_ratio 0.5-2.0), elongated (length_ratio >= 5.0)
-    if smallest >= 5.0 and length_ratio >= 5.0 and 0.5 <= cross_ratio <= 2.0:
+    if smallest >= PROFILE_SMALLEST_MIN_MM and length_ratio >= PROFILE_LENGTH_RATIO_MIN and PROFILE_CROSS_RATIO_MIN <= cross_ratio <= PROFILE_CROSS_RATIO_MAX:
         # Secondary check: must have significant volume fill
         # High volume_ratio (>0.5) = definitely solid profiel
         # Medium volume_ratio (0.15-0.5) = could be profiel with internal features OR formed plate
         
-        if volume_ratio > 0.5:
+        if volume_ratio > PROFILE_VOLUME_RATIO_STRONG_MIN:
             # Clear case: solid rectangular beam
-            return "profiel"
-        elif volume_ratio >= 0.15:
+            trace["rules"].append("profile_primary_strong")
+            return ("profiel", trace) if return_trace else "profiel"
+        elif volume_ratio >= PROFILE_VOLUME_RATIO_WEAK_MIN:
             # Ambiguous: could be profiel with internal features or formed plate
             # Use surface complexity as tiebreaker (lower = likely profiel)
             # Formed plates with bends have higher surface area relative to volume
@@ -494,20 +824,19 @@ def classify_solid(solid) -> str:
                     # Surface to volume ratio: profiel should have lower SA/V than formed sheet
                     sa_v_ratio = surface_area / volume
                     # Rough threshold: constant profiel < 1.5 cm^-1, formed plate > 1.0 cm^-1
-                    if sa_v_ratio < 1.2:  # More surface fill = solid
-                        return "profiel"
+                    if sa_v_ratio < PROFILE_SA_V_RATIO_MAX:  # More surface fill = solid
+                        trace["rules"].append("profile_primary_weak_sav")
+                        return ("profiel", trace) if return_trace else "profiel"
             except:
                 pass
     
-    # Sheet metal detection - works for flat AND bent sheets
-    # Detects thin shells using SA/V ratio (independent of bounding box distortion from bends)
-    # This catches bent sheets that fail planar checks
-    # Only after profiel check to avoid false positives on hollow tubes
-    if _is_shell_solid(solid, max_thickness_mm=20.0):
-        return "plaat"
+    # ============================================================================
+    # STEP 4: DEFAULT
+    # ============================================================================
     
-    # Default: includes machined parts, complex geometry
-    return "anders"
+    # Default: includes formed sheet metal with bends, machined parts, etc.
+    trace["rules"].append("default_anders")
+    return ("anders", trace) if return_trace else "anders"
 
 
 def _get_solid_surface_area(solid) -> float:
@@ -811,8 +1140,10 @@ def analyze_assembly(
                     part_class = "anders"
             
             # If not a standard profile, classify based on geometry
+            class_trace = {}
             if part_class is None:
-                part_class = classify_solid(solid)
+                class_result = classify_solid(solid, return_trace=True)
+                part_class, class_trace = class_result
             
             # Map classification to Dutch part type
             part_type_map = {
@@ -847,6 +1178,7 @@ def analyze_assembly(
                 is_purchased=False,
                 is_fastener=False,
                 part_class=part_class,
+                classification_trace=class_trace,
                 unit_cost=unit_cost,
                 total_cost=unit_cost * count,
                 level=0,
