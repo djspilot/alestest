@@ -688,9 +688,11 @@ def _process_plaat_item(
                     calc_result.find('Sheet_BendInnerRadii').text = bend_radii
                     calc_result.find('Sheet_BendLength').text = bend_lengths
 
-                    # Try to unfold
+                    # Try to unfold - pass the specific solid for bent parts
                     unfold_result = _try_unfold(
-                        str(step_path), part_name, work_dir, k_factor, material
+                        str(step_path), part_name, work_dir, k_factor, material,
+                        nr_bends=len(analysis.bends),
+                        solid_object=part_solid  # Use specific solid instead of whole assembly
                     )
 
                     if unfold_result and unfold_result.get('success'):
@@ -698,6 +700,19 @@ def _process_plaat_item(
                         calc_result.find('Sheet_BoxX').text = _format_float(unfold_result.get('flat_length', 0))
                         calc_result.find('Sheet_BoxY').text = _format_float(unfold_result.get('flat_width', 0))
                         calc_result.find('Sheet_UnfoldSuccess').text = 'True'
+                        
+                        # Add bend parameters from unfold result if available
+                        if unfold_result.get('bend_angles'):
+                            bend_angles_str = '_'.join(_format_float(a) for a in unfold_result['bend_angles'])
+                            calc_result.find('Sheet_BendAngles').text = bend_angles_str
+                        
+                        if unfold_result.get('bend_radii'):
+                            bend_radii_str = '_'.join(_format_float(r) for r in unfold_result['bend_radii'])
+                            calc_result.find('Sheet_BendInnerRadii').text = bend_radii_str
+                        
+                        if unfold_result.get('bend_lengths'):
+                            bend_lengths_str = '_'.join(_format_float(l) for l in unfold_result['bend_lengths'])
+                            calc_result.find('Sheet_BendLength').text = bend_lengths_str
 
                 # Holes
                 if hasattr(analysis, 'holes') and len(analysis.holes) > 0:
@@ -716,6 +731,104 @@ def _process_plaat_item(
         if 'nr_holes' in reference_values:
             calc_result.find('Sheet_NrHoles').text = str(int(reference_values.get('nr_holes', 0)))
 
+    # Try unfold also when part_analyzer is unavailable but bends are known
+    # (e.g. from reference XML or upstream classification)
+    try:
+        nr_bends_value = int(calc_result.findtext('Sheet_NrBends', '0') or 0)
+    except ValueError:
+        nr_bends_value = 0
+
+    if nr_bends_value > 0 and calc_result.findtext('Sheet_UnfoldSuccess', 'False') != 'True':
+        print(f"    [INFO] Trying unfold based on bend count ({nr_bends_value})")
+        unfold_result = _try_unfold(
+            str(step_path), part_name, work_dir, k_factor, material,
+            nr_bends=nr_bends_value,
+            solid_object=part_solid if part_solid is not None else None
+        )
+
+        if unfold_result and unfold_result.get('success'):
+            flat_length = float(unfold_result.get('flat_length', 0) or 0)
+            flat_width = float(unfold_result.get('flat_width', 0) or 0)
+
+            if flat_length > 0 and flat_width > 0:
+                print(f"    [OK] Unfold (fallback): {flat_length:.1f} x {flat_width:.1f} mm")
+                calc_result.find('Sheet_BoxX').text = _format_float(flat_length)
+                calc_result.find('Sheet_BoxY').text = _format_float(flat_width)
+                calc_result.find('Sheet_UnfoldSuccess').text = 'True'
+                
+                # Add bend parameters from unfold result if available
+                if unfold_result.get('bend_angles'):
+                    bend_angles_str = '_'.join(_format_float(a) for a in unfold_result['bend_angles'])
+                    calc_result.find('Sheet_BendAngles').text = bend_angles_str
+                    print(f"      - Bend angles: {bend_angles_str}")
+                
+                if unfold_result.get('bend_radii'):
+                    bend_radii_str = '_'.join(_format_float(r) for r in unfold_result['bend_radii'])
+                    calc_result.find('Sheet_BendInnerRadii').text = bend_radii_str
+                    print(f"      - Bend radii: {bend_radii_str}")
+                
+                if unfold_result.get('bend_lengths'):
+                    bend_lengths_str = '_'.join(_format_float(l) for l in unfold_result['bend_lengths'])
+                    calc_result.find('Sheet_BendLength').text = bend_lengths_str
+                    print(f"      - Bend lengths: {bend_lengths_str}")
+
+                # Use flat dimensions for downstream area calculations
+                length = flat_length
+                width = flat_width
+
+    # ========== GEOMETRY AND AREA CALCULATIONS ==========
+    # Volume and area calculations based on bounding box dimensions
+    volume = length * width * thickness
+    ET.SubElement(calc_result, 'Sheet_Volume').text = _format_float(volume)
+
+    # Top area (flat surface for sheet metal)
+    top_area = length * width
+    ET.SubElement(calc_result, 'Sheet_TopArea').text = _format_float(top_area)
+
+    # Bottom area (same as top for sheet metal)
+    bottom_area = top_area
+    ET.SubElement(calc_result, 'Sheet_BottomArea').text = _format_float(bottom_area)
+
+    # Box surface area (all 6 faces of bounding box)
+    if thickness > 0:
+        box_area = 2 * (length * width + length * thickness + width * thickness)
+    else:
+        box_area = 0
+    ET.SubElement(calc_result, 'Sheet_BoxArea').text = _format_float(box_area)
+
+    # Area without holes (approximation: top_area - sum of hole areas)
+    # For now, assume we have hole count but not exact areas
+    area_no_holes = top_area  # Will be refined when hole analysis is complete
+    ET.SubElement(calc_result, 'Sheet_AreaNoHoles').text = _format_float(area_no_holes)
+
+    # Total area (perimeter measurements)
+    # If unfold was successful, use flat dimensions; otherwise use box
+    total_area = top_area
+    ET.SubElement(calc_result, 'Sheet_TotalArea').text = _format_float(total_area)
+
+    # Outer contour (cutting perimeter)
+    # For flat sheet: 2 * (length + width)
+    outer_contour = 2 * (length + width)
+    ET.SubElement(calc_result, 'Sheet_OuterContour').text = _format_float(outer_contour)
+
+    # Total contour (including internal cuts if any)
+    total_contour = outer_contour  # Will be updated if hole contours extracted
+    ET.SubElement(calc_result, 'Sheet_TotalContour').text = _format_float(total_contour)
+
+    # Weight estimation (material density in g/cm³)
+    # Default steel density: 7.85 g/cm³
+    # Volume in mm³, so: (mm³ * 7.85) / 1000 = grams
+    material_densities = {
+        'steel_304': 8.00,
+        'steel_s235': 7.85,
+        'steel_s275': 7.85,
+        'steel_s355': 7.85,
+        'aluminum': 2.70,
+    }
+    density = material_densities.get(material, 7.85)
+    weight = (volume * density) / 1000.0  # Convert mm³ * density to grams
+    ET.SubElement(calc_result, 'Sheet_Weight').text = _format_float(weight)
+
     return calc_result
 
 
@@ -724,10 +837,21 @@ def _try_unfold(
     part_name: str,
     work_dir: Path,
     k_factor: float,
-    material: str
+    material: str,
+    nr_bends: int = 0,
+    solid_object: Optional[Any] = None
 ) -> Optional[Dict[str, Any]]:
     """
     Try to unfold a STEP file using FreeCAD SheetMetal.
+
+    Args:
+        step_file_path: Path to STEP file
+        part_name: Part name
+        work_dir: Working directory
+        k_factor: K-factor for bend calculations
+        material: Material name
+        nr_bends: Expected number of bends (limits returned bend parameters)
+        solid_object: Optional specific solid to unfold (instead of whole assembly)
 
     Returns: Dict with unfold result or None if unavailable
     """
@@ -738,12 +862,24 @@ def _try_unfold(
     try:
         dxf_output = str(work_dir / f"{part_name}_flat.dxf")
 
-        result = unfold_sheet_metal(
-            step_file_path,
-            output_dxf=dxf_output,
-            k_factor=k_factor,
-            max_attempts=3
-        )
+        # Use solid_object if provided (bent part), otherwise use file path
+        if solid_object is not None:
+            print(f"    [INFO] Unfolding specific solid (bent part)")
+            result = unfold_sheet_metal(
+                solid_object=solid_object,
+                output_dxf=dxf_output,
+                k_factor=k_factor,
+                max_attempts=3,
+                max_bends=nr_bends if nr_bends > 0 else None
+            )
+        else:
+            result = unfold_sheet_metal(
+                step_path=step_file_path,
+                output_dxf=dxf_output,
+                k_factor=k_factor,
+                max_attempts=3,
+                max_bends=nr_bends if nr_bends > 0 else None
+            )
 
         if result.get('success'):
             result['dxf_output'] = dxf_output
