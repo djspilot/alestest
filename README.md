@@ -10,6 +10,10 @@ Gebouwd voor plaatwerk- en metaalbewerkingsbedrijven die snel en nauwkeurig werk
 
 > Voor het nieuwe feature-detection traject (v3) en de geplande stappen, zie **[docs/FEATURE_DETECTION_ROADMAP.md](docs/FEATURE_DETECTION_ROADMAP.md)**.
 
+> Voor het classificatie-schema (4 categorieën) en unfold-triggering, zie **[docs/CLASSIFICATION_SCHEMA.md](docs/CLASSIFICATION_SCHEMA.md)** ⭐ **START HIER** voor begrip van how parts flow through the pipeline.
+
+> Voor de huidige, gefaseerde XML-uitrol (plaat vlak → plaat gezet/unfold → profiel → gaten plaat → gaten profiel) met validatie via STEP/XML referentieparen, zie **[docs/FEATURE_DETECTION_ROADMAP.md](docs/FEATURE_DETECTION_ROADMAP.md)**.
+
 ---
 
 ## Wat doet het?
@@ -32,10 +36,14 @@ Gebouwd voor plaatwerk- en metaalbewerkingsbedrijven die snel en nauwkeurig werk
 
 ### Belangrijkste features
 
-- **Onderdeelclassificatie** — Herkent automatisch plaatwerk, draaidelen, profielen, samenstellingen
+- **Onderdeelclassificatie (4 categorieën)** — 
+  1. **Vlakke plaat** (plaair, geen zettingen) → Box geometry export
+  2. **Gezette plaat** (bent sheet met >0 bends) → Unfold via FreeCAD SheetMetal
+  3. **Profiel** (draaideel, buis, hoekstaal) → Cross-section karakterisering
+  4. **Anders** (samenstellingen, ingewikkelde vormen) → Geometrie-dump
 - **Gatdetectie** — Cilindrische vlakken + inner wire methode voor sleuven en vormgaten
 - **Zetanalyse** — Telt productierelevante zettingen, sluit profielen en afrondingen uit
-- **Plaatwerk ontvouwen** — FreeCAD SheetMetal workbench met multi-poging strategie
+- **Plaatwerk ontvouwen** — FreeCAD SheetMetal workbench met multi-poging strategie (gezette_plaat only)
 - **AAG Feature Recognition** — Attributed Adjacency Graph voor topologie-gebaseerde herkenning
 - **ISO-normen** — ISO 2768, ISO 286, ISO 1302, ISO 68-1, ISO 13715, EN 10025/573
 - **ERP-integratie** — XML/Excel export in SpaceClaim-formaat, Windows file watcher service
