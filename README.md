@@ -86,32 +86,20 @@ manufacturing_pipeline/analysis/classification_variables.py
 
 ### Installatie
 
-```bash
-git clone https://github.com/djspilot/alestest.git
-cd alestest
-pip install -r requirements.txt
 ```
 
 ### Eerste analyse draaien
 
 ```bash
 # Interactieve bestandsselectie
-python run.py
 
 # Specifiek bestand analyseren
 python run.py -f data/input/mijnonderdeel.step
 
 # AAG topologie-analyse met uitgebreide output
-python run.py -f mijnonderdeel.step --aag -v
-```
-
 Output verschijnt in `data/output/<onderdeelnaam>/` — bevat PDF-rapport, SVG-afbeeldingen en analysedata.
 
 ---
-
-## Gebruiksmodi
-
-### 1. Quick Mode (standaard)
 
 Snelle analyse met PDF-rapport. Ideaal voor dagelijkse werkvoorbereiding.
 
