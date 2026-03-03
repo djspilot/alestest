@@ -1,20 +1,49 @@
 # ALES Manufacturing Pipeline
 
-**Laatste update:** 2 maart 2026
+**Laatste update:** 3 maart 2026  
+**Versie:** 2.1.2 ✓ COMMITTED (Fase 1: Gaten + Snijdata plaat/gezette plaat)
 
-Geautomatiseerde analyse van STEP CAD-bestanden voor productie. Extraheert geometrie, detecteert features (gaten, zettingen, draad), classificeert onderdelen en genereert productieklare rapporten volgens Nederlandse/ISO-normen.
+### v2.1.2 Changelog (3 maart 2026)
 
-Gebouwd voor plaatwerk- en metaalbewerkingsbedrijven die snel en nauwkeurig werkvoorbereidingsdata uit 3D-modellen willen halen.
+**Nieuwe features:**
+- ✓ **Fase 1: Cut Features Detection voor Plaat/Gezette Plaat**
+  - Gatdetectie: cylindrisch + vormgaten (slots/rectangles) met perimeters
+  - Gatcontours berekening per gat (inner wire perimeter)
+  - Buitencontour berekening (outer wire largest planar face)
+  - Totale snijlengte: sum(gatcontours) + buitencontour
+  - X/Y box dimensions extraction
+  - Flat pattern analyse strategie (na unfold) met 3D fallback
+- ✓ XML export integratie: Sheet_NrHoles, Sheet_HoleContours, Sheet_HoleRadii, Sheet_OuterContour, Sheet_TotalContour
+- ✓ Backwards compatible: graceful fallback bij failures, geen breaking changes in bestaande code
+- ✓ Validated op testfile 10040878_1.stp
 
-> Voor een uitgebreide technische beschrijving van hoe de engine werkt en hoe deze zich verhoudt tot SpaceClaim, zie **[docs/ENGINE.md](docs/ENGINE.md)**.
+**Implementation:**
+- Nieuwe module: `manufacturing_pipeline/analysis/cut_features.py`
+- Hergebruikt bestaande detectiefuncties (detect_holes, detect_shaped_holes)
+- Conditionally activated alleen voor plaat/gezette_plaat classifications
+- Zie [CHANGELOG_FASE1_CUT_FEATURES.md](CHANGELOG_FASE1_CUT_FEATURES.md) voor details
+- Zie [docs/SHEET_XML_PIPELINE_AND_COMPARATOR.md](docs/SHEET_XML_PIPELINE_AND_COMPARATOR.md) voor de actuele sheet XML flow + comparator gebruik
 
-> Voor het nieuwe feature-detection traject (v3) en de geplande stappen, zie **[docs/FEATURE_DETECTION_ROADMAP.md](docs/FEATURE_DETECTION_ROADMAP.md)**.
+**Gebruik voor validatie:**
+```bash
+python test_bom_to_xml.py path/to/assembly.stp
+```
 
-> Voor het classificatie-schema (4 categorieën) en unfold-triggering, zie **[docs/CLASSIFICATION_SCHEMA.md](docs/CLASSIFICATION_SCHEMA.md)** ⭐ **START HIER** voor begrip van how parts flow through the pipeline.
+---
 
-> **Classificatie beslisboom:** Welke criteria worden wanneer toegepast? Zie **[docs/CLASSIFICATION_DECISION_TREE.md](docs/CLASSIFICATION_DECISION_TREE.md)** voor complete beslisboom met thresholds en rationale. 🌳
+**Laatste update:** 2 maart 2026  
+**Versie:** 2.1.1 ✓ COMMITTED (XML Naming Fix: Sheet_PartName from source STEP)
 
-> Voor de huidige, gefaseerde XML-uitrol (plaat vlak → plaat gezet/unfold → profiel → gaten plaat → gaten profiel) met validatie via STEP/XML referentieparen, zie **[docs/FEATURE_DETECTION_ROADMAP.md](docs/FEATURE_DETECTION_ROADMAP.md)**.
+### v2.1.1 Changelog (2 maart 2026)
+
+**Fixes:**
+- ✓ XML export: Sheet_PartName now uses source STEP filename (e.g., "10040878_1") instead of BOM part name
+- ✓ Consistency: aligns with SpaceClaim reference XMLs for ERP import
+- ✓ Backwards compatible: existing XML structure unchanged, only field value improved
+
+---
+
+**Versie:** 2.1 ✓ COMMITTED (Standard Profile Detection met geometry fallback)
 
 ---
 
@@ -39,11 +68,15 @@ Gebouwd voor plaatwerk- en metaalbewerkingsbedrijven die snel en nauwkeurig werk
 ### Belangrijkste features
 
 - **Onderdeelclassificatie (4 categorieën)** — 
-  1. **Vlakke plaat** (plaair, geen zettingen) → Box geometry export
+  1. **Vlakke plaat** (vlakke plaat, geen zettingen) → Box geometry export
   2. **Gezette plaat** (bent sheet met >0 bends) → Unfold via FreeCAD SheetMetal
   3. **Profiel** (draaideel, buis, hoekstaal) → Cross-section karakterisering
   4. **Anders** (samenstellingen, ingewikkelde vormen) → Geometrie-dump
-- **Gatdetectie** — Cilindrische vlakken + inner wire methode voor sleuven en vormgaten
+- **⭐ Gatdetectie + Snijdata (Fase 1: plaat/gezette plaat)** — 
+  - Cylindrische gaten + vormgaten (slots/rectangles) met perimeters
+  - Gatcontours, buitencontour, totale snijlengte
+  - X/Y box dimensions
+  - Flat pattern analyse (na unfold) of 3D fallback
 - **Zetanalyse** — Telt productierelevante zettingen, sluit profielen en afrondingen uit
 - **Plaatwerk ontvouwen** — FreeCAD SheetMetal workbench met multi-poging strategie (gezette_plaat only)
 - **AAG Feature Recognition** — Attributed Adjacency Graph voor topologie-gebaseerde herkenning
@@ -507,8 +540,43 @@ python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ 
 
 ---
 
-**Laatste update:** 2 maart 2026  
-**Versie:** 2.1 ✓ COMMITTED (Standard Profile Detection met geometry fallback)
+**Laatste update:** 3 maart 2026  
+**Versie:** 2.1.2 ✓ COMMITTED (Fase 1: Gaten + Snijdata plaat/gezette plaat)
+
+### v2.1.2 Changelog (3 maart 2026)
+
+**Nieuwe features:**
+- ✓ **Fase 1: Cut Features Detection voor Plaat/Gezette Plaat**
+  - Gatdetectie: cylindrisch + vormgaten (slots/rectangles) met perimeters
+  - Gatcontours berekening per gat (inner wire perimeter)
+  - Buitencontour berekening (outer wire largest planar face)
+  - Totale snijlengte: sum(gatcontours) + buitencontour
+  - X/Y box dimensions extraction
+  - Flat pattern analyse strategie (na unfold) met 3D fallback
+- ✓ XML export integratie: Sheet_NrHoles, Sheet_HoleContours, Sheet_HoleRadii, Sheet_OuterContour, Sheet_TotalContour
+- ✓ Backwards compatible: graceful fallback bij failures, geen breaking changes
+- ✓ Validated op testfile 10040878_1.stp
+
+**Implementation:**
+- Nieuwe module: `manufacturing_pipeline/analysis/cut_features.py`
+- Hergebruikt bestaande detectiefuncties (detect_holes, detect_shaped_holes)
+- Conditionally activated alleen voor plaat/gezette_plaat
+- Zie [CHANGELOG_FASE1_CUT_FEATURES.md](CHANGELOG_FASE1_CUT_FEATURES.md)
+
+**Gebruik:**
+```bash
+python test_bom_to_xml.py path/to/assembly.stp  # Voor XML export met cut features
+```
+
+---
+
+### v2.1.1 Changelog (2 maart 2026)
+
+**Fixes:**
+- ✓ XML export: Sheet_PartName uses source STEP filename
+- ✓ Consistency met SpaceClaim reference XMLs
+
+---
 
 ### v2.1 Changelog (2 maart 2026)
 
@@ -517,12 +585,6 @@ python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ 
 - ✓ Variable thickness profile detection (DIN 1026 UNP, I-beams): face area diff >20%
 - ✓ Bent sheet exclusion: voorkomt false positives op gezette platen
 - ✓ Generic geometry-based fallback: werkt ook als STEP parser names mist
-
-**Gebruik voor validatie:**
-```bash
-python validate_classification_only.py  # Test alle 5 referentie files
-python analyze_two_parts.py             # Debug EN 10210-2 + DIN 1026 detection
-```
 
 **Documentatie:**
 - [CLASSIFICATION_DECISION_TREE.md](docs/CLASSIFICATION_DECISION_TREE.md) - Complete 3-step beslisboom

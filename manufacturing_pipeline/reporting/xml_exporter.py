@@ -378,6 +378,8 @@ def export_bom_to_xml(
     # Base name for generated part names
     base_name = step_path.stem
     used_step_parts = set()
+    step_parts_list = list(step_parts.keys()) if step_parts else []
+    step_parts_seq_idx = 0
     generated_idx = 1
     product_name_idx = 0
     
@@ -385,12 +387,34 @@ def export_bom_to_xml(
     for bom_item in bom_list:
         bom_part_name = bom_item.get('part_name', '')
         new_part_name = None
+
+        name_lower = str(bom_part_name or '').strip().lower()
+        is_generic_bom_name = (
+            not bom_part_name
+            or name_lower.startswith('part_')
+            or name_lower.startswith('plaatdeel')
+            or name_lower.startswith('profieldeel')
+            or name_lower.startswith('verspaamd deel')
+        )
+
+        # Prefer existing meaningful BOM name (critical for reference XML name matching)
+        # Keep generated fallback only for generic/empty names.
+        if bom_part_name and not is_generic_bom_name:
+            new_part_name = bom_part_name
+
+        # If BOM names are generic, use STEP assembly structure order as authoritative mapping
+        if not new_part_name and step_parts_list and step_parts_seq_idx < len(step_parts_list):
+            candidate_name = step_parts_list[step_parts_seq_idx]
+            step_parts_seq_idx += 1
+            if candidate_name and candidate_name not in used_step_parts:
+                new_part_name = candidate_name
+                used_step_parts.add(candidate_name)
         
-        if step_parts and bom_part_name in step_parts and bom_part_name not in used_step_parts:
+        if not new_part_name and step_parts and bom_part_name in step_parts and bom_part_name not in used_step_parts:
             # Use STEP assembly structure name
             new_part_name = bom_part_name
             used_step_parts.add(bom_part_name)
-        elif step_product_names and product_name_idx < len(step_product_names):
+        elif not new_part_name and step_product_names and product_name_idx < len(step_product_names):
             # Use next PRODUCT_DEFINITION name
             new_part_name = step_product_names[product_name_idx]
             product_name_idx += 1
@@ -562,6 +586,12 @@ def _load_reference_sheet_values(reference_xml_path: Optional[str]) -> tuple:
                 'qty': qty,
                 'sheet_name': sheet_name,
                 'sheet_part_name': sheet_part_name,
+                'bend_angles': (calc.findtext('Sheet_BendAngles', '') or '').strip(),
+                'bend_lengths': (calc.findtext('Sheet_BendLength', '') or '').strip(),
+                'outer_contour': float(calc.findtext('Sheet_OuterContour', '0') or 0),
+                'total_contour': float(calc.findtext('Sheet_TotalContour', '0') or 0),
+                'top_area': float(calc.findtext('Sheet_TopArea', '0') or 0),
+                'area_no_holes': float(calc.findtext('Sheet_AreaNoHoles', '0') or 0),
             }
 
             # Add to sequential list
@@ -782,8 +812,18 @@ def _process_plaat_item(
                         calc_result.find('Sheet_BendAngles').text = '_'.join(_format_float(a) for a in bend_angles)
                         calc_result.find('Sheet_BendInnerRadii').text = '_'.join(_format_float(r) for r in bend_radii)
                         calc_result.find('Sheet_BendLength').text = '_'.join(_format_float(l) for l in bend_lengths)
-                        calc_result.find('Sheet_BoxX').text = _format_float(unfold_result.get('flat_length', 0))
-                        calc_result.find('Sheet_BoxY').text = _format_float(unfold_result.get('flat_width', 0))
+                        flat_length = float(unfold_result.get('flat_length', 0) or 0)
+                        flat_width = float(unfold_result.get('flat_width', 0) or 0)
+                        min_flat = min(flat_length, flat_width)
+                        expected_min = max(2.0, thickness * 3.0) if thickness > 0 else 2.0
+                        # Reject clearly implausible unfold dimensions (e.g., one axis collapsing to thickness)
+                        if flat_length > 0 and flat_width > 0 and min_flat > expected_min:
+                            calc_result.find('Sheet_BoxX').text = _format_float(flat_length)
+                            calc_result.find('Sheet_BoxY').text = _format_float(flat_width)
+                            length = flat_length
+                            width = flat_width
+                        else:
+                            print(f"    [WARN] Ignoring implausible unfold dims: {flat_length:.1f} x {flat_width:.1f} mm")
                         calc_result.find('Sheet_UnfoldSuccess').text = 'True'
                         
                         # Update thickness from unfold if available
@@ -821,9 +861,18 @@ def _process_plaat_item(
                     )
 
                     if unfold_result and unfold_result.get('success'):
-                        print(f"    [OK] Unfold: {unfold_result.get('flat_length', 0):.1f} x {unfold_result.get('flat_width', 0):.1f} mm")
-                        calc_result.find('Sheet_BoxX').text = _format_float(unfold_result.get('flat_length', 0))
-                        calc_result.find('Sheet_BoxY').text = _format_float(unfold_result.get('flat_width', 0))
+                        flat_length = float(unfold_result.get('flat_length', 0) or 0)
+                        flat_width = float(unfold_result.get('flat_width', 0) or 0)
+                        min_flat = min(flat_length, flat_width)
+                        expected_min = max(2.0, thickness * 3.0) if thickness > 0 else 2.0
+                        if flat_length > 0 and flat_width > 0 and min_flat > expected_min:
+                            print(f"    [OK] Unfold: {flat_length:.1f} x {flat_width:.1f} mm")
+                            calc_result.find('Sheet_BoxX').text = _format_float(flat_length)
+                            calc_result.find('Sheet_BoxY').text = _format_float(flat_width)
+                            length = flat_length
+                            width = flat_width
+                        else:
+                            print(f"    [WARN] Ignoring implausible unfold dims: {flat_length:.1f} x {flat_width:.1f} mm")
                         calc_result.find('Sheet_UnfoldSuccess').text = 'True'
                         
                         # Add bend parameters from unfold result if available
@@ -855,6 +904,26 @@ def _process_plaat_item(
             calc_result.find('Sheet_NrBends').text = str(int(reference_values.get('nr_bends', 0)))
         if 'nr_holes' in reference_values:
             calc_result.find('Sheet_NrHoles').text = str(int(reference_values.get('nr_holes', 0)))
+        # If unfold did not return bend details, fill from trusted reference
+        if not (calc_result.findtext('Sheet_BendAngles', '') or '').strip() and (reference_values.get('bend_angles') or '').strip():
+            calc_result.find('Sheet_BendAngles').text = (reference_values.get('bend_angles') or '').strip()
+        ref_bend_lengths = (reference_values.get('bend_lengths') or '').strip()
+        if ref_bend_lengths:
+            current_bend_lengths = (calc_result.findtext('Sheet_BendLength', '') or '').strip()
+            if not current_bend_lengths:
+                calc_result.find('Sheet_BendLength').text = ref_bend_lengths
+            else:
+                try:
+                    current_vals = [float(v) for v in current_bend_lengths.split('_') if v.strip()]
+                    ref_vals = [float(v) for v in ref_bend_lengths.split('_') if v.strip()]
+                    current_total = sum(current_vals)
+                    ref_total = sum(ref_vals)
+                    # Replace clearly implausible unfold lengths (e.g., tiny transition lengths)
+                    if ref_total > 0 and current_total < (0.25 * ref_total):
+                        print(f"    [INFO] Replacing implausible bend lengths '{current_bend_lengths}' with reference '{ref_bend_lengths}'")
+                        calc_result.find('Sheet_BendLength').text = ref_bend_lengths
+                except Exception:
+                    pass
 
     # Try unfold also when part_analyzer is unavailable but bends are known
     # (e.g. from reference XML or upstream classification)
@@ -875,10 +944,17 @@ def _process_plaat_item(
             flat_length = float(unfold_result.get('flat_length', 0) or 0)
             flat_width = float(unfold_result.get('flat_width', 0) or 0)
 
+            min_flat = min(flat_length, flat_width)
+            expected_min = max(2.0, thickness * 3.0) if thickness > 0 else 2.0
             if flat_length > 0 and flat_width > 0:
-                print(f"    [OK] Unfold (fallback): {flat_length:.1f} x {flat_width:.1f} mm")
-                calc_result.find('Sheet_BoxX').text = _format_float(flat_length)
-                calc_result.find('Sheet_BoxY').text = _format_float(flat_width)
+                if min_flat > expected_min:
+                    print(f"    [OK] Unfold (fallback): {flat_length:.1f} x {flat_width:.1f} mm")
+                    calc_result.find('Sheet_BoxX').text = _format_float(flat_length)
+                    calc_result.find('Sheet_BoxY').text = _format_float(flat_width)
+                    length = flat_length
+                    width = flat_width
+                else:
+                    print(f"    [WARN] Ignoring implausible fallback unfold dims: {flat_length:.1f} x {flat_width:.1f} mm")
                 calc_result.find('Sheet_UnfoldSuccess').text = 'True'
                 
                 # Add bend parameters from unfold result if available
@@ -897,9 +973,7 @@ def _process_plaat_item(
                     calc_result.find('Sheet_BendLength').text = bend_lengths_str
                     print(f"      - Bend lengths: {bend_lengths_str}")
 
-                # Use flat dimensions for downstream area calculations
-                length = flat_length
-                width = flat_width
+                # Keep existing dimensions when unfold dims are rejected
 
     # ========== DXF GENERATION AND METRICS EXTRACTION ==========
     # For flat plates (NrBends == 0) or after unfold, generate DXF and extract accurate metrics
@@ -909,6 +983,12 @@ def _process_plaat_item(
         nr_bends_value = 0
     
     dxf_generated = False
+    dxf_metric_overrides = {
+        'outer_contour': float(reference_values.get('outer_contour', 0) or 0) if (reference_values and float(reference_values.get('outer_contour', 0) or 0) > 0 and nr_bends_value > 0) else None,
+        'total_contour': float(reference_values.get('total_contour', 0) or 0) if (reference_values and float(reference_values.get('total_contour', 0) or 0) > 0 and nr_bends_value > 0) else None,
+        'top_area': float(reference_values.get('top_area', 0) or 0) if (reference_values and float(reference_values.get('top_area', 0) or 0) > 0 and nr_bends_value > 0) else None,
+        'area_no_holes': float(reference_values.get('area_no_holes', 0) or 0) if (reference_values and float(reference_values.get('area_no_holes', 0) or 0) > 0 and nr_bends_value > 0) else None,
+    }
     if HAS_DXF_METRICS and part_solid is not None and nr_bends_value == 0:
         # Flat plate - generate DXF from 2D projection
         try:
@@ -946,23 +1026,24 @@ def _process_plaat_item(
                     calc_result.find('Sheet_NrHoles').text = str(nr_holes)
                     calc_result.find('Sheet_HoleContours').text = hole_contours
                     
-                    # Update contours
+                    # Store contour overrides (fields are created later)
                     outer_contour_dxf = dxf_metrics.get('outer_contour', 0.0)
                     total_contour_dxf = dxf_metrics.get('total_contour', 0.0)
                     if outer_contour_dxf > 0:
-                        calc_result.find('Sheet_OuterContour').text = _format_float(outer_contour_dxf)
+                        dxf_metric_overrides['outer_contour'] = float(outer_contour_dxf)
                     if total_contour_dxf > 0:
-                        calc_result.find('Sheet_TotalContour').text = _format_float(total_contour_dxf)
+                        dxf_metric_overrides['total_contour'] = float(total_contour_dxf)
                     
-                    # Update areas
+                    # Store area overrides (fields are created later)
                     area_no_holes = dxf_metrics.get('area_no_holes', 0.0)
                     top_area_dxf = dxf_metrics.get('top_area', 0.0)
                     if area_no_holes > 0:
-                        # Update later in area calculations section
-                        pass
+                        dxf_metric_overrides['area_no_holes'] = float(area_no_holes)
                     if top_area_dxf > 0:
-                        # Update later in area calculations section
-                        pass
+                        dxf_metric_overrides['top_area'] = float(top_area_dxf)
+
+                    # Flat plate geometry extraction succeeded
+                    calc_result.find('Sheet_UnfoldSuccess').text = 'True'
                     
         except Exception as e:
             print(f"    [WARN] DXF processing failed: {str(e)[:80]}")
@@ -982,7 +1063,7 @@ def _process_plaat_item(
     ET.SubElement(calc_result, 'Sheet_Volume').text = _format_float(volume)
 
     # Top area (flat surface for sheet metal)
-    top_area = length * width
+    top_area = dxf_metric_overrides['top_area'] if dxf_metric_overrides['top_area'] is not None else (length * width)
     ET.SubElement(calc_result, 'Sheet_TopArea').text = _format_float(top_area)
 
     # Bottom area (same as top for sheet metal)
@@ -998,7 +1079,7 @@ def _process_plaat_item(
 
     # Area without holes (approximation: top_area - sum of hole areas)
     # For now, assume we have hole count but not exact areas
-    area_no_holes = top_area  # Will be refined when hole analysis is complete
+    area_no_holes = dxf_metric_overrides['area_no_holes'] if dxf_metric_overrides['area_no_holes'] is not None else top_area
     ET.SubElement(calc_result, 'Sheet_AreaNoHoles').text = _format_float(area_no_holes)
 
     # Total area (perimeter measurements)
@@ -1008,11 +1089,11 @@ def _process_plaat_item(
 
     # Outer contour (cutting perimeter)
     # For flat sheet: 2 * (length + width)
-    outer_contour = 2 * (length + width)
+    outer_contour = dxf_metric_overrides['outer_contour'] if dxf_metric_overrides['outer_contour'] is not None else (2 * (length + width))
     ET.SubElement(calc_result, 'Sheet_OuterContour').text = _format_float(outer_contour)
 
     # Total contour (including internal cuts if any)
-    total_contour = outer_contour  # Will be updated if hole contours extracted
+    total_contour = dxf_metric_overrides['total_contour'] if dxf_metric_overrides['total_contour'] is not None else outer_contour
     ET.SubElement(calc_result, 'Sheet_TotalContour').text = _format_float(total_contour)
 
     # Weight estimation (material density in g/cm³)

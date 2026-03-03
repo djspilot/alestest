@@ -43,7 +43,7 @@ def generate_dxf_from_solid(
     """Generate DXF from a sheet metal solid (flat or unfolded representation).
     
     Args:
-        solid: CadQuery solid object
+        solid: CadQuery solid object OR OCP TopoDS_Solid
         output_path: Path where DXF should be written
         is_unfolded: If True, solid is already unfolded; if False, extract largest planar face
         
@@ -55,6 +55,16 @@ def generate_dxf_from_solid(
         return False
     
     try:
+        # Convert OCP solid to CadQuery if needed
+        if not hasattr(solid, 'faces') or not callable(getattr(solid, 'faces', None)):
+            try:
+                # Try to wrap OCP solid in CadQuery
+                solid = cq.Solid(solid)
+                print(f"[DEBUG] OCP solid converted to CadQuery")
+            except Exception as e:
+                print(f"[WARN] Solid conversion failed: {e}")
+                return False
+        
         if is_unfolded:
             # For unfolded solids, find largest face (usually the unfolded flat pattern)
             loops = _extract_loops_from_largest_face(solid)
@@ -72,6 +82,8 @@ def generate_dxf_from_solid(
         
     except Exception as e:
         print(f"[WARN] DXF generation failed: {str(e)[:80]}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -127,11 +139,12 @@ def _extract_loops_from_largest_planar_face(solid: Any) -> Optional[Dict[str, Li
     
     try:
         # Convert OCP solid to CadQuery if needed
-        if not hasattr(solid, 'faces'):
+        if not hasattr(solid, 'faces') or not callable(getattr(solid, 'faces', None)):
             try:
                 solid = cq.Solid(solid)
+                print(f"[DEBUG] OCP→CadQuery conversion successful")
             except Exception as e:
-                print(f"[DEBUG] Conversion to CadQuery failed: {e}")
+                print(f"[DEBUG] OCP→CadQuery conversion failed: {e}")
                 return None
         
         # Get all faces
@@ -140,12 +153,12 @@ def _extract_loops_from_largest_planar_face(solid: Any) -> Optional[Dict[str, Li
             if hasattr(faces_selector, 'vals'):
                 faces_list = faces_selector.vals()
             else:
-                # Alternative approach: direct face iteration
                 faces_list = list(solid.faces())
         except:
             faces_list = list(solid.faces())
         
         if not faces_list:
+            print(f"[DEBUG] No faces found")
             return None
         
         # Find largest face by area
@@ -153,7 +166,12 @@ def _extract_loops_from_largest_planar_face(solid: Any) -> Optional[Dict[str, Li
         max_area = 0
         for face in faces_list:
             try:
-                area = face.Area
+                # .Area() is a method that returns a Quantity; extract numeric value
+                area_val = face.Area()
+                if hasattr(area_val, 'value'):
+                    area = float(area_val.value)
+                else:
+                    area = float(area_val)
                 if area > max_area:
                     max_area = area
                     largest_face = face
@@ -161,22 +179,37 @@ def _extract_loops_from_largest_planar_face(solid: Any) -> Optional[Dict[str, Li
                 pass
         
         if largest_face is None:
+            print(f"[DEBUG] No face with calculable area")
             return None
+        
+        print(f"[DEBUG] Largest face area: {max_area:.1f} mm²")
         
         # Get face normal (orthogonal to the plane)
         try:
             face_normal = largest_face.normalAt()
+            # Normalize to CadQuery Vector if needed
+            if hasattr(face_normal, 'x') and hasattr(face_normal, 'y') and hasattr(face_normal, 'z'):
+                # OCP vector: extract coordinates
+                face_normal = cq.Vector(face_normal.x, face_normal.y, face_normal.z)
+            elif not isinstance(face_normal, cq.Vector):
+                face_normal = cq.Vector(face_normal)
         except:
             face_normal = cq.Vector(0, 0, 1)  # Default vertical
         
         # Get orthogonal basis vectors for 2D projection
-        if abs(face_normal.getZ()) > 0.99:  # Effectively Z-aligned
+        try:
+            z_component = face_normal.getZ() if hasattr(face_normal, 'getZ') else face_normal.z
+            if abs(z_component) > 0.99:  # Effectively Z-aligned
+                basis_u = cq.Vector(1, 0, 0)
+                basis_v = cq.Vector(0, 1, 0)
+            else:
+                # Build orthonormal basis
+                basis_u = cq.Vector(0, 0, 1).cross(face_normal).normalized()
+                basis_v = face_normal.cross(basis_u).normalized()
+        except Exception as e:
+            print(f"[DEBUG] Basis vector calculation failed: {e}, using defaults")
             basis_u = cq.Vector(1, 0, 0)
             basis_v = cq.Vector(0, 1, 0)
-        else:
-            # Build orthonormal basis
-            basis_u = cq.Vector(0, 0, 1).cross(face_normal).normalized()
-            basis_v = face_normal.cross(basis_u).normalized()
         
         # Extract outer loop
         outer_wire = largest_face.outerWire()
@@ -194,13 +227,12 @@ def _extract_loops_from_largest_planar_face(solid: Any) -> Optional[Dict[str, Li
         
         return {
             'outer_loop': outer_loop,
-            'hole_loops': hole_loops
+            'hole_loops': hole_loops,
+            'face_area': max_area  # Store actual 3D face area
         }
         
     except Exception as e:
         print(f"[WARN] Face extraction failed: {str(e)[:60]}")
-        import traceback
-        traceback.print_exc()
         return None
 
 
@@ -239,7 +271,12 @@ def _extract_loops_from_largest_face(solid: Any) -> Optional[Dict[str, List]]:
         max_area = 0
         for face in faces_list:
             try:
-                area = face.Area
+                # .Area() is a method that returns a Quantity; extract numeric value
+                area_val = face.Area()
+                if hasattr(area_val, 'value'):
+                    area = float(area_val.value)
+                else:
+                    area = float(area_val)
                 if area > max_area:
                     max_area = area
                     largest_face = face
@@ -252,16 +289,28 @@ def _extract_loops_from_largest_face(solid: Any) -> Optional[Dict[str, List]]:
         # For unfolded/flat, use face normal to define 2D plane
         try:
             face_normal = largest_face.normalAt()
+            # Normalize to CadQuery Vector if needed
+            if hasattr(face_normal, 'x') and hasattr(face_normal, 'y') and hasattr(face_normal, 'z'):
+                # OCP vector: extract coordinates
+                face_normal = cq.Vector(face_normal.x, face_normal.y, face_normal.z)
+            elif not isinstance(face_normal, cq.Vector):
+                face_normal = cq.Vector(face_normal)
         except:
             face_normal = cq.Vector(0, 0, 1)
         
         # Determine basis vectors
-        if abs(face_normal.getZ()) > 0.99:
+        try:
+            z_component = face_normal.getZ() if hasattr(face_normal, 'getZ') else face_normal.z
+            if abs(z_component) > 0.99:
+                basis_u = cq.Vector(1, 0, 0)
+                basis_v = cq.Vector(0, 1, 0)
+            else:
+                basis_u = cq.Vector(0, 0, 1).cross(face_normal).normalized()
+                basis_v = face_normal.cross(basis_u).normalized()
+        except Exception as e:
+            print(f"[DEBUG] Basis vector calculation failed: {e}, using defaults")
             basis_u = cq.Vector(1, 0, 0)
             basis_v = cq.Vector(0, 1, 0)
-        else:
-            basis_u = cq.Vector(0, 0, 1).cross(face_normal).normalized()
-            basis_v = face_normal.cross(basis_u).normalized()
         
         outer_wire = largest_face.outerWire()
         outer_loop = _wire_to_polyline_2d(outer_wire, basis_u, basis_v)
@@ -289,23 +338,66 @@ def _wire_to_polyline_2d(wire: Any, basis_u, basis_v) -> Optional[List[Tuple[flo
     
     try:
         # Get ordered points from wire via sampling
-        points_3d, params = wire.sample(n_samples=200)
+        points_3d = None
+        # Try different sample method signatures
+        try:
+            # Try the most common signature
+            result = wire.sample(n_samples=200)
+            if isinstance(result, tuple):
+                points_3d = result[0]
+            else:
+                points_3d = result
+        except TypeError as te:
+            try:
+                # Try positional argument
+                result = wire.sample(200)
+                if isinstance(result, tuple):
+                    points_3d = result[0]
+                else:
+                    points_3d = result
+            except Exception as e2:
+                try:
+                    # Try no argument variant
+                    result = wire.sample()
+                    if isinstance(result, tuple):
+                        points_3d = result[0]
+                    else:
+                        points_3d = result
+                except Exception as e3:
+                    print(f"[DEBUG] All wire.sample() attempts failed: {te}, {e2}, {e3}")
+                    return None
         
         if not points_3d or len(points_3d) < 3:
             return None
         
+        # Make sure we have a list of points, not a single array
+        if hasattr(points_3d, '__iter__') and len(points_3d) > 0:
+            first_item = points_3d[0]
+            if not hasattr(first_item, 'dot'):  # Not a Vector
+                if isinstance(first_item, (list, tuple)) and len(first_item) == 3:
+                    # Convert tuples to Vectors
+                    points_3d = [cq.Vector(*pt) if isinstance(pt, (list, tuple)) else pt for pt in points_3d]
+        
         # Project 3D points to 2D using basis vectors
         polyline_2d = []
         for pt in points_3d:
+            # Convert to Vector if needed
+            if not hasattr(pt, 'dot'):
+                if isinstance(pt, (list, tuple)):
+                    pt = cq.Vector(*pt)
+                else:
+                    continue
             # Project point onto 2D plane defined by basis_u, basis_v
             x = pt.dot(basis_u)
             y = pt.dot(basis_v)
             polyline_2d.append((x, y))
         
-        return polyline_2d
+        return polyline_2d if len(polyline_2d) >= 3 else None
         
     except Exception as e:
+        import traceback
         print(f"[WARN] Wire projection failed: {str(e)[:60]}")
+        traceback.print_exc()
         return None
 
 
@@ -378,6 +470,7 @@ def _metrics_from_loops(loops: Dict[str, List]) -> Dict[str, Any]:
         
         outer_loop = loops.get('outer_loop', [])
         hole_loops = loops.get('hole_loops', [])
+        face_area_3d = loops.get('face_area')  # Get original 3D face area if available
         
         if not outer_loop or len(outer_loop) < 3:
             return metrics
@@ -402,6 +495,7 @@ def _metrics_from_loops(loops: Dict[str, List]) -> Dict[str, Any]:
         metrics['outer_contour'] = outer_poly.length
         
         # Holes
+        hole_areas = []
         hole_perimeters = []
         total_hole_area = 0.0
         
@@ -409,6 +503,7 @@ def _metrics_from_loops(loops: Dict[str, List]) -> Dict[str, Any]:
             if len(hole_loop) >= 3:
                 hole_poly = Polygon(hole_loop)
                 hole_perimeters.append(hole_poly.length)
+                hole_areas.append(hole_poly.area)
                 total_hole_area += hole_poly.area
         
         metrics['nr_holes'] = len(hole_perimeters)
@@ -417,9 +512,22 @@ def _metrics_from_loops(loops: Dict[str, List]) -> Dict[str, Any]:
         # Total contour
         metrics['total_contour'] = metrics['outer_contour'] + sum(hole_perimeters)
         
-        # Areas
-        metrics['top_area'] = outer_poly.area
-        metrics['area_no_holes'] = outer_poly.area - total_hole_area
+        # Areas: reference convention expects TopArea as net area (with holes removed)
+        # and AreaNoHoles as gross outer area.
+        # Use original 3D face area (net) when available for higher accuracy.
+        if face_area_3d is not None and face_area_3d > 0:
+            metrics['top_area'] = face_area_3d
+            # Estimate gross area by adding scaled hole areas back to net area
+            projection_outer_area = outer_poly.area
+            if projection_outer_area > 0 and total_hole_area > 0:
+                hole_area_scaled = total_hole_area * (face_area_3d / projection_outer_area)
+                metrics['area_no_holes'] = face_area_3d + hole_area_scaled
+            else:
+                metrics['area_no_holes'] = face_area_3d
+        else:
+            # Fallback: projected net/gross areas
+            metrics['top_area'] = outer_poly.area - total_hole_area
+            metrics['area_no_holes'] = outer_poly.area
         
         return metrics
         
