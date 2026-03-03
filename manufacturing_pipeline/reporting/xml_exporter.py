@@ -438,7 +438,14 @@ def export_bom_to_xml(
             if part_class == 'plaat':
                 # STAP 1: PLAAT PROCESSING
                 calc_result = _process_plaat_item(
-                    bom_item, step_path, work_dir, material, k_factor, part_solid, reference_values
+                    bom_item,
+                    step_path,
+                    step_path.stem,
+                    work_dir,
+                    material,
+                    k_factor,
+                    part_solid,
+                    reference_values,
                 )
             elif part_class == 'profiel':
                 # STAP 2: PROFIEL PROCESSING (TODO)
@@ -641,6 +648,7 @@ def _extract_dims_from_solid(part_solid) -> tuple:
 def _process_plaat_item(
     bom_item: Dict[str, Any],
     step_path: Path,
+    source_step_name: str,
     work_dir: Path,
     material: str,
     k_factor: float,
@@ -654,18 +662,15 @@ def _process_plaat_item(
     """
     part_name = bom_item.get('part_name', 'Unknown')
     quantity = bom_item.get('quantity', 1)
-    output_part_name = part_name
+    output_part_name = source_step_name
     output_sheet_name = part_name
 
     if reference_values is not None:
         ref_sheet_name = str(reference_values.get('sheet_name', '') or '').strip()
-        ref_sheet_part_name = str(reference_values.get('sheet_part_name', '') or '').strip()
         ref_qty = int(float(reference_values.get('qty', quantity) or quantity))
 
         if ref_sheet_name:
             output_sheet_name = ref_sheet_name
-        if ref_sheet_part_name:
-            output_part_name = ref_sheet_part_name
         if ref_qty > 0:
             quantity = ref_qty
 
