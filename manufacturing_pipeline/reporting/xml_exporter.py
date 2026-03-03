@@ -51,6 +51,19 @@ try:
 except ImportError:
     HAS_ASSEMBLY_GEOM = False
 
+try:
+    from manufacturing_pipeline.reporting.dxf_metrics_extractor import (
+        generate_dxf_from_solid,
+        extract_metrics_from_dxf
+    )
+    HAS_DXF_METRICS = True
+except ImportError:
+    HAS_DXF_METRICS = False
+
+
+# Configuration for DXF output path - can be overridden
+DXF_OUTPUT_BASE_PATH = None  # Default: use same directory as STEP file
+
 
 def export_to_xml(result: Dict[str, Any], output_path: Path, part_name: Optional[str] = None) -> None:
     """Export analysis result to AutoPOL-compatible XML format.
@@ -887,6 +900,81 @@ def _process_plaat_item(
                 # Use flat dimensions for downstream area calculations
                 length = flat_length
                 width = flat_width
+
+    # ========== DXF GENERATION AND METRICS EXTRACTION ==========
+    # For flat plates (NrBends == 0) or after unfold, generate DXF and extract accurate metrics
+    try:
+        nr_bends_value = int(calc_result.findtext('Sheet_NrBends', '0') or 0)
+    except ValueError:
+        nr_bends_value = 0
+    
+    dxf_generated = False
+    if HAS_DXF_METRICS and part_solid is not None and nr_bends_value == 0:
+        # Flat plate - generate DXF from 2D projection
+        try:
+            # Determine DXF output path (use STEP directory or configured base path)
+            if DXF_OUTPUT_BASE_PATH:
+                dxf_dir = Path(DXF_OUTPUT_BASE_PATH)
+            else:
+                dxf_dir = step_path.parent
+            
+            dxf_name = f"{step_path.stem}_{part_name}_flat.dxf"
+            dxf_path = dxf_dir / dxf_name
+            
+            print(f"    [INFO] Generating DXF for flat plate: {dxf_name}")
+            dxf_generated = generate_dxf_from_solid(part_solid, dxf_path, is_unfolded=False)
+            
+            if dxf_generated:
+                # Extract metrics from DXF
+                dxf_metrics = extract_metrics_from_dxf(dxf_path)
+                
+                if dxf_metrics:
+                    print(f"    [OK] DXF metrics extracted")
+                    
+                    # Update BoxX/Y with OBB dimensions
+                    box_x = dxf_metrics.get('box_x', 0.0)
+                    box_y = dxf_metrics.get('box_y', 0.0)
+                    if box_x > 0 and box_y > 0:
+                        calc_result.find('Sheet_BoxX').text = _format_float(box_x)
+                        calc_result.find('Sheet_BoxY').text = _format_float(box_y)
+                        length = box_x
+                        width = box_y
+                    
+                    # Update hole information
+                    nr_holes = dxf_metrics.get('nr_holes', 0)
+                    hole_contours = dxf_metrics.get('hole_contours', '')
+                    calc_result.find('Sheet_NrHoles').text = str(nr_holes)
+                    calc_result.find('Sheet_HoleContours').text = hole_contours
+                    
+                    # Update contours
+                    outer_contour_dxf = dxf_metrics.get('outer_contour', 0.0)
+                    total_contour_dxf = dxf_metrics.get('total_contour', 0.0)
+                    if outer_contour_dxf > 0:
+                        calc_result.find('Sheet_OuterContour').text = _format_float(outer_contour_dxf)
+                    if total_contour_dxf > 0:
+                        calc_result.find('Sheet_TotalContour').text = _format_float(total_contour_dxf)
+                    
+                    # Update areas
+                    area_no_holes = dxf_metrics.get('area_no_holes', 0.0)
+                    top_area_dxf = dxf_metrics.get('top_area', 0.0)
+                    if area_no_holes > 0:
+                        # Update later in area calculations section
+                        pass
+                    if top_area_dxf > 0:
+                        # Update later in area calculations section
+                        pass
+                    
+        except Exception as e:
+            print(f"    [WARN] DXF processing failed: {str(e)[:80]}")
+    
+    elif HAS_DXF_METRICS and part_solid is not None and nr_bends_value > 0 and calc_result.findtext('Sheet_UnfoldSuccess', 'False') == 'True':
+        # Unfolded plate - generate DXF from unfolded state
+        try:
+            # Use same DXF generation for unfolded (no FreeCAD unfold output available here)
+            # This is for future use if we capture unfolded solids
+            pass
+        except Exception as e:
+            print(f"    [WARN] Unfolded DXF processing failed: {str(e)[:80]}")
 
     # ========== GEOMETRY AND AREA CALCULATIONS ==========
     # Volume and area calculations based on bounding box dimensions
