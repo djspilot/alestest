@@ -449,7 +449,7 @@ def export_bom_to_xml(
                 )
             elif part_class == 'profiel':
                 # STAP 2: PROFIEL PROCESSING (TODO)
-                calc_result = _process_profiel_item(bom_item)
+                calc_result = _process_profiel_item(bom_item, step_path.stem)
             else:
                 # STAP 3: OTHERS
                 calc_result = _process_others_item(bom_item)
@@ -1005,14 +1005,16 @@ def _try_unfold(
         return None
 
 
-def _process_profiel_item(bom_item: Dict[str, Any]) -> Optional[ET.Element]:
+def _process_profiel_item(bom_item: Dict[str, Any], source_step_name: str = '') -> Optional[ET.Element]:
     """
     Process PROFIEL item: Extract dimensions and features.
     TODO: Implement in STAP 2
     """
     calc_result = ET.Element('CalculationResult')
-    ET.SubElement(calc_result, 'Tube_PartName').text = bom_item.get('part_name', 'Unknown')
-    ET.SubElement(calc_result, 'Tube_Name').text = bom_item.get('part_name', 'Unknown')
+    part_name = bom_item.get('part_name', 'Unknown')
+    output_part_name = source_step_name if source_step_name else part_name
+    ET.SubElement(calc_result, 'Tube_PartName').text = output_part_name
+    ET.SubElement(calc_result, 'Tube_Name').text = part_name
     ET.SubElement(calc_result, 'Tube_Type').text = 'Profile'
     ET.SubElement(calc_result, 'Tube_Count').text = str(bom_item.get('quantity', 1))
     # TODO: Add more fields
