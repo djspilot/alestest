@@ -119,19 +119,55 @@ def _extract_loops_from_largest_planar_face(solid: Any) -> Optional[Dict[str, Li
     
     For flat plates (NrBends=0), this projects the 3D face to 2D using
     the face normal and orthogonal basis vectors.
+    
+    Handles both CadQuery and OCP solids.
     """
     if not HAS_CADQUERY:
         return None
     
     try:
-        faces = solid.faces("<Z").vals()  # Get faces ordered by area descending
-        if not faces:
+        # Convert OCP solid to CadQuery if needed
+        if not hasattr(solid, 'faces'):
+            try:
+                solid = cq.Solid(solid)
+            except Exception as e:
+                print(f"[DEBUG] Conversion to CadQuery failed: {e}")
+                return None
+        
+        # Get all faces
+        try:
+            faces_selector = solid.faces()
+            if hasattr(faces_selector, 'vals'):
+                faces_list = faces_selector.vals()
+            else:
+                # Alternative approach: direct face iteration
+                faces_list = list(solid.faces())
+        except:
+            faces_list = list(solid.faces())
+        
+        if not faces_list:
             return None
         
-        largest_face = faces[0]
+        # Find largest face by area
+        largest_face = None
+        max_area = 0
+        for face in faces_list:
+            try:
+                area = face.Area
+                if area > max_area:
+                    max_area = area
+                    largest_face = face
+            except:
+                pass
+        
+        if largest_face is None:
+            return None
         
         # Get face normal (orthogonal to the plane)
-        face_normal = largest_face.normalAt()  # Should be ~(0,0,1) for horizontal
+        try:
+            face_normal = largest_face.normalAt()
+        except:
+            face_normal = cq.Vector(0, 0, 1)  # Default vertical
         
         # Get orthogonal basis vectors for 2D projection
         if abs(face_normal.getZ()) > 0.99:  # Effectively Z-aligned
@@ -148,10 +184,13 @@ def _extract_loops_from_largest_planar_face(solid: Any) -> Optional[Dict[str, Li
         
         # Extract hole loops
         hole_loops = []
-        for inner_wire in largest_face.innerWires():
-            hole_loop = _wire_to_polyline_2d(inner_wire, basis_u, basis_v)
-            if hole_loop:
-                hole_loops.append(hole_loop)
+        try:
+            for inner_wire in largest_face.innerWires():
+                hole_loop = _wire_to_polyline_2d(inner_wire, basis_u, basis_v)
+                if hole_loop:
+                    hole_loops.append(hole_loop)
+        except:
+            pass
         
         return {
             'outer_loop': outer_loop,
@@ -160,23 +199,61 @@ def _extract_loops_from_largest_planar_face(solid: Any) -> Optional[Dict[str, Li
         
     except Exception as e:
         print(f"[WARN] Face extraction failed: {str(e)[:60]}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
 def _extract_loops_from_largest_face(solid: Any) -> Optional[Dict[str, List]]:
-    """Extract 2D loops from largest face (for already-flat/unfolded solids)."""
+    """Extract 2D loops from largest face (for already-flat/unfolded solids).
+    
+    Handles both CadQuery and OCP solids.
+    """
     if not HAS_CADQUERY:
         return None
     
     try:
-        faces = solid.faces("<Z").vals()  # Ordered by area descending
-        if not faces:
+        # Convert OCP solid to CadQuery if needed
+        if not hasattr(solid, 'faces'):
+            try:
+                solid = cq.Solid(solid)
+            except Exception as e:
+                print(f"[DEBUG] Conversion to CadQuery failed: {e}")
+                return None
+        
+        # Get all faces
+        try:
+            faces_selector = solid.faces()
+            if hasattr(faces_selector, 'vals'):
+                faces_list = faces_selector.vals()
+            else:
+                faces_list = list(solid.faces())
+        except:
+            faces_list = list(solid.faces())
+        
+        if not faces_list:
             return None
         
-        largest_face = faces[0]
+        # Find largest face by area
+        largest_face = None
+        max_area = 0
+        for face in faces_list:
+            try:
+                area = face.Area
+                if area > max_area:
+                    max_area = area
+                    largest_face = face
+            except:
+                pass
+        
+        if largest_face is None:
+            return None
         
         # For unfolded/flat, use face normal to define 2D plane
-        face_normal = largest_face.normalAt()
+        try:
+            face_normal = largest_face.normalAt()
+        except:
+            face_normal = cq.Vector(0, 0, 1)
         
         # Determine basis vectors
         if abs(face_normal.getZ()) > 0.99:
