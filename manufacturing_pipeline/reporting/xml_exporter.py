@@ -41,7 +41,12 @@ except ImportError:
     HAS_CADQUERY = False
 
 try:
-    from manufacturing_pipeline.analysis.assembly_analysis import solids_are_equal, get_solid_bounding_box
+    from manufacturing_pipeline.analysis.assembly_analysis import (
+        solids_are_equal, 
+        get_solid_bounding_box,
+        parse_step_assembly_structure,
+        parse_step_product_names
+    )
     HAS_ASSEMBLY_GEOM = True
 except ImportError:
     HAS_ASSEMBLY_GEOM = False
@@ -332,6 +337,60 @@ def export_bom_to_xml(
 
     if output_xml_path is None:
         output_xml_path = str(work_dir / f"{step_path.stem}.xml")
+
+    # ==========================================================================
+    # NAMING STRATEGY (same logic as export_classification_excel.py)
+    # ==========================================================================
+    # 1. Try STEP assembly structure names
+    # 2. Try PRODUCT_DEFINITION names (deduplicated)
+    # 3. Generate: {base_name}-p1, {base_name}-p2, etc.
+    
+    step_parts = parse_step_assembly_structure(str(step_path)) if HAS_ASSEMBLY_GEOM else None
+    step_product_names = None
+    
+    if not step_parts and HAS_ASSEMBLY_GEOM:
+        step_product_names = parse_step_product_names(str(step_path))
+        
+        # Deduplicate product names: remove _1, _2, _3 suffixes
+        if step_product_names:
+            unique_names = []
+            seen_bases = set()
+            for name in step_product_names:
+                base_name = re.sub(r'_\d+$', '', name)
+                if base_name not in seen_bases:
+                    unique_names.append(base_name)
+                    seen_bases.add(base_name)
+            step_product_names = unique_names
+    
+    # Base name for generated part names
+    base_name = step_path.stem
+    used_step_parts = set()
+    generated_idx = 1
+    product_name_idx = 0
+    
+    # Apply naming to each BOM item
+    for bom_item in bom_list:
+        bom_part_name = bom_item.get('part_name', '')
+        new_part_name = None
+        
+        if step_parts and bom_part_name in step_parts and bom_part_name not in used_step_parts:
+            # Use STEP assembly structure name
+            new_part_name = bom_part_name
+            used_step_parts.add(bom_part_name)
+        elif step_product_names and product_name_idx < len(step_product_names):
+            # Use next PRODUCT_DEFINITION name
+            new_part_name = step_product_names[product_name_idx]
+            product_name_idx += 1
+        
+        if not new_part_name:
+            # Generate name: "Silo 2-p1", "Silo 2-p2", etc.
+            new_part_name = f"{base_name}-p{generated_idx}"
+            generated_idx += 1
+        
+        # Update BOM item with proper name
+        bom_item['part_name'] = new_part_name
+    
+    print(f"  [INFO] Applied naming strategy: {len([b for b in bom_list if base_name in b.get('part_name', '')])}/{len(bom_list)} items use generated names")
 
     # Load STEP once
     print(f"\n[XML Export] Loading STEP: {step_path.name}")
