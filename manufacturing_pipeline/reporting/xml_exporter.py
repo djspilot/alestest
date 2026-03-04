@@ -456,6 +456,9 @@ def export_bom_to_xml(
     # Process each BOM item
     print(f"\n[XML Export] Processing {len(bom_list)} BOM items...")
     plaat_seq_index = 0  # Track which sheet item in reference sequence we're at
+    processed_count = 0  # Track successfully processed items
+    class_counts = {'plaat': 0, 'profiel': 0, 'anders': 0}  # Track by class
+    
     for idx, bom_item in enumerate(bom_list, 1):
         print(f"\n  [{idx}/{len(bom_list)}] {bom_item.get('part_name', 'Unknown')}")
 
@@ -491,6 +494,8 @@ def export_bom_to_xml(
 
             if calc_result is not None:
                 root.append(calc_result)
+                processed_count += 1
+                class_counts[part_class] += 1
                 print(f"    [OK] XML element created")
 
         except Exception as e:
@@ -498,6 +503,20 @@ def export_bom_to_xml(
             import traceback
             traceback.print_exc()
             continue
+
+    # Add document control element for validation
+    doc_control = ET.Element('DocumentControl')
+    ET.SubElement(doc_control, 'Aantal_BOM').text = str(len(bom_list))
+    ET.SubElement(doc_control, 'Aantal_Verwerkt').text = str(processed_count)
+    ET.SubElement(doc_control, 'Aantal_Plaat').text = str(class_counts['plaat'])
+    ET.SubElement(doc_control, 'Aantal_Profiel').text = str(class_counts['profiel'])
+    ET.SubElement(doc_control, 'Aantal_Anders').text = str(class_counts['anders'])
+    ET.SubElement(doc_control, 'Status').text = 'OK' if processed_count == len(bom_list) else 'INCOMPLETE'
+    
+    # Insert at the beginning of root
+    root.insert(0, doc_control)
+    
+    print(f"\n[INFO] Document control: BOM={len(bom_list)}, Verwerkt={processed_count}, Status={'OK' if processed_count == len(bom_list) else 'INCOMPLETE'}")
 
     # Write XML
     xml_string = _prettify_xml(root)
