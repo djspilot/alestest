@@ -375,7 +375,7 @@ def export_bom_to_xml(
     product_name_idx = 0
     
     # Apply naming to each BOM item
-    for bom_item in bom_list:
+    for idx, bom_item in enumerate(bom_list):
         bom_part_name = bom_item.get('part_name', '')
         new_part_name = None
 
@@ -388,11 +388,14 @@ def export_bom_to_xml(
             or name_lower.startswith('verspaamd deel')
             or name_lower.startswith('vaste vorm')
         )
+        
+
 
         # Prefer existing meaningful BOM name (critical for reference XML name matching)
         # Keep generated fallback only for generic/empty names.
         if bom_part_name and not is_generic_bom_name:
             new_part_name = bom_part_name
+
 
         # If BOM names are generic, use STEP assembly structure order as authoritative mapping
         if not new_part_name and step_parts_list and step_parts_seq_idx < len(step_parts_list):
@@ -401,19 +404,27 @@ def export_bom_to_xml(
             if candidate_name and candidate_name not in used_step_parts:
                 new_part_name = candidate_name
                 used_step_parts.add(candidate_name)
+
         
         if not new_part_name and step_parts and bom_part_name in step_parts and bom_part_name not in used_step_parts:
             # Use STEP assembly structure name
             new_part_name = bom_part_name
             used_step_parts.add(bom_part_name)
+
         elif not new_part_name and step_product_names and product_name_idx < len(step_product_names):
             # Use next PRODUCT_DEFINITION name
-            new_part_name = step_product_names[product_name_idx]
+            candidate_product_name = step_product_names[product_name_idx]
             product_name_idx += 1
+            # Skip 'UNKNOWN' values - they indicate parsing failed for this item
+            if candidate_product_name and candidate_product_name.upper() != 'UNKNOWN':
+                new_part_name = candidate_product_name
+            else:
+                pass
         
         if not new_part_name:
             # Generate name: "Silo 2-p1", "Silo 2-p2", etc.
             new_part_name = f"{base_name}-p{generated_idx}"
+
             generated_idx += 1
         
         # Update BOM item with proper name
