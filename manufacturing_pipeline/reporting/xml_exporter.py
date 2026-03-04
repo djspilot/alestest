@@ -386,6 +386,7 @@ def export_bom_to_xml(
             or name_lower.startswith('plaatdeel')
             or name_lower.startswith('profieldeel')
             or name_lower.startswith('verspaamd deel')
+            or name_lower.startswith('vaste vorm')
         )
 
         # Prefer existing meaningful BOM name (critical for reference XML name matching)
@@ -475,7 +476,7 @@ def export_bom_to_xml(
                 calc_result = _process_profiel_item(bom_item, step_path.stem)
             else:
                 # STAP 3: OTHERS
-                calc_result = _process_others_item(bom_item)
+                calc_result = _process_others_item(bom_item, step_path.stem)
 
             if calc_result is not None:
                 root.append(calc_result)
@@ -1173,13 +1174,18 @@ def _process_profiel_item(bom_item: Dict[str, Any], source_step_name: str = '') 
     return calc_result
 
 
-def _process_others_item(bom_item: Dict[str, Any]) -> Optional[ET.Element]:
+def _process_others_item(bom_item: Dict[str, Any], source_step_name: str = '') -> Optional[ET.Element]:
     """
     Process OTHERS/COMPONENT item: Basic info only.
     """
+    part_name = bom_item.get('part_name', 'Unknown')
+    quantity = bom_item.get('quantity', 1)
+    output_part_name = source_step_name if source_step_name else part_name
+    output_name = part_name
+    
     calc_result = ET.Element('CalculationResult')
-    ET.SubElement(calc_result, 'Others_PartName').text = bom_item.get('part_name', 'Unknown')
-    ET.SubElement(calc_result, 'Others_Name').text = bom_item.get('part_name', 'Unknown')
+    ET.SubElement(calc_result, 'Others_PartName').text = output_part_name
+    ET.SubElement(calc_result, 'Others_Name').text = output_name
     ET.SubElement(calc_result, 'Others_Type').text = 'Other'
-    ET.SubElement(calc_result, 'Others_Count').text = str(bom_item.get('quantity', 1))
+    ET.SubElement(calc_result, 'Others_Count').text = str(quantity)
     return calc_result

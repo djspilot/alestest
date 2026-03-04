@@ -1060,6 +1060,10 @@ def parse_step_product_names(step_file_path: str) -> Optional[List[str]]:
             # Avoid material labels that can appear in PRODUCT_DEFINITION
             if candidate_lower.startswith('aisi '):
                 return False
+            
+            # Filter out generic SpaceClaim shape names
+            if candidate_lower.startswith('vaste vorm'):
+                return False
 
             return True
 
