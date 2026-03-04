@@ -352,59 +352,25 @@ def export_bom_to_xml(
         output_xml_path = str(work_dir / f"{step_path.stem}.xml")
 
     # ==========================================================================
-    # NAMING STRATEGY (Determine unique solid names)
+    # NAMING STRATEGY (same logic as export_classification_excel.py)
     # ==========================================================================
-    # Design: If solid has unique name → use it. Else → generate {step_name}-p{N}
-    # 
-    # Result: bom_item['part_name'] = unique solid identifier or generated fallback
-    # 
-    # Hierarchy (priority order):
-    # 1. Meaningful BOM name (not generic classification like "plaatdeel")
-    # 2. STEP assembly structure (NEXT_ASSEMBLY_USAGE_OCCURRENCE)
-    # 3. Reference XML sheet names (from baseline comparison XML)
-    # 4. PRODUCT_DEFINITION names (fallback STEP parsing)
-    # 5. Generated: {step_base_name}-p1, -p2, etc. (last resort)
-    
-    # FIRST: Load reference XML sheet names if provided
-    reference_sheet_names_by_seq = []
-    if reference_xml_path:
-        try:
-            ref_path = Path(reference_xml_path)
-            if ref_path.exists():
-                ref_tree = ET.parse(ref_path)
-                ref_root = ref_tree.getroot()
-                for calc in ref_root.findall('CalculationResult'):
-                    sheet_name = calc.findtext('Sheet_Name', '').strip()
-                    if sheet_name and not sheet_name.startswith('<'):  # Valid Sheet_Name (not Assembly_Name)
-                        reference_sheet_names_by_seq.append(sheet_name)
-                if reference_sheet_names_by_seq:
-                    print(f"  [INFO] Found {len(reference_sheet_names_by_seq)} sheet names in reference XML")
-        except Exception:
-            pass
+    # 1. Try STEP assembly structure names
+    # 2. Try PRODUCT_DEFINITION names (deduplicated)
+    # 3. Generate: {base_name}-p1, {base_name}-p2, etc.
     
     step_parts = parse_step_assembly_structure(str(step_path)) if HAS_ASSEMBLY_GEOM else None
     step_product_names = None
     
     if not step_parts and HAS_ASSEMBLY_GEOM:
+        # STEP-only naming source fallback when assembly structure names are unavailable
+        # Keep exact names as present in STEP (do not strip revision suffixes like _Rev_00)
         step_product_names = parse_step_product_names(str(step_path))
-        
-        # Deduplicate product names: remove _1, _2, _3 suffixes
-        if step_product_names:
-            unique_names = []
-            seen_bases = set()
-            for name in step_product_names:
-                base_name = re.sub(r'_\d+$', '', name)
-                if base_name not in seen_bases:
-                    unique_names.append(base_name)
-                    seen_bases.add(base_name)
-            step_product_names = unique_names
     
     # Base name for generated part names
     base_name = step_path.stem
     used_step_parts = set()
     step_parts_list = list(step_parts.keys()) if step_parts else []
     step_parts_seq_idx = 0
-    reference_sheet_names_seq_idx = 0
     generated_idx = 1
     product_name_idx = 0
     
@@ -439,10 +405,6 @@ def export_bom_to_xml(
             # Use STEP assembly structure name
             new_part_name = bom_part_name
             used_step_parts.add(bom_part_name)
-        elif not new_part_name and reference_sheet_names_by_seq and reference_sheet_names_seq_idx < len(reference_sheet_names_by_seq):
-            # Use next reference XML sheet name (for files where STEP metadata is missing)
-            new_part_name = reference_sheet_names_by_seq[reference_sheet_names_seq_idx]
-            reference_sheet_names_seq_idx += 1
         elif not new_part_name and step_product_names and product_name_idx < len(step_product_names):
             # Use next PRODUCT_DEFINITION name
             new_part_name = step_product_names[product_name_idx]
@@ -495,22 +457,13 @@ def export_bom_to_xml(
         if part_class == 'plaat':
             plaat_seq_index += 1
 
-        # If baseline XML says this is a sheet item, follow that classification
-        if reference_values is not None and part_class != 'plaat':
-            print("    [INFO] Override class to 'plaat' from reference XML")
-            part_class = 'plaat'
-
         try:
             if part_class == 'plaat':
                 # STAP 1: PLAAT PROCESSING
-                # Design: *_PartName = STEP assembly filename (constant)
-                #         *_Name = unique solid name OR generated fallback
-                corrected_part_name = bom_item.get('part_name', step_path.stem)
                 calc_result = _process_plaat_item(
                     bom_item,
                     step_path,
-                    step_path.stem,           # → Sheet_PartName (assembly container)
-                    corrected_part_name,      # → Sheet_Name (unique identifier)
+                    step_path.stem,
                     work_dir,
                     material,
                     k_factor,
@@ -519,15 +472,10 @@ def export_bom_to_xml(
                 )
             elif part_class == 'profiel':
                 # STAP 2: PROFIEL PROCESSING (TODO)
-                # Design: *_PartName = STEP assembly filename (constant)
-                #         *_Name = unique solid name OR generated fallback
-                corrected_part_name = bom_item.get('part_name', step_path.stem)
-                calc_result = _process_profiel_item(bom_item, step_path.stem, corrected_part_name)
+                calc_result = _process_profiel_item(bom_item, step_path.stem)
             else:
                 # STAP 3: OTHERS
-                # Same naming scheme: PartName = assembly, Name = unique component
-                corrected_part_name = bom_item.get('part_name', step_path.stem)
-                calc_result = _process_others_item(bom_item, step_path.stem, corrected_part_name)
+                calc_result = _process_others_item(bom_item)
 
             if calc_result is not None:
                 root.append(calc_result)
@@ -730,7 +678,6 @@ def _process_plaat_item(
     bom_item: Dict[str, Any],
     step_path: Path,
     source_step_name: str,
-    source_sheet_name: str,
     work_dir: Path,
     material: str,
     k_factor: float,
@@ -740,33 +687,16 @@ def _process_plaat_item(
     """
     Process PLAAT item: Check if bent, unfold if needed, extract features.
 
-    Args:
-        source_step_name: STEP assembly filename (constant for all items)
-                         → Becomes Sheet_PartName
-        source_sheet_name: Unique solid identifier (from naming strategy)
-                          → Becomes Sheet_Name
-                          ~ From STEP metadata, reference XML, or generated (-p1, -p2)
-        reference_values: Optional trusted values from reference XML (can override sheet_name)
-
-    Design:
-        Sheet_PartName = Assembly/container (source_step_name)
-        Sheet_Name = Individual unique solid (source_sheet_name or ref override)
-
     Returns: ET.Element with Sheet_* elements or None if error
     """
     part_name = bom_item.get('part_name', 'Unknown')
     quantity = bom_item.get('quantity', 1)
-    
-    # Use parameters directly 
-    output_part_name = source_step_name  # Assembly name (constant for all items)
-    output_sheet_name = source_sheet_name  # Unique part name (changes per item)
+    output_part_name = source_step_name
+    output_sheet_name = part_name
 
     if reference_values is not None:
-        ref_sheet_name = str(reference_values.get('sheet_name', '') or '').strip()
+        # Reference XML is for validating/enriching metrics, not for overriding naming
         ref_qty = int(float(reference_values.get('qty', quantity) or quantity))
-
-        if ref_sheet_name:
-            output_sheet_name = ref_sheet_name  # Override with reference if available
         if ref_qty > 0:
             quantity = ref_qty
 
@@ -1227,61 +1157,29 @@ def _try_unfold(
         return None
 
 
-def _process_profiel_item(bom_item: Dict[str, Any], source_step_name: str = '', source_sheet_name: str = '') -> Optional[ET.Element]:
+def _process_profiel_item(bom_item: Dict[str, Any], source_step_name: str = '') -> Optional[ET.Element]:
     """
-    Process PROFIEL/TUBE item: Extract dimensions and features.
-    
-    Args:
-        source_step_name: STEP assembly filename (constant for all items)
-                         → Becomes Tube_PartName
-        source_sheet_name: Unique solid identifier (from naming strategy)
-                          → Becomes Tube_Name
-                          ~ From STEP metadata, reference XML, or generated (-p1, -p2)
-    
-    Design (consistent with Sheet/Plaat logic):
-        Tube_PartName = Assembly/container (source_step_name)
-        Tube_Name = Individual unique solid (source_sheet_name or fallback to part_name)
-
-    TODO: Implement full profile detection and measurements in STAP 2
+    Process PROFIEL item: Extract dimensions and features.
+    TODO: Implement in STAP 2
     """
     calc_result = ET.Element('CalculationResult')
-    # Naming: PartName = assembly (source_step_name), Name = unique solid (source_sheet_name)
-    output_part_name = source_step_name if source_step_name else bom_item.get('part_name', 'Unknown')
-    output_sheet_name = source_sheet_name if source_sheet_name else output_part_name
+    part_name = bom_item.get('part_name', 'Unknown')
+    output_part_name = source_step_name if source_step_name else part_name
     ET.SubElement(calc_result, 'Tube_PartName').text = output_part_name
-    ET.SubElement(calc_result, 'Tube_Name').text = output_sheet_name
+    ET.SubElement(calc_result, 'Tube_Name').text = part_name
     ET.SubElement(calc_result, 'Tube_Type').text = 'Profile'
     ET.SubElement(calc_result, 'Tube_Count').text = str(bom_item.get('quantity', 1))
-    # TODO: Add bed length, profile type, angle measurements, holes
+    # TODO: Add more fields
     return calc_result
 
 
-def _process_others_item(bom_item: Dict[str, Any], source_step_name: str = '', source_sheet_name: str = '') -> Optional[ET.Element]:
+def _process_others_item(bom_item: Dict[str, Any]) -> Optional[ET.Element]:
     """
-    Process OTHERS/COMPONENT item: Basic info (fasteners, hardware, sub-assemblies).
-    
-    Args:
-        source_step_name: STEP assembly filename (constant for all items)
-                         → Becomes Others_PartName
-        source_sheet_name: Unique solid identifier (from naming strategy)
-                          → Becomes Others_Name
-                          ~ From STEP metadata, reference XML, or generated (-p1, -p2)
-    
-    Design (consistent with Sheet/Plaat and Tube/Profiel logic):
-        Others_PartName = Assembly/container (source_step_name)
-        Others_Name = Individual unique component (source_sheet_name or fallback to part_name)
-
-    TODO: Implement detailed feature extraction for fasteners (if time permits in STAP 2)
+    Process OTHERS/COMPONENT item: Basic info only.
     """
     calc_result = ET.Element('CalculationResult')
-    # Naming: PartName = assembly (source_step_name), Name = unique component (source_sheet_name)
-    output_part_name = source_step_name if source_step_name else bom_item.get('part_name', 'Unknown')
-    output_component_name = source_sheet_name if source_sheet_name else output_part_name
-    ET.SubElement(calc_result, 'Others_PartName').text = output_part_name
-    ET.SubElement(calc_result, 'Others_Name').text = output_component_name
-    ET.SubElement(calc_result, 'Others_Type').text = 'Component'
-    ET.SubElement(calc_result, 'Others_Count').text = str(bom_item.get('quantity', 1))
-    return calc_result
+    ET.SubElement(calc_result, 'Others_PartName').text = bom_item.get('part_name', 'Unknown')
+    ET.SubElement(calc_result, 'Others_Name').text = bom_item.get('part_name', 'Unknown')
     ET.SubElement(calc_result, 'Others_Type').text = 'Other'
     ET.SubElement(calc_result, 'Others_Count').text = str(bom_item.get('quantity', 1))
     return calc_result

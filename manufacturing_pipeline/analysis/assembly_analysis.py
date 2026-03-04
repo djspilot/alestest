@@ -891,9 +891,10 @@ def parse_step_assembly_structure(step_file_path: str) -> Optional[Dict[str, int
         with open(step_file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
         
-        # STEP format: NEXT_ASSEMBLY_USAGE_OCCURRENCE('pos','','part_name.instance',...)
-        # This represents actual part instances in the assembly
-        assembly_pattern = r"NEXT_ASSEMBLY_USAGE_OCCURRENCE\('(\d+)','','([^']+)'"
+        # STEP format (varies by exporter):
+        # NEXT_ASSEMBLY_USAGE_OCCURRENCE('NAUO1',' ','part_name.instance',#parent,#child,$)
+        # or with blank name field. We only count non-empty explicit names.
+        assembly_pattern = r"NEXT_ASSEMBLY_USAGE_OCCURRENCE\s*\(\s*'[^']*'\s*,\s*'[^']*'\s*,\s*'([^']*)'"
         assembly_items = re.findall(assembly_pattern, content)
         
         if not assembly_items:
@@ -902,10 +903,13 @@ def parse_step_assembly_structure(step_file_path: str) -> Optional[Dict[str, int
         # Count parts, removing instance suffixes (.1, .2, etc.)
         # Example: "10040854_1.1" -> "10040854_1"
         parts_count = defaultdict(int)
-        for pos, full_name in assembly_items:
-            # Remove instance suffix to get base part name
+        for raw_name in assembly_items:
+            full_name = (raw_name or '').strip()
+            if not full_name:
+                continue
             base_name = re.sub(r'\.\d+$', '', full_name)
-            parts_count[base_name] += 1
+            if base_name:
+                parts_count[base_name] += 1
         
         return dict(parts_count) if parts_count else None
         
@@ -916,22 +920,24 @@ def parse_step_assembly_structure(step_file_path: str) -> Optional[Dict[str, int
 
 def parse_step_product_names(step_file_path: str) -> Optional[List[str]]:
     """
-    Parse STEP file to extract PRODUCT_DEFINITION names.
-    
-    This is a fallback when NEXT_ASSEMBLY_USAGE_OCCURRENCE is not present.
-    Returns product names in order of appearance, which typically matches
-    the order of solids in the geometry.
-    
+    Parse STEP file to extract candidate part names directly from STEP entities.
+
+    Priority order:
+    1) PRODUCT names (preferred)
+    2) SHAPE_REPRESENTATION names
+    3) PRODUCT_DEFINITION names (legacy fallback)
+
     Filters out:
     - Main assembly name (matches filename stem)
     - Frame/Skeleton helper geometry
-    - Duplicate suffixes (_1, _2, etc.) are kept as they represent instances
+    - Empty/'NONE' values
+    - Clear material-only PRODUCT_DEFINITION labels (e.g. AISI ...)
     
     Args:
         step_file_path: Path to STEP file
         
     Returns:
-        List of product names in order, or None if parsing fails
+        List of part names in order, or None if parsing fails
         
     Example:
         ["31686-404", "31686-362", "DIN 1026 - U 160 - 600", ...]
@@ -948,32 +954,69 @@ def parse_step_product_names(step_file_path: str) -> Optional[List[str]]:
         # Get the main assembly name from filename
         main_assembly_name = Path(step_file_path).stem
         
-        # STEP format: PRODUCT_DEFINITION('name','name',#ref,#ref);
-        # Extract the first name field (product ID)
-        product_pattern = r"PRODUCT_DEFINITION\('([^']+)'"
-        product_names = re.findall(product_pattern, content)
-        
-        if not product_names:
-            return None
-        
-        # Filter the product names
-        filtered_names = []
-        for name in product_names:
-            # Skip main assembly (exact match with filename)
-            if name == main_assembly_name:
-                continue
-            
-            # Skip Frame/Skeleton helper geometry
-            if name.startswith('Frame') or name.startswith('Skeleton'):
-                continue
-            
-            # Skip skeleton suffix items (helper geometry)
-            if '_skeleton' in name.lower():
-                continue
-            
-            filtered_names.append(name)
-        
-        return filtered_names if filtered_names else None
+        # Some exporters put a secondary assembly alias in FILE_NAME header (e.g. ..._000)
+        # which should not be used as part name candidates.
+        header_file_stem = ''
+        header_match = re.search(r"FILE_NAME\s*\(\s*'([^']+)'", content)
+        if header_match:
+            header_file_stem = Path((header_match.group(1) or '').strip()).stem
+
+        def _is_candidate(name: str) -> bool:
+            candidate = (name or '').strip()
+            if not candidate:
+                return False
+            if candidate.upper() == 'NONE':
+                return False
+            if candidate == main_assembly_name:
+                return False
+            if header_file_stem and candidate.lower() == header_file_stem.lower():
+                return False
+
+            candidate_lower = candidate.lower()
+            if candidate_lower.startswith('frame') or candidate_lower.startswith('skeleton'):
+                return False
+            if '_skeleton' in candidate_lower:
+                return False
+
+            # Avoid material labels that can appear in PRODUCT_DEFINITION
+            if candidate_lower.startswith('aisi '):
+                return False
+
+            return True
+
+        def _dedupe_preserve_order(names: List[str]) -> List[str]:
+            seen = set()
+            result = []
+            for name in names:
+                key = name.strip()
+                if key in seen:
+                    continue
+                seen.add(key)
+                result.append(key)
+            return result
+
+        # 1) PRODUCT names (best source for explicit part names)
+        product_pattern = r"PRODUCT\s*\(\s*'([^']+)'"
+        product_names = [name.strip() for name in re.findall(product_pattern, content) if _is_candidate(name)]
+        product_names = _dedupe_preserve_order(product_names)
+        if product_names:
+            return product_names
+
+        # 2) SHAPE_REPRESENTATION names (fallback)
+        shape_pattern = r"SHAPE_REPRESENTATION\s*\(\s*'([^']+)'"
+        shape_names = [name.strip() for name in re.findall(shape_pattern, content) if _is_candidate(name)]
+        shape_names = _dedupe_preserve_order(shape_names)
+        if shape_names:
+            return shape_names
+
+        # 3) PRODUCT_DEFINITION names (legacy fallback)
+        product_def_pattern = r"PRODUCT_DEFINITION\s*\(\s*'([^']+)'"
+        product_def_names = [name.strip() for name in re.findall(product_def_pattern, content) if _is_candidate(name)]
+        product_def_names = _dedupe_preserve_order(product_def_names)
+        if product_def_names:
+            return product_def_names
+
+        return None
         
     except Exception as e:
         return None
