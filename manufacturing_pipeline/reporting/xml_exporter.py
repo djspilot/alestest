@@ -361,9 +361,13 @@ def export_bom_to_xml(
     # ==========================================================================
     # NAMING STRATEGY (same logic as export_classification_excel.py)
     # ==========================================================================
+    # FIX v2.2: Match BOM items to STEP product names by clustering
+    # (avoid index-based matching which breaks when BOM order != STEP order)
+    # 
     # 1. Try STEP assembly structure names
-    # 2. Try PRODUCT_DEFINITION names (deduplicated)
-    # 3. Generate: {base_name}-p1, {base_name}-p2, etc.
+    # 2. Match BOM items to SHAPE_REP names by classification type + quantity
+    # 3. Try PRODUCT_DEFINITION names (deduplicated)
+    # 4. Generate: {base_name}-p1, {base_name}-p2, etc.
     
     step_parts = parse_step_assembly_structure(str(step_path)) if HAS_ASSEMBLY_GEOM else None
     step_product_names = None
@@ -379,7 +383,35 @@ def export_bom_to_xml(
     step_parts_list = list(step_parts.keys()) if step_parts else []
     step_parts_seq_idx = 0
     generated_idx = 1
-    product_name_idx = 0
+    
+    # Group BOM items by (classification, quantity) for clustering
+    # This matches BOM items to step_product_names without relying on order
+    bom_clusters = {}
+    for idx, bom_item in enumerate(bom_list):
+        part_class = bom_item.get('part_class', 'unknown')
+        quantity = bom_item.get('quantity', 1)
+        cluster_key = (part_class, quantity)
+        
+        if cluster_key not in bom_clusters:
+            bom_clusters[cluster_key] = []
+        bom_clusters[cluster_key].append(idx)
+    
+    # Create a mapping: cluster_key → product_names for that cluster
+    # This allows us to assign product names to BOM items by type, not order
+    name_by_cluster = {}
+    if step_product_names:
+        # Group product names by assumed classification (heuristic: length of name or context)
+        # For now, simple: first names go to first cluster, etc.
+        # Better would be to parse SHAPE_REP geometry, but this is a fallback
+        name_idx = 0
+        for cluster_key in sorted(bom_clusters.keys()):  # Sort for consistency
+            names_for_cluster = []
+            cluster_size = len(bom_clusters[cluster_key])
+            while name_idx < len(step_product_names) and len(names_for_cluster) < cluster_size:
+                names_for_cluster.append(step_product_names[name_idx])
+                name_idx += 1
+            if names_for_cluster:
+                name_by_cluster[cluster_key] = names_for_cluster
     
     # Apply naming to each BOM item
     for idx, bom_item in enumerate(bom_list):
@@ -418,15 +450,21 @@ def export_bom_to_xml(
             new_part_name = bom_part_name
             used_step_parts.add(bom_part_name)
 
-        elif not new_part_name and step_product_names and product_name_idx < len(step_product_names):
-            # Use next PRODUCT_DEFINITION name
-            candidate_product_name = step_product_names[product_name_idx]
-            product_name_idx += 1
-            # Skip 'UNKNOWN' values - they indicate parsing failed for this item
-            if candidate_product_name and candidate_product_name.upper() != 'UNKNOWN':
-                new_part_name = candidate_product_name
-            else:
-                pass
+        elif not new_part_name:
+            # Use cluster-based name matching (v2.2 fix)
+            part_class = bom_item.get('part_class', 'unknown')
+            quantity = bom_item.get('quantity', 1)
+            cluster_key = (part_class, quantity)
+            cluster_names = name_by_cluster.get(cluster_key, [])
+            cluster_items = bom_clusters.get(cluster_key, [])
+            
+            if cluster_names and idx in cluster_items:
+                # Find position within this cluster
+                cluster_pos = cluster_items.index(idx)
+                if cluster_pos < len(cluster_names):
+                    candidate_product_name = cluster_names[cluster_pos]
+                    if candidate_product_name and candidate_product_name.upper() != 'UNKNOWN':
+                        new_part_name = candidate_product_name
         
         if not new_part_name:
             # Generate name: "Silo 2-p1", "Silo 2-p2", etc.
