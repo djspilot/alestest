@@ -384,11 +384,82 @@ def _solid_bbox_sorted(solid) -> Tuple[float, float, float]:
     return tuple(sorted(dims))
 
 
+def _get_top2_parallel_planar_face_percent(solid, parallel_dot_min: float = 0.98) -> float:
+    """Return area share (%) of the best pair of parallel planar faces.
+
+    This is the robust plate signal used by plate-face detection:
+    - only planar faces are considered
+    - the selected pair must be parallel (or anti-parallel)
+    - percentage is measured against total surface area of the solid
+
+    Why:
+    Cylinders can be split into 2 large curved faces by STEP exporters.
+    A naive top-2-face metric would incorrectly classify round bars as plates.
+    """
+    try:
+        if not HAS_OCP:
+            return 0.0
+
+        from OCP.BRepAdaptor import BRepAdaptor_Surface
+        from OCP.GeomAbs import GeomAbs_Plane
+
+        total_area = 0.0
+        planar_faces: List[Tuple[float, Tuple[float, float, float]]] = []
+
+        exp = TopExp_Explorer(solid, TopAbs_FACE)
+        while exp.More():
+            face = TopoDS.Face_s(exp.Current())
+
+            props = GProp_GProps()
+            if hasattr(BRepGProp, "SurfaceProperties_s"):
+                BRepGProp.SurfaceProperties_s(face, props)
+            else:
+                BRepGProp.SurfaceProperties(face, props)
+            area = props.Mass()
+            total_area += area
+
+            surf = BRepAdaptor_Surface(face, True)
+            if surf.GetType() == GeomAbs_Plane:
+                plane = surf.Plane()
+                direction = plane.Axis().Direction()
+                normal = (float(direction.X()), float(direction.Y()), float(direction.Z()))
+                planar_faces.append((area, normal))
+
+            exp.Next()
+
+        if total_area <= 0.0 or len(planar_faces) < 2:
+            return 0.0
+
+        best_pair_area = 0.0
+        for i in range(len(planar_faces) - 1):
+            area_i, normal_i = planar_faces[i]
+            for j in range(i + 1, len(planar_faces)):
+                area_j, normal_j = planar_faces[j]
+                dot = (
+                    normal_i[0] * normal_j[0]
+                    + normal_i[1] * normal_j[1]
+                    + normal_i[2] * normal_j[2]
+                )
+                if abs(dot) >= parallel_dot_min:
+                    pair_area = area_i + area_j
+                    if pair_area > best_pair_area:
+                        best_pair_area = pair_area
+
+        if best_pair_area <= 0.0:
+            return 0.0
+
+        return (best_pair_area / total_area) * 100.0
+    except Exception:
+        return 0.0
+
+
 def _is_plate_by_face_analysis(solid, threshold: float = 60.0) -> bool:
     """Check if solid is a plate by analyzing face areas.
     
-    A plate has two large parallel faces (top/bottom) that dominate the surface area.
-    If the top 2 faces comprise > threshold% of total surface area, it's a plate.
+    A plate has two large parallel PLANAR faces (top/bottom) that dominate
+    the surface area. Curved faces (e.g. round shaft mantle) are ignored.
+    If the best parallel planar pair comprises > threshold% of total surface area,
+    it's a plate.
     
     This is more reliable than bounding box analysis for thick plates (50mm+)
     that would fail thickness_ratio checks but are still flat plates.
@@ -401,8 +472,8 @@ def _is_plate_by_face_analysis(solid, threshold: float = 60.0) -> bool:
         True if solid is a plate
     """
     try:
-        top2_percent = _get_top2_face_percent(solid)
-        return top2_percent > threshold
+        top2_planar_percent = _get_top2_parallel_planar_face_percent(solid)
+        return top2_planar_percent > threshold
     except:
         return False
 
@@ -983,7 +1054,8 @@ def classify_solid_scored(solid) -> Tuple[str, Dict[str, Any]]:
     thickness_ratio = smallest / middle if middle > 0 else 0.0
     length_ratio = longest / middle if middle > 0 else 0.0
     cross_ratio = middle / smallest if smallest > 0 else 0.0
-    top2_percent = _get_top2_face_percent(solid)
+    top2_percent = _get_top2_parallel_planar_face_percent(solid)
+    raw_top2_percent = _get_top2_face_percent(solid)
     surface_area = _get_solid_surface_area(solid)
     sa_v_ratio = surface_area / volume if volume > 0 else 0.0
 
@@ -1052,6 +1124,7 @@ def classify_solid_scored(solid) -> Tuple[str, Dict[str, Any]]:
         "mode": "score",
         "features": {
             "top2_percent": round(top2_percent, 3),
+            "top2_percent_raw": round(raw_top2_percent, 3),
             "smallest": round(smallest, 3),
             "middle": round(middle, 3),
             "longest": round(longest, 3),
@@ -1132,6 +1205,7 @@ def classify_solid(solid, return_trace: bool = False):
             "cross_ratio": round(cross_ratio, 3),
             "volume_ratio": round(volume_ratio, 3),
             "top2_percent": round(_get_top2_face_percent(solid), 3),
+            "top2_planar_percent": round(_get_top2_parallel_planar_face_percent(solid), 3),
         },
         "rules": [],
     }
@@ -1318,47 +1392,23 @@ def parse_step_assembly_structure(step_file_path: str) -> Optional[Dict[str, int
 
 
 def parse_step_product_names(step_file_path: str) -> Optional[List[str]]:
-    """
-    Parse STEP file to extract candidate part names directly from STEP entities.
+    """Parse STEP file and return candidate part names in geometry order.
 
-    IMPORTANT: This function uses SHAPE_REPRESENTATION order (not PRODUCT order)
-    because CadQuery loads solids in SHAPE_REPRESENTATION order, not PRODUCT order.
-    
-    This prevents name swaps when PRODUCT statements appear in different order
-    than the actual geometry. Priority order:
-    1) SHAPE_REPRESENTATION names (BEST - matches CadQuery geometry order)
-    2) PRODUCT names (legacy fallback)
-    3) PRODUCT_DEFINITION names (legacy fallback)
-
-    Filters out:
-    - Main assembly name (matches filename stem)
-    - Frame/Skeleton helper geometry
-    - Empty/'NONE' values
-    - Clear material-only PRODUCT_DEFINITION labels (e.g. AISI ...)
-    
-    Args:
-        step_file_path: Path to STEP file
-        
-    Returns:
-        List of part names in CadQuery geometry order, or None if parsing fails
-        
-    Example:
-        ["31686-404", "31686-362", "DIN 1026 - U 160 - 600", ...]
+    Priority:
+    1) SHAPE_REPRESENTATION names (preferred; follows CAD geometry stream)
+    2) PRODUCT names (fallback)
+    3) PRODUCT_DEFINITION names (fallback)
     """
     if not step_file_path or not os.path.exists(step_file_path):
         return None
-        
+
     try:
         from pathlib import Path
-        
+
         with open(step_file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
-        
-        # Get the main assembly name from filename
+
         main_assembly_name = Path(step_file_path).stem
-        
-        # Some exporters put a secondary assembly alias in FILE_NAME header (e.g. ..._000)
-        # which should not be used as part name candidates.
         header_file_stem = ''
         header_match = re.search(r"FILE_NAME\s*\(\s*'([^']+)'", content)
         if header_match:
@@ -1366,9 +1416,7 @@ def parse_step_product_names(step_file_path: str) -> Optional[List[str]]:
 
         def _is_candidate(name: str) -> bool:
             candidate = (name or '').strip()
-            if not candidate:
-                return False
-            if candidate.upper() == 'NONE':
+            if not candidate or candidate.upper() == 'NONE':
                 return False
             if candidate == main_assembly_name:
                 return False
@@ -1380,15 +1428,10 @@ def parse_step_product_names(step_file_path: str) -> Optional[List[str]]:
                 return False
             if '_skeleton' in candidate_lower:
                 return False
-
-            # Avoid material labels that can appear in PRODUCT_DEFINITION
             if candidate_lower.startswith('aisi '):
                 return False
-            
-            # Filter out generic SpaceClaim shape names
             if candidate_lower.startswith('vaste vorm'):
                 return False
-
             return True
 
         def _dedupe_preserve_order(names: List[str]) -> List[str]:
@@ -1402,49 +1445,54 @@ def parse_step_product_names(step_file_path: str) -> Optional[List[str]]:
                 result.append(key)
             return result
 
-        # PRIMARY: SHAPE_REPRESENTATION names (in file order)
-        # This order matches CadQuery's geometry loading order, preventing name swaps
-        shape_names = []
-        for match in re.finditer(r"SHAPE_REPRESENTATION\s*\(\s*'([^']+)'", content):
-            name = match.group(1).strip()
-            if _is_candidate(name):
-                shape_names.append(name)
+        shape_names = [
+            m.group(1).strip()
+            for m in re.finditer(r"SHAPE_REPRESENTATION\s*\(\s*'([^']+)'", content)
+            if _is_candidate(m.group(1))
+        ]
         shape_names = _dedupe_preserve_order(shape_names)
         if shape_names:
             return shape_names
 
-        # FALLBACK 1: PRODUCT names (if no SHAPE_REPRESENTATION names found)
-        product_pattern = r"PRODUCT\s*\(\s*'([^']+)'"
-        product_names = [name.strip() for name in re.findall(product_pattern, content) if _is_candidate(name)]
+        product_names = [
+            name.strip()
+            for name in re.findall(r"PRODUCT\s*\(\s*'([^']+)'", content)
+            if _is_candidate(name)
+        ]
         product_names = _dedupe_preserve_order(product_names)
         if product_names:
             return product_names
 
-        # FALLBACK 2: PRODUCT_DEFINITION names (legacy fallback)
-        product_def_pattern = r"PRODUCT_DEFINITION\s*\(\s*'([^']+)'"
-        product_def_names = [name.strip() for name in re.findall(product_def_pattern, content) if _is_candidate(name)]
+        product_def_names = [
+            name.strip()
+            for name in re.findall(r"PRODUCT_DEFINITION\s*\(\s*'([^']+)'", content)
+            if _is_candidate(name)
+        ]
         product_def_names = _dedupe_preserve_order(product_def_names)
         if product_def_names:
             return product_def_names
 
         return None
-        
-    except Exception as e:
+    except Exception:
         return None
+
+
+def parse_step_shape_rep_name_counts(step_file_path: str) -> Optional[Dict[str, int]]:
+    """Return occurrence counts per SHAPE_REPRESENTATION part name.
+
+    Counts are derived from REPRESENTATION_RELATIONSHIP links from assembly
+    SHAPE_REPRESENTATION to child SHAPE_REPRESENTATION entries.
+    """
     if not step_file_path or not os.path.exists(step_file_path):
         return None
-        
+
     try:
         from pathlib import Path
-        
+
         with open(step_file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
-        
-        # Get the main assembly name from filename
+
         main_assembly_name = Path(step_file_path).stem
-        
-        # Some exporters put a secondary assembly alias in FILE_NAME header (e.g. ..._000)
-        # which should not be used as part name candidates.
         header_file_stem = ''
         header_match = re.search(r"FILE_NAME\s*\(\s*'([^']+)'", content)
         if header_match:
@@ -1452,70 +1500,83 @@ def parse_step_product_names(step_file_path: str) -> Optional[List[str]]:
 
         def _is_candidate(name: str) -> bool:
             candidate = (name or '').strip()
-            if not candidate:
-                return False
-            if candidate.upper() == 'NONE':
+            if not candidate or candidate.upper() == 'NONE':
                 return False
             if candidate == main_assembly_name:
                 return False
             if header_file_stem and candidate.lower() == header_file_stem.lower():
                 return False
-
             candidate_lower = candidate.lower()
             if candidate_lower.startswith('frame') or candidate_lower.startswith('skeleton'):
                 return False
             if '_skeleton' in candidate_lower:
                 return False
-
-            # Avoid material labels that can appear in PRODUCT_DEFINITION
             if candidate_lower.startswith('aisi '):
                 return False
-            
-            # Filter out generic SpaceClaim shape names
             if candidate_lower.startswith('vaste vorm'):
                 return False
-
             return True
 
-        def _dedupe_preserve_order(names: List[str]) -> List[str]:
-            seen = set()
-            result = []
-            for name in names:
-                key = name.strip()
-                if key in seen:
-                    continue
-                seen.add(key)
-                result.append(key)
-            return result
+        # All SHAPE_REPRESENTATION ids/names in file order
+        shape_rep_seq: List[Tuple[str, str]] = []
+        shape_rep_name_by_id: Dict[str, str] = {}
+        for m in re.finditer(r"#\s*(\d+)\s*=\s*SHAPE_REPRESENTATION\s*\(\s*'([^']+)'", content):
+            rep_id = m.group(1)
+            rep_name = (m.group(2) or '').strip()
+            shape_rep_name_by_id[rep_id] = rep_name
+            if _is_candidate(rep_name):
+                shape_rep_seq.append((rep_id, rep_name))
 
-        # PRIMARY: SHAPE_REPRESENTATION names (in file order)
-        # This order matches CadQuery's geometry loading order, preventing name swaps
-        shape_names = []
-        for match in re.finditer(r"SHAPE_REPRESENTATION\s*\(\s*'([^']+)'", content):
-            name = match.group(1).strip()
-            if _is_candidate(name):
-                shape_names.append(name)
-        shape_names = _dedupe_preserve_order(shape_names)
-        if shape_names:
-            return shape_names
+        if not shape_rep_seq:
+            return None
 
-        # FALLBACK 1: PRODUCT names (if no SHAPE_REPRESENTATION names found)
-        product_pattern = r"PRODUCT\s*\(\s*'([^']+)'"
-        product_names = [name.strip() for name in re.findall(product_pattern, content) if _is_candidate(name)]
-        product_names = _dedupe_preserve_order(product_names)
-        if product_names:
-            return product_names
+        candidate_ids = {rep_id for rep_id, _ in shape_rep_seq}
 
-        # FALLBACK 2: PRODUCT_DEFINITION names (legacy fallback)
-        product_def_pattern = r"PRODUCT_DEFINITION\s*\(\s*'([^']+)'"
-        product_def_names = [name.strip() for name in re.findall(product_def_pattern, content) if _is_candidate(name)]
-        product_def_names = _dedupe_preserve_order(product_def_names)
-        if product_def_names:
-            return product_def_names
+        assembly_ids = set()
+        for rep_id, rep_name in shape_rep_name_by_id.items():
+            rep_name_clean = (rep_name or '').strip()
+            if rep_name_clean == main_assembly_name:
+                assembly_ids.add(rep_id)
+            elif header_file_stem and rep_name_clean.lower() == header_file_stem.lower():
+                assembly_ids.add(rep_id)
 
-        return None
-        
-    except Exception as e:
+        relations = [
+            (m.group(1), m.group(2))
+            for m in re.finditer(
+                r"REPRESENTATION_RELATIONSHIP\s*\([^#]*#\s*(\d+)\s*,\s*#\s*(\d+)\s*\)",
+                content,
+            )
+        ]
+
+        counts: Dict[str, int] = defaultdict(int)
+
+        # Preferred: only assembly->part representation links
+        if assembly_ids:
+            for left_id, right_id in relations:
+                if left_id in assembly_ids and right_id in candidate_ids:
+                    counts[shape_rep_name_by_id[right_id]] += 1
+                elif right_id in assembly_ids and left_id in candidate_ids:
+                    counts[shape_rep_name_by_id[left_id]] += 1
+
+        # Fallback if no assembly links detected
+        if not counts:
+            for left_id, right_id in relations:
+                left_is_candidate = left_id in candidate_ids
+                right_is_candidate = right_id in candidate_ids
+                if left_is_candidate and not right_is_candidate:
+                    counts[shape_rep_name_by_id[left_id]] += 1
+                elif right_is_candidate and not left_is_candidate:
+                    counts[shape_rep_name_by_id[right_id]] += 1
+
+        # Build ordered dict (same order as SHAPE_REPRESENTATION stream)
+        ordered_counts: Dict[str, int] = {}
+        for _, rep_name in shape_rep_seq:
+            if rep_name in ordered_counts:
+                continue
+            ordered_counts[rep_name] = int(counts.get(rep_name, 1))
+
+        return ordered_counts if ordered_counts else None
+    except Exception:
         return None
 
 

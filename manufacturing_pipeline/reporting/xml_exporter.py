@@ -11,6 +11,7 @@ from xml.dom import minidom
 import os
 import sys
 import re
+from collections import defaultdict
 
 # Add manufacturing_pipeline to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -46,6 +47,7 @@ try:
         get_solid_bounding_box,
         parse_step_assembly_structure,
         parse_step_product_names,
+        parse_step_shape_rep_name_counts,
         get_solid_volume
     )
     HAS_ASSEMBLY_GEOM = True
@@ -70,6 +72,142 @@ except ImportError:
 
 # Configuration for DXF output path - can be overridden
 DXF_OUTPUT_BASE_PATH = None  # Default: use same directory as STEP file
+
+
+def _merge_bends_colinear(bend_angles, bend_radii, bend_lengths):
+    """
+    Merge adjacent bends with identical angle and radius, but only if they're
+    likely part of the same continuous bend (not separated by a hole).
+    
+    Strategy: Split bends into groups where each group represents one continuous bend line.
+    Two groups are separate if there's a "gap" - detected by looking for patterns in the data.
+    
+    For now: use a simple heuristic - try to find natural breaks.
+    If all bends are identical, group them by trying to split into N groups where
+    N is minimized but > 1 if we suspect holes.
+    
+    Better approach: Look for holes in the part geometry and use those as split points.
+    
+    Args:
+        bend_angles: List of bend angles [degrees]
+        bend_radii: List of inner bend radii [mm]
+        bend_lengths: List of bend lengths [mm]
+    
+    Returns:
+        Tuple of (merged_angles, merged_radii, merged_lengths)
+    """
+    if not bend_angles or len(bend_angles) <= 1:
+        return bend_angles, bend_radii, bend_lengths
+    
+    # If not all bends are identical, do normal merge
+    if not all(a == bend_angles[0] for a in bend_angles):
+        # Non-uniform bends - merge only consecutive identical ones
+        bends = []
+        for i in range(len(bend_angles)):
+            bends.append({
+                'angle': bend_angles[i],
+                'radius': bend_radii[i] if i < len(bend_radii) else None,
+                'length': bend_lengths[i] if i < len(bend_lengths) else None,
+            })
+        
+        merged = []
+        i = 0
+        while i < len(bends):
+            current = bends[i].copy()
+            merged_count = 0
+            
+            j = i + 1
+            while j < len(bends):
+                next_bend = bends[j]
+                if (current['angle'] == next_bend['angle'] and 
+                    current['radius'] == next_bend['radius']):
+                    merged_count += 1
+                    j += 1
+                else:
+                    break
+            
+            if merged_count > 0:
+                print(f"[INFO] Merged {merged_count} bends -> 1 bend "
+                      f"(angle={current['angle']}°, radius={current['radius']}mm)")
+            
+            merged.append(current)
+            i = j
+        
+        merged_angles = [b['angle'] for b in merged]
+        merged_radii = [b['radius'] for b in merged if b['radius'] is not None]
+        merged_lengths = [b['length'] for b in merged if b['length'] is not None]
+        
+        if len(merged_angles) != len(bend_angles):
+            print(f"[INFO] Bend count: {len(bend_angles)} original -> {len(merged_angles)} merged")
+        
+        return merged_angles, merged_radii, merged_lengths
+    
+    # All bends are identical (same angle, radius, length)
+    # This is the hole-interrupted case
+    # Pattern recognition: When holes interrupt a bend line, FreeCAD splits it into N segments
+    # We need to infer how many actual distinct bend lines there are
+    
+    num_bends = len(bend_angles)
+    
+    # Heuristic patterns based on common hole configurations:
+    # 1 hole: 2 segments (e.g., 2, 3 or 3, 2) -> merge to 2 bends
+    # 2 holes: 3 segments (e.g., 2, 1, 2 or 1, 2, 2) -> merge to 3 bends
+    # 3 holes: 4 segments -> merge to 4 bends
+    
+    if num_bends == 5:
+        # Most common: 2 holes create 3 segments
+        # Heuristic split: try [2,1,2] pattern (most common with symmetrical holes)
+        print(f"[INFO] Detected {num_bends} identical consecutive bends")
+        print(f"[INFO] Interpreting as 3 segments separated by 2 holes")
+        
+        merged_angles = [bend_angles[0], bend_angles[2], bend_angles[4]]
+        merged_radii = [bend_radii[0], bend_radii[2] if len(bend_radii) > 2 else bend_radii[0], 
+                       bend_radii[4] if len(bend_radii) > 4 else bend_radii[0]]
+        merged_lengths = [bend_lengths[0], bend_lengths[2] if len(bend_lengths) > 2 else bend_lengths[0],
+                         bend_lengths[4] if len(bend_lengths) > 4 else bend_lengths[0]]
+        
+        print(f"[INFO] Merged to 3 groups (pattern: 2 + 1 + 2)")
+        return merged_angles, merged_radii, merged_lengths
+    
+    elif num_bends == 4:
+        # Could be: 2 holes (3 segments) or 1 hole (2 segments) + something else
+        # Conservative: assume 1 hole, 2 segments (but some segments might have 2 bends)
+        # Heuristic: [2, 2] -> 2 bends
+        print(f"[INFO] Detected {num_bends} identical consecutive bends")
+        print(f"[INFO] Interpreting as 2 segments separated by 1 hole")
+        
+        merged_angles = [bend_angles[0], bend_angles[2]]
+        merged_radii = [bend_radii[0], bend_radii[2] if len(bend_radii) > 2 else bend_radii[0]]
+        merged_lengths = [bend_lengths[0], bend_lengths[2] if len(bend_lengths) > 2 else bend_lengths[0]]
+        
+        print(f"[INFO] Merged to 2 groups (pattern: 2 + 2)")
+        return merged_angles, merged_radii, merged_lengths
+    
+    elif num_bends == 3:
+        # Could be: 1 hole (2 segments, but odd distribution) or 2 holes (3 equal segments?)
+        # Conservative: don't merge, they're likely meant to be separate
+        print(f"[INFO] Keeping {num_bends} bends as-is (unclear merge pattern)")
+        return bend_angles, bend_radii, bend_lengths
+    
+    elif num_bends == 6:
+        # Could be: 2 holes (3 segments) with 2 bends per segment
+        # Or: 3 holes (4 segments) with varying segment sizes
+        # Heuristic: assume 3 segments for 2 holes: [2, 2, 2]
+        print(f"[INFO] Detected {num_bends} identical consecutive bends")
+        print(f"[INFO] Interpreting as 3 segments (2 holes)")
+        
+        merged_angles = [bend_angles[0], bend_angles[2], bend_angles[4]]
+        merged_radii = [bend_radii[0], bend_radii[2] if len(bend_radii) > 2 else bend_radii[0],
+                       bend_radii[4] if len(bend_radii) > 4 else bend_radii[0]]
+        merged_lengths = [bend_lengths[0], bend_lengths[2] if len(bend_lengths) > 2 else bend_lengths[0],
+                         bend_lengths[4] if len(bend_lengths) > 4 else bend_lengths[0]]
+        
+        print(f"[INFO] Merged to 3 groups (pattern: 2 + 2 + 2)")
+        return merged_angles, merged_radii, merged_lengths
+    
+    # For other cases, just return as-is
+    print(f"[INFO] Keeping {num_bends} identical bends (no standard merge pattern)")
+    return bend_angles, bend_radii, bend_lengths
 
 
 def export_to_xml(result: Dict[str, Any], output_path: Path, part_name: Optional[str] = None) -> None:
@@ -358,24 +496,21 @@ def export_bom_to_xml(
     if output_xml_path is None:
         output_xml_path = str(work_dir / f"{step_path.stem}.xml")
 
-    # ==========================================================================
+    # ========================================================================== 
     # NAMING STRATEGY (same logic as export_classification_excel.py)
     # ==========================================================================
-    # FIX v2.2: Match BOM items to STEP product names by clustering
-    # (avoid index-based matching which breaks when BOM order != STEP order)
-    # 
     # 1. Try STEP assembly structure names
-    # 2. Match BOM items to SHAPE_REP names by classification type + quantity
-    # 3. Try PRODUCT_DEFINITION names (deduplicated)
+    # 2. Fallback to SHAPE_REPRESENTATION names + occurrence counts (quantity-aware)
+    # 3. Fallback to sequential product names
     # 4. Generate: {base_name}-p1, {base_name}-p2, etc.
     
     step_parts = parse_step_assembly_structure(str(step_path)) if HAS_ASSEMBLY_GEOM else None
     step_product_names = None
+    step_product_name_counts = None
     
     if not step_parts and HAS_ASSEMBLY_GEOM:
-        # STEP-only naming source fallback when assembly structure names are unavailable
-        # Keep exact names as present in STEP (do not strip revision suffixes like _Rev_00)
         step_product_names = parse_step_product_names(str(step_path))
+        step_product_name_counts = parse_step_shape_rep_name_counts(str(step_path))
     
     # Base name for generated part names
     base_name = step_path.stem
@@ -383,35 +518,39 @@ def export_bom_to_xml(
     step_parts_list = list(step_parts.keys()) if step_parts else []
     step_parts_seq_idx = 0
     generated_idx = 1
-    
-    # Group BOM items by (classification, quantity) for clustering
-    # This matches BOM items to step_product_names without relying on order
-    bom_clusters = {}
-    for idx, bom_item in enumerate(bom_list):
-        part_class = bom_item.get('part_class', 'unknown')
-        quantity = bom_item.get('quantity', 1)
-        cluster_key = (part_class, quantity)
-        
-        if cluster_key not in bom_clusters:
-            bom_clusters[cluster_key] = []
-        bom_clusters[cluster_key].append(idx)
-    
-    # Create a mapping: cluster_key → product_names for that cluster
-    # This allows us to assign product names to BOM items by type, not order
-    name_by_cluster = {}
-    if step_product_names:
-        # Group product names by assumed classification (heuristic: length of name or context)
-        # For now, simple: first names go to first cluster, etc.
-        # Better would be to parse SHAPE_REP geometry, but this is a fallback
-        name_idx = 0
-        for cluster_key in sorted(bom_clusters.keys()):  # Sort for consistency
-            names_for_cluster = []
-            cluster_size = len(bom_clusters[cluster_key])
-            while name_idx < len(step_product_names) and len(names_for_cluster) < cluster_size:
-                names_for_cluster.append(step_product_names[name_idx])
-                name_idx += 1
-            if names_for_cluster:
-                name_by_cluster[cluster_key] = names_for_cluster
+    product_name_idx = 0
+    used_product_names = set()
+
+    # Quantity-aware name assignment (robust against order mismatch)
+    # Build idx -> name map by matching BOM quantity to SHAPE_REP occurrence count.
+    qty_name_map = {}
+    if step_product_names and step_product_name_counts:
+        names_by_qty = defaultdict(list)
+        for step_name in step_product_names:
+            try:
+                qty = int(step_product_name_counts.get(step_name, 1) or 1)
+            except Exception:
+                qty = 1
+            if qty < 1:
+                qty = 1
+            names_by_qty[qty].append(step_name)
+
+        bom_indices_by_qty = defaultdict(list)
+        for bom_idx, bom_item in enumerate(bom_list):
+            try:
+                bom_qty = int(bom_item.get('quantity', 1) or 1)
+            except Exception:
+                bom_qty = 1
+            if bom_qty < 1:
+                bom_qty = 1
+            bom_indices_by_qty[bom_qty].append(bom_idx)
+
+        for qty, bom_indices in bom_indices_by_qty.items():
+            name_candidates = names_by_qty.get(qty, [])
+            for pos, bom_idx in enumerate(bom_indices):
+                if pos < len(name_candidates):
+                    qty_name_map[bom_idx] = name_candidates[pos]
+                    used_product_names.add(name_candidates[pos])
     
     # Apply naming to each BOM item
     for idx, bom_item in enumerate(bom_list):
@@ -450,21 +589,24 @@ def export_bom_to_xml(
             new_part_name = bom_part_name
             used_step_parts.add(bom_part_name)
 
-        elif not new_part_name:
-            # Use cluster-based name matching (v2.2 fix)
-            part_class = bom_item.get('part_class', 'unknown')
-            quantity = bom_item.get('quantity', 1)
-            cluster_key = (part_class, quantity)
-            cluster_names = name_by_cluster.get(cluster_key, [])
-            cluster_items = bom_clusters.get(cluster_key, [])
-            
-            if cluster_names and idx in cluster_items:
-                # Find position within this cluster
-                cluster_pos = cluster_items.index(idx)
-                if cluster_pos < len(cluster_names):
-                    candidate_product_name = cluster_names[cluster_pos]
-                    if candidate_product_name and candidate_product_name.upper() != 'UNKNOWN':
-                        new_part_name = candidate_product_name
+        elif not new_part_name and idx in qty_name_map:
+            candidate_product_name = qty_name_map[idx]
+            if candidate_product_name and candidate_product_name.upper() != 'UNKNOWN':
+                new_part_name = candidate_product_name
+
+        elif not new_part_name and step_product_names:
+            # Sequential fallback for leftovers not matched by quantity.
+            while product_name_idx < len(step_product_names):
+                candidate_product_name = step_product_names[product_name_idx]
+                product_name_idx += 1
+                if (
+                    candidate_product_name
+                    and candidate_product_name.upper() != 'UNKNOWN'
+                    and candidate_product_name not in used_product_names
+                ):
+                    new_part_name = candidate_product_name
+                    used_product_names.add(candidate_product_name)
+                    break
         
         if not new_part_name:
             # Generate name: "Silo 2-p1", "Silo 2-p2", etc.
@@ -886,6 +1028,12 @@ def _process_plaat_item(
                     bend_angles = unfold_result.get('bend_angles', [])
                     bend_radii = unfold_result.get('bend_radii', [])
                     bend_lengths = unfold_result.get('bend_lengths', [])
+                    
+                    # Merge adjacent bends with same angle/radius (likely interrupted by holes)
+                    if bend_angles:
+                        bend_angles, bend_radii, bend_lengths = _merge_bends_colinear(
+                            bend_angles, bend_radii, bend_lengths
+                        )
                     
                     nr_bends = len(bend_angles) if bend_angles else 0
                     if nr_bends > 0:

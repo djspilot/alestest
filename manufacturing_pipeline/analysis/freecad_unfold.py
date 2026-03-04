@@ -538,6 +538,81 @@ UNFOLD_ERROR_MESSAGES = {
 }
 
 
+def _merge_adjacent_bends(bend_angles, bend_radii, bend_lengths):
+    """
+    Merge bends that are likely part of the same bend line but interrupted by holes.
+    
+    Criteria for merging:
+    - Same angle (e.g., all 90°)
+    - Same radius (inner radius)
+    - Adjacent in sequence (FreeCAD likely detected them in order)
+    
+    This removes artificial "bend splits" caused by holes that interrupt a bend line.
+    Example: A single 90° bend interrupted by 2 holes appears as 3 separate bends,
+    but should be counted as 1 bend if the gaps are small.
+    
+    Args:
+        bend_angles: List of bend angles in degrees
+        bend_radii: List of inner bend radii in mm
+        bend_lengths: List of bend lengths in mm
+    
+    Returns:
+        Tuple of (merged_angles, merged_radii, merged_lengths)
+    """
+    if not bend_angles:
+        return bend_angles, bend_radii, bend_lengths
+    
+    # Build list of bends with metadata
+    bends = []
+    for i in range(len(bend_angles)):
+        bends.append({
+            'angle': bend_angles[i],
+            'radius': bend_radii[i] if i < len(bend_radii) else None,
+            'length': bend_lengths[i] if i < len(bend_lengths) else None,
+            'index': i
+        })
+    
+    # Merge adjacent bends with identical angle and radius
+    merged = []
+    i = 0
+    while i < len(bends):
+        current = bends[i].copy()
+        merged_count = 0
+        
+        # Look ahead for similar bends
+        j = i + 1
+        while j < len(bends):
+            next_bend = bends[j]
+            # Merge if: same angle AND same radius
+            if (current['angle'] == next_bend['angle'] and 
+                current['radius'] == next_bend['radius']):
+                merged_count += 1
+                j += 1
+            else:
+                break
+        
+        # Report merging
+        if merged_count > 0:
+            print(f"[INFO] Merged {merged_count} adjacent bends into 1 "
+                  f"(angle={current['angle']}°, radius={current['radius']}mm) "
+                  f"- likely interrupted by holes")
+        
+        merged.append(current)
+        i = j
+    
+    # Extract back into lists
+    merged_angles = [b['angle'] for b in merged]
+    merged_radii = [b['radius'] for b in merged if b['radius'] is not None]
+    merged_lengths = [b['length'] for b in merged if b['length'] is not None]
+    
+    original_count = len(bend_angles)
+    merged_count = len(merged_angles)
+    if original_count != merged_count:
+        print(f"[INFO] Bend count: {original_count} -> {merged_count} after merging")
+    
+    return merged_angles, merged_radii, merged_lengths
+
+
 def unfold_sheet_metal(
     step_path: Optional[str] = None,
     solid_object: Optional[Any] = None,
@@ -785,20 +860,28 @@ def unfold_sheet_metal(
                         
                         # Extraheer bend parameters uit unfold tree
                         bend_info = extract_bend_info_from_tree(unfold_tree)
-                        result['bend_angles'] = bend_info['bend_angles']
-                        result['bend_radii'] = bend_info['bend_radii']
-                        result['bend_lengths'] = bend_info['bend_lengths']
-                        result['bend_count'] = bend_info['bend_count']
+                        
+                        # Merge adjacent bends that are likely interrupted by holes
+                        merged_angles, merged_radii, merged_lengths = _merge_adjacent_bends(
+                            bend_info['bend_angles'],
+                            bend_info['bend_radii'],
+                            bend_info['bend_lengths']
+                        )
+                        
+                        result['bend_angles'] = merged_angles
+                        result['bend_radii'] = merged_radii
+                        result['bend_lengths'] = merged_lengths
+                        result['bend_count'] = len(merged_angles)
 
                         print(f"  ✓ Unfold geslaagd: {bbox.XLength:.1f} x {bbox.YLength:.1f} mm")
-                        if bend_info['bend_count'] > 0:
-                            print(f"  ✓ Bends: {bend_info['bend_count']} gevonden")
-                            if bend_info['bend_angles']:
-                                print(f"    - Angles: {bend_info['bend_angles']}")
-                            if bend_info['bend_radii']:
-                                print(f"    - Radii: {bend_info['bend_radii']}")
-                            if bend_info['bend_lengths']:
-                                print(f"    - Lengths: {bend_info['bend_lengths']}")
+                        if result['bend_count'] > 0:
+                            print(f"  ✓ Bends: {result['bend_count']} gevonden")
+                            if result['bend_angles']:
+                                print(f"    - Angles: {result['bend_angles']}")
+                            if result['bend_radii']:
+                                print(f"    - Radii: {result['bend_radii']}")
+                            if result['bend_lengths']:
+                                print(f"    - Lengths: {result['bend_lengths']}")
                         print(f"  ✓ Fold lines: {len(foldLines)}")
 
                         # Export naar DXF indien gewenst
