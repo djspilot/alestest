@@ -43,8 +43,13 @@ from manufacturing_pipeline.analysis.classification_variables import (
     STANDARD_TUBE_VOLUME_RATIO_MAX,
     STANDARD_TUBE_ASPECT_MIN,
     STANDARD_PROFILE_FACE_AREA_TOLERANCE,
-    BENT_SHEET_LARGE_RADIUS_MIN_MM,
+    # v2.1: Bent sheet detection
+    BENT_SHEET_THICKNESS_MAX_MM,
     BENT_SHEET_MIN_EDGE_COUNT,
+    BENT_SHEET_VOLUME_RATIO_MIN,
+    BENT_SHEET_VOLUME_RATIO_MAX,
+    BENT_SHEET_TOP2_FACES_MAX_PCT,
+    BENT_SHEET_ASPECT_RATIO_MIN,
 )
 
 # Try to import CAD libraries
@@ -574,6 +579,70 @@ def _detect_variable_thickness(solid, dims: Tuple[float, float, float]) -> bool:
         return False
 
 
+def _detect_bent_sheet(solid, volume: float, dims: Tuple[float, float, float]) -> bool:
+    """Detect bent/formed sheet metal parts (U-profiles, channels, trays).
+    
+    Bent sheets have been folded/bent rather than solid extruded or drawn:
+    - Thin material (thickness < 5mm, typical for sheet metal)
+    - Many edges (>=8 from bends/folds)
+    - Moderate volume ratio (0.15-0.5: not hollow pipe, not solid profile)
+    - Lower top2 face percentage (<60%: distributed faces from bends)
+    - Reasonable aspect ratio (elongated)
+    
+    Example: U-profile (3mm thick, 40×60×201.5mm) has ~14 edges, 35% top2%, vol_ratio 0.33
+    
+    Args:
+        solid: The solid to analyze
+        volume: Volume in mm³
+        dims: Sorted bounding box dimensions [smallest, middle, longest]
+    
+    Returns:
+        True if this appears to be a bent sheet metal part
+    """
+    try:
+        if not HAS_OCP:
+            return False
+        
+        smallest, middle, longest = dims
+        
+        # CRITERION 1: Thickness must be thin (typical sheet metal)
+        if smallest > BENT_SHEET_THICKNESS_MAX_MM:
+            return False
+        
+        # CRITERION 2: Many edges (from bends/folds)
+        edge_count = 0
+        edge_exp = TopExp_Explorer(solid, TopAbs_EDGE)
+        while edge_exp.More():
+            edge_count += 1
+            edge_exp.Next()
+        
+        if edge_count < BENT_SHEET_MIN_EDGE_COUNT:
+            return False
+        
+        # CRITERION 3: Volume ratio in correct range (not hollow pipe, not solid)
+        bbox_volume = smallest * middle * longest
+        volume_ratio = volume / bbox_volume if bbox_volume > 0 else 0
+        
+        if volume_ratio < BENT_SHEET_VOLUME_RATIO_MIN or volume_ratio > BENT_SHEET_VOLUME_RATIO_MAX:
+            return False
+        
+        # CRITERION 4: Top2 faces not too dominant (distributed from bends)
+        top2_pct = _get_top2_face_percent(solid)
+        if top2_pct > BENT_SHEET_TOP2_FACES_MAX_PCT:
+            return False
+        
+        # CRITERION 5: Must be reasonably elongated
+        aspect_ratio = longest / smallest if smallest > 0 else 0
+        if aspect_ratio < BENT_SHEET_ASPECT_RATIO_MIN:
+            return False
+        
+        # All criteria met
+        return True
+        
+    except:
+        return False
+
+
 def _get_top2_face_percent(solid) -> float:
     """Return percentage surface area covered by the two largest faces."""
     try:
@@ -782,6 +851,16 @@ def classify_solid(solid, return_trace: bool = False):
     if _detect_variable_thickness(solid, dims):
         trace["rules"].append("standard_variable_thickness")
         return ("anders", trace) if return_trace else "anders"
+    
+    # ============================================================================
+    # STEP 1.5: BENT SHEET DETECTION (v2.1)
+    # Formed/folded sheet metal (U-profiles, channels, trays)
+    # ============================================================================
+    # Bent sheets have many edges and thin material, but lower top2% than flat plates
+    # Must check BEFORE traditional plate detection to catch shaped sheet metal
+    if _detect_bent_sheet(solid, volume, dims):
+        trace["rules"].append("bent_sheet_metal")
+        return ("plaat", trace) if return_trace else "plaat"
     
     # ============================================================================
     # STEP 2: PLATE DETECTION

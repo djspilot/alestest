@@ -75,6 +75,29 @@ STANDARD_PROFILE_VARIABLE_THICKNESS = True       # Enable check
 STANDARD_PROFILE_ELONGATED_LENGTH_RATIO_MIN = 5.0  # L/smallest >= 5 (elongated)
 STANDARD_PROFILE_FACE_AREA_TOLERANCE = 0.20      # Top2 faces differ >20% → variable
 
-# Bent sheet exclusion (prevent false positives on formed sheet metal)
-BENT_SHEET_LARGE_RADIUS_MIN_MM = 1.0      # Bends have radius >= 1mm
-BENT_SHEET_MIN_EDGE_COUNT = 8             # Formed sheets have many edges
+# =============================================================================
+# BENT SHEET DETECTION (v2.1 - Formed/Folded Sheet Metal)
+# =============================================================================
+# Detect sheet metal that has been bent/formed (U-profiles, channels, trays)
+# These should be classified as PLAAT even though they don't have high top2%
+
+# Thickness constraint - bent sheets must be thin (like normal sheets)
+# Note: For U-profiles, "smallest" dimension includes the hollow opening,
+# so this is more generous (allows profiles with larger cross-sections)
+BENT_SHEET_THICKNESS_MAX_MM = 100.0       # Relaxed: allows hollow sections with opening
+
+# Edge count - bent sheets have many edges due to bends/folds  
+BENT_SHEET_MIN_EDGE_COUNT = 8             # >=8 edges indicates folded geometry
+                                          # Flat plate: ~4 edges
+                                          # U-profile: ~12-16 edges
+                                          # Channel: ~8-12 edges
+
+# Volume ratio - bent sheets should be mostly air (not solid mass)
+BENT_SHEET_VOLUME_RATIO_MIN = 0.10        # Lowered to 0.10 for hollow profiles
+BENT_SHEET_VOLUME_RATIO_MAX = 0.50        # <0.50 (not solid profile)
+
+# Top2 faces should NOT be too high (to distinguish from completely flat plates)
+BENT_SHEET_TOP2_FACES_MAX_PCT = 60.0      # <60% (more distributed than flat plate)
+
+# Aspect ratio - bent sheets are typically elongated
+BENT_SHEET_ASPECT_RATIO_MIN = 2.0         # longest/smallest >= 2.0 (elongated)
