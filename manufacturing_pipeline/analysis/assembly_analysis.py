@@ -50,6 +50,11 @@ from manufacturing_pipeline.analysis.classification_variables import (
     BENT_SHEET_VOLUME_RATIO_MAX,
     BENT_SHEET_TOP2_FACES_MAX_PCT,
     BENT_SHEET_ASPECT_RATIO_MIN,
+    CROSS_SECTION_SAMPLE_FRACTIONS,
+    CROSS_SECTION_MIN_VALID_SAMPLES,
+    CROSS_SECTION_CLOSED_RATIO_MIN,
+    CROSS_SECTION_PERIMETER_CV_MAX,
+    CROSS_SECTION_EDGE_COUNT_SPAN_MAX,
 )
 
 # Try to import CAD libraries
@@ -636,10 +641,22 @@ def _detect_bent_sheet(solid, volume: float, dims: Tuple[float, float, float]) -
         if aspect_ratio < BENT_SHEET_ASPECT_RATIO_MIN:
             return False
         
-        # CRITERION 6: EXCLUSION - Must NOT be a perfect circular/square cross-section
-        # (perfect round/square = solid profile like tube or rod, not bent sheet)
-        cross_ratio = smallest / middle if middle > 0 else 0
-        if abs(cross_ratio - 1.0) < 0.05:  # Tolerance for rounding: essentially 1.0
+        # CRITERION 6: EXCLUSION - long hollow rectangular sections are profiles, not bent sheets.
+        # Examples: 100x50 kokers with long length and low volume ratio.
+        profile_cross_ratio = middle / smallest if smallest > 0 else 0
+        profile_length_ratio = longest / middle if middle > 0 else 0
+        if (
+            smallest >= PLATE_THICK_MAX_MM and
+            profile_length_ratio >= PROFILE_LENGTH_RATIO_MIN and
+            PROFILE_CROSS_RATIO_MIN <= profile_cross_ratio <= PROFILE_CROSS_RATIO_MAX and
+            volume_ratio <= STANDARD_TUBE_VOLUME_RATIO_MAX
+        ):
+            return False
+
+        # CRITERION 7: EXCLUSION - Must NOT be a perfect circular/square cross-section
+        # (perfect round/square = tube/rod profile, not bent sheet)
+        bent_cross_ratio = smallest / middle if middle > 0 else 0
+        if abs(bent_cross_ratio - 1.0) < 0.05:  # Tolerance for rounding: essentially 1.0
             return False  # Exclude perfect cylindrical/square profiles
         
         # All criteria met
@@ -675,6 +692,282 @@ def _get_top2_face_percent(solid) -> float:
         return ((face_areas[0] + face_areas[1]) / total_area) * 100.0
     except Exception:
         return 0.0
+
+
+def _estimate_bend_angle_sum(solid, min_angle_deg: float = 20.0, min_length_mm: float = 5.0) -> float:
+    """Estimate total bend angle (degrees) from cylindrical faces.
+
+    Strategy:
+    - Collect cylindrical faces
+    - Estimate bend length from face area / circumference
+    - Ignore very small/short cylinders (holes, fillets)
+    - Deduplicate inner/outer bend faces by (angle, length)
+
+    Returns:
+        Sum of unique bend angles in degrees
+    """
+    try:
+        if not HAS_OCP:
+            return 0.0
+
+        from OCP.BRepAdaptor import BRepAdaptor_Surface
+        from OCP.GeomAbs import GeomAbs_Cylinder
+
+        cylinders = []
+
+        face_exp = TopExp_Explorer(solid, TopAbs_FACE)
+        while face_exp.More():
+            face = TopoDS.Face_s(face_exp.Current())
+            surf = BRepAdaptor_Surface(face, True)
+
+            if surf.GetType() == GeomAbs_Cylinder:
+                cyl = surf.Cylinder()
+                radius = cyl.Radius()
+                if radius <= 0:
+                    face_exp.Next()
+                    continue
+
+                props = GProp_GProps()
+                BRepGProp.SurfaceProperties_s(face, props)
+                area = props.Mass()
+
+                circumference = 2.0 * math.pi * radius
+                bend_length = area / circumference if circumference > 0 else 0.0
+
+                try:
+                    u_min = surf.FirstUParameter()
+                    u_max = surf.LastUParameter()
+                    angle_deg = abs(math.degrees(u_max - u_min))
+                except Exception:
+                    angle_deg = 0.0
+
+                if angle_deg >= min_angle_deg and bend_length >= min_length_mm:
+                    cylinders.append({
+                        "angle_deg": angle_deg,
+                        "bend_length": bend_length,
+                        "radius": radius,
+                    })
+
+            face_exp.Next()
+
+        if not cylinders:
+            return 0.0
+
+        unique = {}
+        for c in cylinders:
+            key = (round(c["angle_deg"], 1), round(c["bend_length"], 1))
+            if key not in unique or c["radius"] < unique[key]["radius"]:
+                unique[key] = c
+
+        return sum(c["angle_deg"] for c in unique.values())
+
+    except Exception:
+        return 0.0
+
+
+def _get_solid_bbox_extents(solid) -> Optional[Tuple[float, float, float, float, float, float]]:
+    """Get raw bbox extents (xmin, ymin, zmin, xmax, ymax, zmax)."""
+    if not HAS_OCP:
+        return None
+    try:
+        from OCP.Bnd import Bnd_Box
+        from OCP.BRepBndLib import BRepBndLib
+
+        box = Bnd_Box()
+        BRepBndLib.Add_s(solid, box)
+        return box.Get()
+    except Exception:
+        return None
+
+
+def _extract_section_signature(
+    solid,
+    axis_index: int,
+    axis_coordinate: float,
+    vertex_snap_mm: float = 0.05,
+) -> Optional[Dict[str, Any]]:
+    """Extract section signature (closed/open, edge count, perimeter) on a plane.
+
+    Args:
+        solid: OCP solid
+        axis_index: 0=x, 1=y, 2=z
+        axis_coordinate: coordinate value along selected axis
+        vertex_snap_mm: spatial snap tolerance for vertex graph matching
+
+    Returns:
+        dict(edge_count, perimeter, closed) or None when section failed/empty
+    """
+    try:
+        from OCP.BRepAlgoAPI import BRepAlgoAPI_Section
+        from OCP.gp import gp_Dir, gp_Pln, gp_Pnt
+        from OCP.BRep import BRep_Tool
+        from OCP.TopAbs import TopAbs_EDGE, TopAbs_VERTEX
+
+        if axis_index == 0:
+            plane = gp_Pln(gp_Pnt(axis_coordinate, 0.0, 0.0), gp_Dir(1.0, 0.0, 0.0))
+        elif axis_index == 1:
+            plane = gp_Pln(gp_Pnt(0.0, axis_coordinate, 0.0), gp_Dir(0.0, 1.0, 0.0))
+        else:
+            plane = gp_Pln(gp_Pnt(0.0, 0.0, axis_coordinate), gp_Dir(0.0, 0.0, 1.0))
+
+        try:
+            section_op = BRepAlgoAPI_Section(solid, plane, False)
+        except TypeError:
+            section_op = BRepAlgoAPI_Section(solid, plane)
+
+        section_op.Build()
+        if hasattr(section_op, "IsDone") and not section_op.IsDone():
+            return None
+
+        section_shape = section_op.Shape()
+        edge_exp = TopExp_Explorer(section_shape, TopAbs_EDGE)
+
+        edge_count = 0
+        perimeter = 0.0
+        vertex_degree: Dict[Tuple[int, int, int], int] = {}
+
+        while edge_exp.More():
+            edge = TopoDS.Edge_s(edge_exp.Current())
+
+            props = GProp_GProps()
+            if hasattr(BRepGProp, "LinearProperties_s"):
+                BRepGProp.LinearProperties_s(edge, props)
+            else:
+                BRepGProp.LinearProperties(edge, props)
+            edge_length = props.Mass()
+
+            if edge_length > 1e-6:
+                edge_count += 1
+                perimeter += edge_length
+
+                vertex_exp = TopExp_Explorer(edge, TopAbs_VERTEX)
+                vertex_keys: List[Tuple[int, int, int]] = []
+                while vertex_exp.More():
+                    vertex = TopoDS.Vertex_s(vertex_exp.Current())
+                    point = BRep_Tool.Pnt_s(vertex)
+                    vertex_keys.append(
+                        (
+                            int(round(point.X() / vertex_snap_mm)),
+                            int(round(point.Y() / vertex_snap_mm)),
+                            int(round(point.Z() / vertex_snap_mm)),
+                        )
+                    )
+                    vertex_exp.Next()
+
+                if len(vertex_keys) >= 2:
+                    start_key = vertex_keys[0]
+                    end_key = vertex_keys[-1]
+                    vertex_degree[start_key] = vertex_degree.get(start_key, 0) + 1
+                    vertex_degree[end_key] = vertex_degree.get(end_key, 0) + 1
+
+            edge_exp.Next()
+
+        if edge_count == 0:
+            return None
+
+        is_closed = edge_count >= 4 and bool(vertex_degree) and all(deg >= 2 for deg in vertex_degree.values())
+        return {
+            "edge_count": edge_count,
+            "perimeter": perimeter,
+            "closed": is_closed,
+        }
+    except Exception:
+        return None
+
+
+def _detect_closed_constant_cross_section(
+    solid,
+    dims: Tuple[float, float, float],
+) -> Tuple[bool, Dict[str, Any]]:
+    """Detect closed, near-constant cross-section along dominant length axis.
+
+    This acts as a hard profile signature for long hollow/solid extrusions,
+    reducing confusion with bent open-sheet geometries.
+    """
+    metrics: Dict[str, Any] = {
+        "section_samples": 0,
+        "section_closed_count": 0,
+        "section_closed_ratio": 0.0,
+        "section_perimeter_cv": None,
+        "section_edge_span": None,
+    }
+
+    try:
+        if not HAS_OCP:
+            return False, metrics
+
+        smallest, middle, longest = dims
+        if smallest <= 0 or middle <= 0 or longest <= 0:
+            return False, metrics
+
+        length_ratio = longest / middle if middle > 0 else 0.0
+        cross_ratio = middle / smallest if smallest > 0 else 0.0
+
+        # Run this expensive check only for plausible profile candidates.
+        if not (
+            smallest >= PROFILE_SMALLEST_MIN_MM and
+            length_ratio >= PROFILE_LENGTH_RATIO_MIN and
+            PROFILE_CROSS_RATIO_MIN <= cross_ratio <= PROFILE_CROSS_RATIO_MAX
+        ):
+            return False, metrics
+
+        bbox_extents = _get_solid_bbox_extents(solid)
+        if not bbox_extents:
+            return False, metrics
+
+        xmin, ymin, zmin, xmax, ymax, zmax = bbox_extents
+        axis_lengths = [xmax - xmin, ymax - ymin, zmax - zmin]
+        axis_index = max(range(3), key=lambda idx: axis_lengths[idx])
+
+        axis_min = [xmin, ymin, zmin][axis_index]
+        axis_max = [xmax, ymax, zmax][axis_index]
+        if axis_max <= axis_min:
+            return False, metrics
+
+        signatures: List[Dict[str, Any]] = []
+        for fraction in CROSS_SECTION_SAMPLE_FRACTIONS:
+            section_pos = axis_min + (axis_max - axis_min) * fraction
+            signature = _extract_section_signature(solid, axis_index, section_pos)
+            if signature:
+                signatures.append(signature)
+
+        metrics["section_samples"] = len(signatures)
+        if len(signatures) < CROSS_SECTION_MIN_VALID_SAMPLES:
+            return False, metrics
+
+        closed_signatures = [entry for entry in signatures if entry.get("closed")]
+        closed_ratio = len(closed_signatures) / len(signatures)
+        metrics["section_closed_count"] = len(closed_signatures)
+        metrics["section_closed_ratio"] = round(closed_ratio, 3)
+
+        if closed_ratio < CROSS_SECTION_CLOSED_RATIO_MIN:
+            return False, metrics
+
+        perimeters = [entry["perimeter"] for entry in closed_signatures if entry.get("perimeter", 0.0) > 0.0]
+        if len(perimeters) < 2:
+            return False, metrics
+
+        perimeter_avg = sum(perimeters) / len(perimeters)
+        if perimeter_avg <= 0:
+            return False, metrics
+
+        variance = sum((value - perimeter_avg) ** 2 for value in perimeters) / len(perimeters)
+        perimeter_cv = math.sqrt(variance) / perimeter_avg
+
+        edge_counts = [entry["edge_count"] for entry in closed_signatures if entry.get("edge_count", 0) > 0]
+        edge_span = (max(edge_counts) - min(edge_counts)) if edge_counts else 999
+
+        metrics["section_perimeter_cv"] = round(perimeter_cv, 4)
+        metrics["section_edge_span"] = int(edge_span)
+
+        is_constant = (
+            perimeter_cv <= CROSS_SECTION_PERIMETER_CV_MAX and
+            edge_span <= CROSS_SECTION_EDGE_COUNT_SPAN_MAX
+        )
+        return is_constant, metrics
+
+    except Exception:
+        return False, metrics
 
 
 def classify_solid_scored(solid) -> Tuple[str, Dict[str, Any]]:
@@ -783,11 +1076,15 @@ def classify_solid(solid, return_trace: bool = False):
     
     Returns one of: "plaat", "profiel", "anders"
     
-    Classification logic (v2.1):
+    Classification logic (v2.2):
     
     STEP 1: STANDARD PROFILE CHECK (purchased items - name-based heuristic failed)
     - Hollow tube: cylindrical ≥60%, volume_ratio <0.7 → "anders"
     - Variable thickness: face area diff >20%, elongated ≥5.0 → "anders"
+
+    STEP 1.25: HARD PROFILE OVERRIDE (closed & constant cross-section)
+    - Multi-slice section check along dominant axis
+    - Closed contour ratio high + low perimeter variation → "profiel"
     
     STEP 2: PLATE DETECTION
     - PLAAT: Detected by face analysis (top 2 faces > 60% surface area) OR
@@ -799,7 +1096,7 @@ def classify_solid(solid, return_trace: bool = False):
     STEP 4: DEFAULT
     - ANDERS: everything else (machined parts, complex geometry)
     
-    Key insight (v2.1):
+    Key insight (v2.2):
     Standard profiles (tubes, UNP, I-beams) must be detected BEFORE plate check.
     Otherwise, tubes with dominant end faces (94%) and UNP with flat web (52%)
     incorrectly trigger plate classification.
@@ -824,7 +1121,7 @@ def classify_solid(solid, return_trace: bool = False):
     
     trace = {
         "mode": "legacy",
-        "version": "2.1",
+        "version": "2.2",
         "features": {
             "smallest": round(smallest, 3),
             "middle": round(middle, 3),
@@ -857,6 +1154,14 @@ def classify_solid(solid, return_trace: bool = False):
     if _detect_variable_thickness(solid, dims):
         trace["rules"].append("standard_variable_thickness")
         return ("anders", trace) if return_trace else "anders"
+
+    # 1c. Hard profile signature: closed + near-constant cross-section
+    # This protects long hollow/solid extrusions against bent-sheet heuristics.
+    is_closed_constant_profile, section_metrics = _detect_closed_constant_cross_section(solid, dims)
+    trace["features"].update(section_metrics)
+    if is_closed_constant_profile:
+        trace["rules"].append("closed_constant_section")
+        return ("profiel", trace) if return_trace else "profiel"
     
     # ============================================================================
     # STEP 1.5: BENT SHEET DETECTION (v2.1)
@@ -865,6 +1170,15 @@ def classify_solid(solid, return_trace: bool = False):
     # Bent sheets have many edges and thin material, but lower top2% than flat plates
     # Must check BEFORE traditional plate detection to catch shaped sheet metal
     if _detect_bent_sheet(solid, volume, dims):
+        bend_angle_sum = _estimate_bend_angle_sum(solid)
+        trace["features"]["bend_angle_sum"] = round(bend_angle_sum, 3)
+
+        # Closed loop profile rule requested by user:
+        # if sum of bend angles >= 360°, classify as profile instead of bent sheet.
+        if bend_angle_sum >= 360.0:
+            trace["rules"].append("closed_profile_bend_sum")
+            return ("profiel", trace) if return_trace else "profiel"
+
         trace["rules"].append("bent_sheet_metal")
         return ("plaat", trace) if return_trace else "plaat"
     

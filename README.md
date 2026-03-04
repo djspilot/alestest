@@ -1,5 +1,29 @@
 # ALES Manufacturing Pipeline
 
+**Laatste update:** 4 maart 2026  
+**Versie:** 2.2 ✓ COMMITTED (Profile Robustness + Koker Dikte Fix)
+
+### v2.2 Changelog (4 maart 2026)
+
+**Nieuwe features/fixes:**
+- ✓ **Hard profile override op doorsnede-gedrag**
+  - Multi-slice cross-section check langs lengterichting (20/40/60/80%)
+  - Gesloten-contour ratio + perimeter-constantheid + edge-stabiliteit
+  - Doel: gesloten extrusies (kokers) betrouwbaar als `profiel`, ook bij tuning van bent-sheet regels
+- ✓ **Rectangular tube dikteberekening gecorrigeerd**
+  - Oude benadering op `volume_ratio` kon te hoge waardes geven (bijv. 100x50 → ~15 mm)
+  - Vervangen door analytische hollow-box vergelijking:
+    - `4t² - 2(W+H)t + fWH = 0`
+    - `t = ((W+H) - sqrt((W+H)^2 - 4fWH)) / 4`
+  - Resultaat: 100x50-kokers in `10001091875_Rev_00.step` nu correct op **3 mm**
+- ✓ XML output geverifieerd: `Tube_Type=R_100x50x3`, `Tube_Thickness=3`
+
+**Documentatie:**
+- Zie [CLASSIFICATION_METHODOLOGY.md](CLASSIFICATION_METHODOLOGY.md) voor classificatielogica + profieldikteformule
+- Zie [docs/CLASSIFICATION_DECISION_TREE.md](docs/CLASSIFICATION_DECISION_TREE.md) voor de bijgewerkte beslisboom
+
+---
+
 **Laatste update:** 3 maart 2026  
 **Versie:** 2.1.2 ✓ COMMITTED (Fase 1: Gaten + Snijdata plaat/gezette plaat)
 

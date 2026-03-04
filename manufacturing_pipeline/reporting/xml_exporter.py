@@ -45,7 +45,8 @@ try:
         solids_are_equal, 
         get_solid_bounding_box,
         parse_step_assembly_structure,
-        parse_step_product_names
+        parse_step_product_names,
+        get_solid_volume
     )
     HAS_ASSEMBLY_GEOM = True
 except ImportError:
@@ -59,6 +60,12 @@ try:
     HAS_DXF_METRICS = True
 except ImportError:
     HAS_DXF_METRICS = False
+
+try:
+    from manufacturing_pipeline.analysis.profile_features import extract_profile_features
+    HAS_PROFILE_FEATURES = True
+except ImportError:
+    HAS_PROFILE_FEATURES = False
 
 
 # Configuration for DXF output path - can be overridden
@@ -457,12 +464,25 @@ def export_bom_to_xml(
     print(f"\n[XML Export] Processing {len(bom_list)} BOM items...")
     plaat_seq_index = 0  # Track which sheet item in reference sequence we're at
     processed_count = 0  # Track successfully processed items
-    class_counts = {'plaat': 0, 'profiel': 0, 'anders': 0}  # Track by class
+    class_counts = {'plaat': 0, 'profiel': 0, 'anders': 0}  # Track by class (line-based)
+    unclassified_count = 0  # Items with missing/unknown part_class
+    bom_piece_count = 0  # Sum of quantities (stuk-count), separate from line count
     
     for idx, bom_item in enumerate(bom_list, 1):
         print(f"\n  [{idx}/{len(bom_list)}] {bom_item.get('part_name', 'Unknown')}")
 
-        part_class = bom_item.get('part_class', 'anders').lower()
+        raw_part_class = str(bom_item.get('part_class', '') or '').strip().lower()
+        if raw_part_class in class_counts:
+            part_class = raw_part_class
+        else:
+            part_class = 'anders'
+            unclassified_count += 1
+
+        try:
+            bom_piece_count += int(bom_item.get('quantity', 1) or 1)
+        except Exception:
+            bom_piece_count += 1
+
         part_solid = representative_solids[idx - 1] if (idx - 1) < len(representative_solids) else None
         
         # Determine sequence index for sheet items (only for plaat class)
@@ -486,8 +506,13 @@ def export_bom_to_xml(
                     reference_values,
                 )
             elif part_class == 'profiel':
-                # STAP 2: PROFIEL PROCESSING (TODO)
-                calc_result = _process_profiel_item(bom_item, step_path.stem)
+                # STAP 2: PROFIEL PROCESSING
+                calc_result = _process_profiel_item(
+                    bom_item,
+                    step_path.stem,
+                    part_solid,
+                    material
+                )
             else:
                 # STAP 3: OTHERS
                 calc_result = _process_others_item(bom_item, step_path.stem)
@@ -507,16 +532,24 @@ def export_bom_to_xml(
     # Add document control element for validation
     doc_control = ET.Element('DocumentControl')
     ET.SubElement(doc_control, 'Aantal_BOM').text = str(len(bom_list))
+    ET.SubElement(doc_control, 'Aantal_BOM_Regels').text = str(len(bom_list))
+    ET.SubElement(doc_control, 'Aantal_BOM_Stuks').text = str(bom_piece_count)
     ET.SubElement(doc_control, 'Aantal_Verwerkt').text = str(processed_count)
     ET.SubElement(doc_control, 'Aantal_Plaat').text = str(class_counts['plaat'])
     ET.SubElement(doc_control, 'Aantal_Profiel').text = str(class_counts['profiel'])
     ET.SubElement(doc_control, 'Aantal_Anders').text = str(class_counts['anders'])
+    ET.SubElement(doc_control, 'Aantal_NietGeclassificeerd').text = str(unclassified_count)
     ET.SubElement(doc_control, 'Status').text = 'OK' if processed_count == len(bom_list) else 'INCOMPLETE'
+    ET.SubElement(doc_control, 'Classificatie_Status').text = 'OK' if unclassified_count == 0 else 'UNCLASSIFIED_PARTS'
     
     # Insert at the beginning of root
     root.insert(0, doc_control)
     
-    print(f"\n[INFO] Document control: BOM={len(bom_list)}, Verwerkt={processed_count}, Status={'OK' if processed_count == len(bom_list) else 'INCOMPLETE'}")
+    print(
+        f"\n[INFO] Document control: Regels={len(bom_list)}, Stuks={bom_piece_count}, "
+        f"Verwerkt={processed_count}, NietGeclassificeerd={unclassified_count}, "
+        f"Status={'OK' if processed_count == len(bom_list) else 'INCOMPLETE'}"
+    )
 
     # Write XML
     xml_string = _prettify_xml(root)
@@ -1203,19 +1236,130 @@ def _try_unfold(
         return None
 
 
-def _process_profiel_item(bom_item: Dict[str, Any], source_step_name: str = '') -> Optional[ET.Element]:
+def _process_profiel_item(
+    bom_item: Dict[str, Any],
+    source_step_name: str = '',
+    part_solid=None,
+    material: str = 'S235JR'
+) -> Optional[ET.Element]:
     """
-    Process PROFIEL item: Extract dimensions and features.
-    TODO: Implement in STAP 2
+    Process PROFIEL item: Extract tube/profile dimensions and features.
+    
+    Extracts geometry features for tubes/profiles and populates XML with:
+    - Tube type (R_100x50x3 for rectangular, C_88.9x4 for circular)
+    - Dimensions (width, height for rectangular; diameter for circular)
+    - Wall thickness
+    - Corner radii (outer/inner radius)
+    - Bounding box dimensions
+    - Material and weight
+    
+    Args:
+        bom_item: BOM item dictionary
+        source_step_name: Source STEP file name
+        part_solid: OCP TopoDS_Shape solid (optional)
+        material: Material string (default: S235JR)
+    
+    Returns:
+        XML Element with Tube_* fields
     """
     calc_result = ET.Element('CalculationResult')
     part_name = bom_item.get('part_name', 'Unknown')
     output_part_name = source_step_name if source_step_name else part_name
+    quantity = bom_item.get('quantity', 1)
+    
+    # Basic fields (always populated)
     ET.SubElement(calc_result, 'Tube_PartName').text = output_part_name
     ET.SubElement(calc_result, 'Tube_Name').text = part_name
-    ET.SubElement(calc_result, 'Tube_Type').text = 'Profile'
-    ET.SubElement(calc_result, 'Tube_Count').text = str(bom_item.get('quantity', 1))
-    # TODO: Add more fields
+    ET.SubElement(calc_result, 'Tube_Count').text = str(quantity)
+    
+    # Initialize with default values
+    tube_type = 'Profile'
+    width = 0.0
+    height = 0.0
+    thickness = 0.0
+    outer_radius = 0.0
+    inner_radius = 0.0
+    bbox_x = 0.0
+    bbox_y = 0.0
+    bbox_z = 0.0
+    success = False
+    weight = 0.0
+    
+    # Extract features if solid available
+    if part_solid is not None and HAS_PROFILE_FEATURES and HAS_ASSEMBLY_GEOM:
+        try:
+            # Get bounding box dimensions and volume
+            dims = get_solid_bounding_box(part_solid)
+            volume = get_solid_volume(part_solid)
+            
+            # Extract profile features using dedicated module
+            features = extract_profile_features(part_solid, dims, volume)
+            
+            if features.get('success', False):
+                # Update values from extracted features
+                tube_type = features.get('tube_type', 'Profile')
+                width = features.get('width', 0.0)
+                height = features.get('height', 0.0)
+                thickness = features.get('thickness', 0.0)
+                outer_radius = features.get('outer_radius', 0.0)
+                inner_radius = features.get('inner_radius', 0.0)
+                bbox_x = features.get('bbox_x', 0.0)
+                bbox_y = features.get('bbox_y', 0.0)
+                bbox_z = features.get('bbox_z', 0.0)
+                success = True
+                
+                # Calculate weight: volume (mm³) * density (kg/m³) / 1e9
+                density_map = {
+                    'S235JR': 7850,  # kg/m³
+                    'S355': 7850,
+                    'AlMg3': 2700,
+                    'Aluminum': 2700,
+                    'Stainless': 7900
+                }
+                density = 7850  # Default: steel
+                for mat_key, dens in density_map.items():
+                    if mat_key.lower() in material.lower():
+                        density = dens
+                        break
+                
+                weight = (volume / 1e9) * density  # kg
+                
+                print(f"    [OK] Profile features extracted: {tube_type}")
+                print(f"        Dimensions: {width:.1f} x {height:.1f} mm, thickness: {thickness:.1f} mm")
+                print(f"        Bbox: {bbox_x:.1f} x {bbox_y:.1f} x {bbox_z:.1f} mm")
+                print(f"        Weight: {weight:.2f} kg")
+            else:
+                print(f"    [WARN] Profile feature extraction failed, using defaults")
+                # Fallback: use description from BOM if available
+                desc = bom_item.get('description', '')
+                if desc:
+                    tube_type = f"Profile_{desc}"
+        
+        except Exception as e:
+            print(f"    [ERR] Profile feature extraction error: {e}")
+            success = False
+    else:
+        # No solid or module unavailable - use fallback
+        print(f"    [WARN] Profile solid not available, using fallback values")
+        desc = bom_item.get('description', '')
+        if desc:
+            tube_type = f"Profile_{desc}"
+    
+    # Populate XML elements
+    ET.SubElement(calc_result, 'Tube_Type').text = tube_type
+    ET.SubElement(calc_result, 'Tube_Thickness').text = _format_float(thickness)
+    ET.SubElement(calc_result, 'Tube_Width').text = _format_float(width)
+    ET.SubElement(calc_result, 'Tube_Height').text = _format_float(height)
+    ET.SubElement(calc_result, 'Tube_BoxDeltaX').text = _format_float(bbox_x)
+    ET.SubElement(calc_result, 'Tube_BoxDeltaY').text = _format_float(bbox_y)
+    ET.SubElement(calc_result, 'Tube_BoxDeltaZ').text = _format_float(bbox_z)
+    ET.SubElement(calc_result, 'Tube_Material').text = material
+    ET.SubElement(calc_result, 'Tube_InnerRadius').text = _format_float(inner_radius)
+    ET.SubElement(calc_result, 'Tube_OuterRadius').text = _format_float(outer_radius)
+    ET.SubElement(calc_result, 'Tube_Success').text = 'True' if success else 'False'
+    ET.SubElement(calc_result, 'Tube_FilePath').text = ''  # Populated later if needed
+    ET.SubElement(calc_result, 'Tube_Weight').text = _format_float(weight * quantity)  # Total weight
+    
     return calc_result
 
 

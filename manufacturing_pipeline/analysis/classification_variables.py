@@ -21,7 +21,7 @@ TUNING:
     2. Test: python validate_classification_only.py
     3. Commit: git add -A && git commit -m "Tune: adjusted thresholds"
 
-VERSION: 2.1 (Standard Profile Detection - 2 maart 2026)
+VERSION: 2.2 (Closed & Constant Cross-Section Override - 4 maart 2026)
 """
 
 # =============================================================================
@@ -101,3 +101,24 @@ BENT_SHEET_TOP2_FACES_MAX_PCT = 60.0      # <60% (more distributed than flat pla
 
 # Aspect ratio - bent sheets are typically elongated
 BENT_SHEET_ASPECT_RATIO_MIN = 2.0         # longest/smallest >= 2.0 (elongated)
+
+# =============================================================================
+# HARD PROFILE OVERRIDE (v2.2 - Closed & Constant Cross-Section)
+# =============================================================================
+# Robust profile signature to separate closed extrusions (e.g. kokers) from
+# bent/open sheet metal geometries.
+
+# Sample planes along dominant length axis (fractions of bbox length)
+CROSS_SECTION_SAMPLE_FRACTIONS = (0.2, 0.4, 0.6, 0.8)
+
+# Minimum successful section slices required for decision
+CROSS_SECTION_MIN_VALID_SAMPLES = 3
+
+# At least this share of successful slices must be closed contours
+CROSS_SECTION_CLOSED_RATIO_MIN = 0.75
+
+# Constant cross-section requirement: perimeter coefficient of variation
+CROSS_SECTION_PERIMETER_CV_MAX = 0.08
+
+# Topological stability across slices: max spread in edge counts
+CROSS_SECTION_EDGE_COUNT_SPAN_MAX = 2

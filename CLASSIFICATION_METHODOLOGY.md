@@ -1,7 +1,7 @@
 # Classification Methodology - ALES Manufacturing Pipeline
 
-**Version:** 2.0  
-**Date:** February 26, 2026  
+**Version:** 2.2  
+**Date:** March 4, 2026  
 **Status:** Production Ready
 
 ---
@@ -78,6 +78,29 @@ For very thin plates (<10mm) where face analysis might struggle:
 - ✓ 8.5×16.7×1400mm beam → PROFIEL
 - ✓ Rectangular bar stock
 - ✗ Thin-walled tube (low volume_ratio)
+
+### Hard Closed Cross-Section Override (NEW in v2.2)
+
+To make profile detection robust against bent-sheet tuning changes, a geometry-first
+override is applied before bent-sheet routing:
+
+**Algorithm (multi-slice):**
+1. Determine dominant length axis from bounding box
+2. Slice cross-sections at 20%, 40%, 60%, 80% of length
+3. For each slice, evaluate:
+    - contour closure (vertex graph has no open ends)
+    - section perimeter
+    - edge count
+4. Classify as **PROFIEL** when all are true:
+    - at least 3 valid slices
+    - at least 75% closed slices
+    - perimeter variation (CV) ≤ 0.08
+    - edge count spread ≤ 2
+
+**What this fixes:**
+- Closed extrusions (e.g. rectangular kokers) are no longer pulled into PLAAT by
+  bend/edge-heavy heuristics.
+- Open formed sections (U/C profiles) stay excluded because slices are not closed.
 
 ### Standard Profile Override
 
@@ -224,6 +247,9 @@ These have extensive internal pockets/cutouts that add many small faces.
 ```python
 _is_plate_by_face_analysis(solid, threshold=50.0) -> bool
     """Face-based plate detection (new in v2.0)"""
+
+_detect_closed_constant_cross_section(solid, dims) -> Tuple[bool, Dict]
+    """Hard profile signature using multi-slice closure + constancy checks"""
     
 classify_solid(solid) -> str
     """Main classification function. Returns: 'plaat', 'profiel', 'anders'"""

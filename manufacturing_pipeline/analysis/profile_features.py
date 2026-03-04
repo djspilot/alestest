@@ -1,0 +1,467 @@
+"""
+Profile Feature Extraction Module
+
+Extracts geometric features from tube/profile parts for XML export:
+- Circular tubes: diameter, wall thickness, inner/outer radius
+- Rectangular tubes: width, height, wall thickness, corner radius
+
+This module is designed to be easily replaceable without affecting
+other parts of the codebase (sheet metal, assembly analysis, etc.).
+
+Usage:
+    features = extract_profile_features(solid, dims, volume)
+    tube_type = features['tube_type']  # e.g., "C_88.9x4" or "R_100x50x3"
+"""
+
+import math
+from typing import Dict, List, Optional, Tuple, Any
+
+# Try to import CAD libraries
+try:
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopoDS import TopoDS
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_Cylinder, GeomAbs_Plane, GeomAbs_Torus
+    from OCP.GProp import GProp_GProps
+    from OCP.BRepGProp import BRepGProp
+    HAS_OCP = True
+except ImportError:
+    HAS_OCP = False
+
+
+def extract_profile_features(solid, dims: Tuple[float, float, float], volume: float) -> Dict[str, Any]:
+    """
+    Extract tube/profile features for XML export.
+    
+    This is the main entry point for profile feature extraction.
+    
+    Args:
+        solid: OCP TopoDS_Shape solid
+        dims: Bounding box dimensions [smallest, middle, largest] in mm
+        volume: Volume in mm³
+    
+    Returns:
+        Dictionary with extracted features:
+        {
+            'tube_type': str,          # "R_100x50x3" or "C_88.9x4"
+            'is_circular': bool,
+            'is_rectangular': bool,
+            'width': float,            # For rectangular (middle dim)
+            'height': float,           # For rectangular (smallest dim)
+            'diameter': float,         # For circular (outer diameter)
+            'thickness': float,        # Wall thickness
+            'outer_radius': float,     # Corner radius (rect) or cylinder radius (circ)
+            'inner_radius': float,     # Corner radius (rect) or cylinder radius (circ)
+            'length': float,           # Longest dimension
+            'bbox_x': float,           # Bounding box largest
+            'bbox_y': float,           # Bounding box middle
+            'bbox_z': float,           # Bounding box smallest
+            'success': bool,           # Extraction successful
+            'method': str              # Detection method used
+        }
+    """
+    if not HAS_OCP:
+        return _create_fallback_result(dims, volume)
+    
+    try:
+        smallest, middle, largest = sorted(dims)
+        
+        # Detect tube type (circular vs rectangular)
+        tube_type_info = _detect_tube_type(solid, dims, volume)
+        
+        if tube_type_info['is_circular']:
+            return _extract_circular_tube_features(solid, dims, volume, tube_type_info)
+        elif tube_type_info['is_rectangular']:
+            return _extract_rectangular_tube_features(solid, dims, volume, tube_type_info)
+        else:
+            # Fallback: treat as solid profile
+            return _extract_solid_profile_features(solid, dims, volume)
+    
+    except Exception as e:
+        # Fallback on error
+        return _create_fallback_result(dims, volume, error=str(e))
+
+
+def _detect_tube_type(solid, dims: Tuple[float, float, float], volume: float) -> Dict[str, Any]:
+    """
+    Detect whether profile is circular, rectangular, or solid.
+    
+    Detection strategy:
+    - Circular: High cylindrical face % (≥60%), low volume ratio (<0.7)
+    - Rectangular: High planar face % (≥80%), low volume ratio (<0.7)
+    - Solid: High volume ratio (≥0.5)
+    
+    Returns:
+        {
+            'is_circular': bool,
+            'is_rectangular': bool,
+            'is_hollow': bool,
+            'cylindrical_pct': float,
+            'planar_pct': float,
+            'volume_ratio': float
+        }
+    """
+    smallest, middle, largest = sorted(dims)
+    bbox_volume = smallest * middle * largest
+    volume_ratio = volume / bbox_volume if bbox_volume > 0 else 0
+    
+    # Analyze face types
+    total_area = 0.0
+    cylindrical_area = 0.0
+    planar_area = 0.0
+    
+    face_exp = TopExp_Explorer(solid, TopAbs_FACE)
+    while face_exp.More():
+        face = TopoDS.Face_s(face_exp.Current())
+        surf_adapter = BRepAdaptor_Surface(face, True)
+        
+        # Calculate face area
+        props = GProp_GProps()
+        BRepGProp.SurfaceProperties_s(face, props)
+        area = props.Mass()
+        total_area += area
+        
+        # Check surface type
+        surf_type = surf_adapter.GetType()
+        if surf_type == GeomAbs_Cylinder:
+            cylindrical_area += area
+        elif surf_type == GeomAbs_Plane:
+            planar_area += area
+        
+        face_exp.Next()
+    
+    # Calculate percentages
+    cylindrical_pct = (cylindrical_area / total_area * 100) if total_area > 0 else 0
+    planar_pct = (planar_area / total_area * 100) if total_area > 0 else 0
+    
+    # Determine type
+    is_hollow = volume_ratio < 0.7
+    is_circular = cylindrical_pct >= 60.0 and is_hollow
+    is_rectangular = planar_pct >= 80.0 and is_hollow and not is_circular
+    
+    return {
+        'is_circular': is_circular,
+        'is_rectangular': is_rectangular,
+        'is_hollow': is_hollow,
+        'cylindrical_pct': cylindrical_pct,
+        'planar_pct': planar_pct,
+        'volume_ratio': volume_ratio
+    }
+
+
+def _extract_circular_tube_features(solid, dims: Tuple[float, float, float], 
+                                    volume: float, type_info: Dict) -> Dict[str, Any]:
+    """
+    Extract features for circular/cylindrical tubes.
+    
+    Strategy:
+    1. Extract all cylindrical face radii
+    2. Outer radius = max(radii), Inner radius = min(radii)
+    3. Wall thickness = outer_radius - inner_radius
+    4. Create type string: "C_{diameter}x{thickness}"
+    
+    Args:
+        solid: OCP TopoDS_Shape
+        dims: [smallest, middle, largest]
+        volume: Volume in mm³
+        type_info: Output from _detect_tube_type()
+    
+    Returns:
+        Feature dictionary
+    """
+    smallest, middle, largest = sorted(dims)
+    
+    # Extract cylinder radii
+    cylinder_radii = _extract_cylinder_radii(solid)
+    
+    if not cylinder_radii:
+        # Fallback: estimate from bounding box
+        # Assume circular cross-section: diameter ≈ middle dimension
+        estimated_outer_radius = middle / 2.0
+        estimated_inner_radius = estimated_outer_radius * 0.8  # Guess 20% wall
+        cylinder_radii = [estimated_outer_radius, estimated_inner_radius]
+    
+    # Sort radii to get outer/inner
+    cylinder_radii_sorted = sorted(cylinder_radii, reverse=True)
+    outer_radius = cylinder_radii_sorted[0]
+    inner_radius = cylinder_radii_sorted[-1] if len(cylinder_radii_sorted) > 1 else outer_radius * 0.8
+    
+    # Calculate dimensions
+    outer_diameter = outer_radius * 2.0
+    wall_thickness = outer_radius - inner_radius
+    
+    # Create type string: "C_88.9x4"
+    tube_type = f"C_{outer_diameter:.1f}x{wall_thickness:.0f}"
+    
+    return {
+        'tube_type': tube_type,
+        'is_circular': True,
+        'is_rectangular': False,
+        'width': outer_diameter,  # Alias for diameter
+        'height': outer_diameter,  # Alias for diameter
+        'diameter': outer_diameter,
+        'thickness': wall_thickness,
+        'outer_radius': outer_radius,
+        'inner_radius': inner_radius,
+        'length': largest,
+        'bbox_x': largest,
+        'bbox_y': middle,
+        'bbox_z': smallest,
+        'success': True,
+        'method': 'circular_cylinder_extraction',
+        'cylindrical_pct': type_info.get('cylindrical_pct', 0),
+        'volume_ratio': type_info.get('volume_ratio', 0)
+    }
+
+
+def _extract_rectangular_tube_features(solid, dims: Tuple[float, float, float],
+                                       volume: float, type_info: Dict) -> Dict[str, Any]:
+    """
+    Extract features for rectangular/square tubes.
+    
+    Strategy:
+    1. Width = middle dimension, Height = smallest dimension
+    2. Extract torus radii (corner radii) if present
+    3. Estimate wall thickness from volume ratio or torus analysis
+    4. Create type string: "R_{width}x{height}x{thickness}"
+    
+    Args:
+        solid: OCP TopoDS_Shape
+        dims: [smallest, middle, largest]
+        volume: Volume in mm³
+        type_info: Output from _detect_tube_type()
+    
+    Returns:
+        Feature dictionary
+    """
+    smallest, middle, largest = sorted(dims)
+    
+    # Cross-section dimensions
+    width = middle
+    height = smallest
+    
+    # Extract corner radii (torus faces)
+    torus_radii = _extract_torus_radii(solid)
+    
+    if torus_radii:
+        # Outer radius = max (outer corner), Inner radius = min (inner corner)
+        outer_radius = max(torus_radii)
+        inner_radius = min(torus_radii)
+    else:
+        # No torus faces found - sharp corners or estimation failed
+        outer_radius = 0.0
+        inner_radius = 0.0
+    
+    # Estimate wall thickness
+    volume_ratio = type_info.get('volume_ratio', 0)
+    thickness = _estimate_wall_thickness(smallest, middle, volume_ratio, torus_radii)
+    
+    # Create type string: "R_100x50x3"
+    tube_type = f"R_{width:.0f}x{height:.0f}x{thickness:.0f}"
+    
+    return {
+        'tube_type': tube_type,
+        'is_circular': False,
+        'is_rectangular': True,
+        'width': width,
+        'height': height,
+        'diameter': 0.0,  # N/A for rectangular
+        'thickness': thickness,
+        'outer_radius': outer_radius,  # Corner radius
+        'inner_radius': inner_radius,  # Corner radius
+        'length': largest,
+        'bbox_x': largest,
+        'bbox_y': middle,
+        'bbox_z': smallest,
+        'success': True,
+        'method': 'rectangular_torus_extraction',
+        'planar_pct': type_info.get('planar_pct', 0),
+        'volume_ratio': volume_ratio
+    }
+
+
+def _extract_solid_profile_features(solid, dims: Tuple[float, float, float], 
+                                    volume: float) -> Dict[str, Any]:
+    """
+    Fallback for solid profiles (not hollow tubes).
+    
+    Returns basic bounding box dimensions.
+    """
+    smallest, middle, largest = sorted(dims)
+    
+    return {
+        'tube_type': f"Profile_{largest:.0f}x{middle:.0f}x{smallest:.0f}",
+        'is_circular': False,
+        'is_rectangular': False,
+        'width': middle,
+        'height': smallest,
+        'diameter': 0.0,
+        'thickness': smallest,  # Treat as solid thickness
+        'outer_radius': 0.0,
+        'inner_radius': 0.0,
+        'length': largest,
+        'bbox_x': largest,
+        'bbox_y': middle,
+        'bbox_z': smallest,
+        'success': True,
+        'method': 'solid_profile_fallback',
+        'volume_ratio': volume / (smallest * middle * largest) if (smallest * middle * largest) > 0 else 0
+    }
+
+
+# =============================================================================
+# HELPER FUNCTIONS - GEOMETRY EXTRACTION
+# =============================================================================
+
+def _extract_cylinder_radii(solid) -> List[float]:
+    """
+    Extract all cylindrical face radii from a solid.
+    
+    Returns:
+        List of radii in mm, sorted descending (largest first)
+    """
+    radii = []
+    
+    face_exp = TopExp_Explorer(solid, TopAbs_FACE)
+    while face_exp.More():
+        face = TopoDS.Face_s(face_exp.Current())
+        surf_adapter = BRepAdaptor_Surface(face, True)
+        
+        if surf_adapter.GetType() == GeomAbs_Cylinder:
+            try:
+                cylinder = surf_adapter.Cylinder()
+                radius = cylinder.Radius()
+                if radius > 0.1:  # Filter noise
+                    radii.append(radius)
+            except:
+                pass
+        
+        face_exp.Next()
+    
+    # Remove duplicates (tolerance 0.1mm)
+    unique_radii = []
+    for r in sorted(radii, reverse=True):
+        if not any(abs(r - ur) < 0.1 for ur in unique_radii):
+            unique_radii.append(r)
+    
+    return unique_radii
+
+
+def _extract_torus_radii(solid) -> List[float]:
+    """
+    Extract torus face minor radii (corner radii) from a solid.
+    
+    For rectangular tubes:
+    - Outer corners: larger torus minor radius
+    - Inner corners: smaller torus minor radius
+    
+    Returns:
+        List of minor radii in mm, sorted descending
+    """
+    radii = []
+    
+    face_exp = TopExp_Explorer(solid, TopAbs_FACE)
+    while face_exp.More():
+        face = TopoDS.Face_s(face_exp.Current())
+        surf_adapter = BRepAdaptor_Surface(face, True)
+        
+        if surf_adapter.GetType() == GeomAbs_Torus:
+            try:
+                torus = surf_adapter.Torus()
+                minor_radius = torus.MinorRadius()
+                major_radius = torus.MajorRadius()
+                
+                # Filter: minor radius should be reasonable for corner radius
+                if 0.5 < minor_radius < 50 and minor_radius < major_radius * 0.5:
+                    radii.append(minor_radius)
+            except:
+                pass
+        
+        face_exp.Next()
+    
+    # Remove duplicates (tolerance 0.1mm)
+    unique_radii = []
+    for r in sorted(radii, reverse=True):
+        if not any(abs(r - ur) < 0.1 for ur in unique_radii):
+            unique_radii.append(r)
+    
+    return unique_radii
+
+
+def _estimate_wall_thickness(smallest_dim: float, middle_dim: float,
+                             volume_ratio: float, torus_radii: List[float]) -> float:
+    """
+    Estimate wall thickness for hollow rectangular tubes.
+    
+    Estimation strategies (in priority order):
+    1. From volume ratio: analytical hollow-box wall solve (preferred)
+    2. From torus radii: fallback estimate from detected corner radii
+    3. Default: 3mm (common thin-walled tube)
+    
+    Args:
+        smallest_dim: Smallest bbox dimension (height)
+        middle_dim: Middle bbox dimension (width)
+        volume_ratio: actual_volume / bbox_volume
+        torus_radii: List of corner radii
+    
+    Returns:
+        Estimated wall thickness in mm
+    """
+    # Strategy 1: Analytical area-balance solve from volume ratio.
+    # For a constant rectangular hollow section:
+    #   fill_ratio f = A_material / (W*H) = volume_ratio
+    #   A_material = W*H - (W-2t)(H-2t)
+    # -> 4t² - 2(W+H)t + fWH = 0
+    if 0.01 < volume_ratio < 0.98 and smallest_dim > 0 and middle_dim > 0:
+        width = float(middle_dim)
+        height = float(smallest_dim)
+        fill_ratio = float(volume_ratio)
+
+        discriminant = ((width + height) ** 2) - (4.0 * fill_ratio * width * height)
+        if discriminant >= 0:
+            thickness = ((width + height) - math.sqrt(discriminant)) / 4.0
+            if 0.5 <= thickness <= (height / 2.0):
+                return round(thickness, 1)
+
+    # Strategy 2: Torus-based fallback (only when area-balance is inconclusive)
+    if torus_radii:
+        inner_radius = min(torus_radii)
+        thickness = inner_radius * 1.5
+        if 0.5 <= thickness <= smallest_dim / 2.0:
+            return round(thickness, 1)
+
+    # Strategy 3: Default fallback
+    # Common thin-walled tube thicknesses: 2, 3, 4, 5mm
+    return 3.0
+
+
+# =============================================================================
+# FALLBACK FUNCTIONS
+# =============================================================================
+
+def _create_fallback_result(dims: Tuple[float, float, float], 
+                            volume: float, error: str = None) -> Dict[str, Any]:
+    """
+    Create fallback result when extraction fails or OCP unavailable.
+    """
+    smallest, middle, largest = sorted(dims)
+    
+    return {
+        'tube_type': f"Profile_{largest:.0f}mm",
+        'is_circular': False,
+        'is_rectangular': False,
+        'width': middle,
+        'height': smallest,
+        'diameter': 0.0,
+        'thickness': 0.0,
+        'outer_radius': 0.0,
+        'inner_radius': 0.0,
+        'length': largest,
+        'bbox_x': largest,
+        'bbox_y': middle,
+        'bbox_z': smallest,
+        'success': False,
+        'method': 'fallback',
+        'error': error
+    }
