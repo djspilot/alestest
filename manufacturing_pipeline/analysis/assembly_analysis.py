@@ -636,6 +636,12 @@ def _detect_bent_sheet(solid, volume: float, dims: Tuple[float, float, float]) -
         if aspect_ratio < BENT_SHEET_ASPECT_RATIO_MIN:
             return False
         
+        # CRITERION 6: EXCLUSION - Must NOT be a perfect circular/square cross-section
+        # (perfect round/square = solid profile like tube or rod, not bent sheet)
+        cross_ratio = smallest / middle if middle > 0 else 0
+        if abs(cross_ratio - 1.0) < 0.05:  # Tolerance for rounding: essentially 1.0
+            return False  # Exclude perfect cylindrical/square profiles
+        
         # All criteria met
         return True
         

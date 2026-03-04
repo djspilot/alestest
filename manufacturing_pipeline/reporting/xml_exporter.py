@@ -758,6 +758,7 @@ def _process_plaat_item(
     ET.SubElement(calc_result, 'Sheet_HoleContours').text = ''
     ET.SubElement(calc_result, 'Sheet_HoleRadii').text = ''
     ET.SubElement(calc_result, 'Sheet_UnfoldSuccess').text = 'False'
+    ET.SubElement(calc_result, 'Sheet_FilePathDXF').text = ''
 
     # PROACTIVE UNFOLD: Try unfold for all sheet metal parts to detect bends
     # This catches bent sheets that classify as "plaat" via shell detection
@@ -810,6 +811,10 @@ def _process_plaat_item(
                             print(f"    [WARN] Ignoring implausible unfold dims: {flat_length:.1f} x {flat_width:.1f} mm")
                         calc_result.find('Sheet_UnfoldSuccess').text = 'True'
                         
+                        # Store DXF file path from unfold
+                        if unfold_result.get('dxf_output'):
+                            calc_result.find('Sheet_FilePathDXF').text = str(unfold_result['dxf_output'])
+                        
                         # Update thickness from unfold if available
                         if unfold_result.get('thickness'):
                             calc_result.find('Sheet_Thickness').text = _format_float(unfold_result['thickness'])
@@ -858,6 +863,10 @@ def _process_plaat_item(
                         else:
                             print(f"    [WARN] Ignoring implausible unfold dims: {flat_length:.1f} x {flat_width:.1f} mm")
                         calc_result.find('Sheet_UnfoldSuccess').text = 'True'
+                        
+                        # Store DXF file path from unfold
+                        if unfold_result.get('dxf_output'):
+                            calc_result.find('Sheet_FilePathDXF').text = str(unfold_result['dxf_output'])
                         
                         # Add bend parameters from unfold result if available
                         if unfold_result.get('bend_angles'):
@@ -982,7 +991,7 @@ def _process_plaat_item(
             else:
                 dxf_dir = step_path.parent
             
-            dxf_name = f"{step_path.stem}_{part_name}_flat.dxf"
+            dxf_name = f"{part_name}.dxf"
             dxf_path = dxf_dir / dxf_name
             
             print(f"    [INFO] Generating DXF for flat plate: {dxf_name}")
@@ -1028,6 +1037,9 @@ def _process_plaat_item(
 
                     # Flat plate geometry extraction succeeded
                     calc_result.find('Sheet_UnfoldSuccess').text = 'True'
+                    
+                    # Store DXF file path
+                    calc_result.find('Sheet_FilePathDXF').text = str(dxf_path)
                     
         except Exception as e:
             print(f"    [WARN] DXF processing failed: {str(e)[:80]}")
@@ -1112,7 +1124,7 @@ def _try_unfold(
     Args:
         step_file_path: Path to STEP file
         part_name: Part name
-        work_dir: Working directory
+        work_dir: Working directory (not used for DXF output - uses STEP directory)
         k_factor: K-factor for bend calculations
         material: Material name
         nr_bends: Expected number of bends (limits returned bend parameters)
@@ -1125,7 +1137,10 @@ def _try_unfold(
         return None
 
     try:
-        dxf_output = str(work_dir / f"{part_name}_flat.dxf")
+        # Write DXF to same directory as STEP file (not XML output directory)
+        step_path = Path(step_file_path)
+        dxf_dir = step_path.parent
+        dxf_output = str(dxf_dir / f"{part_name}.dxf")
 
         # Use solid_object if provided (bent part), otherwise use file path
         if solid_object is not None:
