@@ -39,7 +39,7 @@ PLATE_ASPECT_RATIO_MIN = 5.0           # longest/middle > 5.0 (elongated)
 # PROFILE DETECTION (Solid beams, bars)
 # =============================================================================
 PROFILE_SMALLEST_MIN_MM = 5.0          # >=5mm (not a thin sheet)
-PROFILE_LENGTH_RATIO_MIN = 5.0         # longest/smallest >= 5.0 (elongated)
+PROFILE_LENGTH_RATIO_MIN = 3.0         # longest/smallest >= 3.0 (compact solids)
 PROFILE_CROSS_RATIO_MIN = 0.5          # Rectangular cross-section
 PROFILE_CROSS_RATIO_MAX = 2.0          #   0.5 <= smallest/middle <= 2.0
 PROFILE_VOLUME_RATIO_STRONG_MIN = 0.5  # >0.5 volume fill → solid profile (strong)

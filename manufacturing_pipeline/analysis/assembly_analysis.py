@@ -1195,30 +1195,32 @@ def classify_solid(solid, return_trace: bool = False):
     
     Returns one of: "plaat", "profiel", "anders"
     
-    Classification logic (v2.2):
+    Classification logic (v3.0 - Restructured Decision Tree):
     
-    STEP 1: STANDARD PROFILE CHECK (purchased items - name-based heuristic failed)
-    - Hollow tube: cylindrical ≥60%, volume_ratio <0.7 → "anders"
-    - Variable thickness: face area diff >20%, elongated ≥5.0 → "anders"
-
-    STEP 1.25: HARD PROFILE OVERRIDE (closed & constant cross-section)
-    - Multi-slice section check along dominant axis
-    - Closed contour ratio high + low perimeter variation → "profiel"
+    STATISTICAL REORDERING (70-80% of products are sheet metal!):
     
-    STEP 2: PLATE DETECTION
-    - PLAAT: Detected by face analysis (top 2 faces > 60% surface area) OR
-             traditional thin plate criteria (thickness<25mm, thickness_ratio<0.15, aspect>5)
+    STEP 1: PLATE DETECTION (check FIRST - 70-80% of production)
+    - 1A: Face analysis (top2_planar% > 50%) → "plaat"
+    - 1B: Bent sheet (edges≥8, 0.1<vol<0.5, top2<60%, aspect≥2)
+         → "plaat" (or "profiel" if bend_sum ≥ 360°)
+    - 1C: Thin plate (thickness<25mm) → "plaat"
     
-    STEP 3: PROFILE DETECTION
-    - PROFIEL: smallest≥5mm, length_ratio≥5.0, cross_ratio 0.5-2.0, constant cross-section
+    STEP 2: PROFILE DETECTION
+    - 2A: Closed & constant cross-section → "profiel"
+    - 2B: Solid rectangular beam → "profiel"
+    
+    STEP 3: STANDARD CATALOG PARTS (moved LAST - fallback only)
+    - 3A: Hollow tube (cylindrical≥60%, vol<0.7) → "anders"
+    - 3B: Variable thickness (I-beam, UNP) → "anders"
     
     STEP 4: DEFAULT
     - ANDERS: everything else (machined parts, complex geometry)
     
-    Key insight (v2.2):
-    Standard profiles (tubes, UNP, I-beams) must be detected BEFORE plate check.
-    Otherwise, tubes with dominant end faces (94%) and UNP with flat web (52%)
-    incorrectly trigger plate classification.
+    Key insight (v3.0):
+    Reordered to match statistical distribution. Plate detection first (majority of parts),
+    then profiles, then only check standard catalog parts as fallback.
+    This prevents high-volume-ratio solids and bent sheets from being misclassified as
+    "purchased standard parts" when they should be plaat or profiel.
     """
     mode = os.environ.get("ALES_CLASSIFICATION_MODE", "legacy").strip().lower()
     if mode == "score":
@@ -1257,26 +1259,10 @@ def classify_solid(solid, return_trace: bool = False):
     }
     
     # ============================================================================
-    # STEP 1: STANDARD PROFILE CHECK (v2.1)
-    # Purchased items that name-based heuristics missed (STEP parser failure)
+    # STEP 0: HARD PROFILE SIGNATURE CHECK (v3.0 - EARLIEST!)
+    # Closed extrusion profiles have hard geometric signature
+    # Must check BEFORE plate_face_analysis to avoid false positives
     # ============================================================================
-    
-    # 1a. Hollow tube detection (EN 10210-2, etc.)
-    # Example: Ø88.9×4×65mm tube has cylindrical faces 94% but top2_faces also 94%
-    # Must check BEFORE plate detection to avoid false positive
-    if _detect_hollow_tube(solid, volume, dims):
-        trace["rules"].append("standard_hollow_tube")
-        return ("anders", trace) if return_trace else "anders"
-    
-    # 1b. Variable thickness profile detection (DIN 1026 UNP, I-beams, etc.)
-    # Example: UNP160 has top2_faces 52% but variable thickness indicates standard profile
-    # Must check BEFORE plate detection to avoid false positive
-    if _detect_variable_thickness(solid, dims):
-        trace["rules"].append("standard_variable_thickness")
-        return ("anders", trace) if return_trace else "anders"
-
-    # 1c. Hard profile signature: closed + near-constant cross-section
-    # This protects long hollow/solid extrusions against bent-sheet heuristics.
     is_closed_constant_profile, section_metrics = _detect_closed_constant_cross_section(solid, dims)
     trace["features"].update(section_metrics)
     if is_closed_constant_profile:
@@ -1284,76 +1270,76 @@ def classify_solid(solid, return_trace: bool = False):
         return ("profiel", trace) if return_trace else "profiel"
     
     # ============================================================================
-    # STEP 1.5: BENT SHEET DETECTION (v2.1)
-    # Formed/folded sheet metal (U-profiles, channels, trays)
+    # STEP 1: PLATE DETECTION (v3.0 - CHECK FIRST!)
+    # 70-80% of production are sheet metal - check these first
     # ============================================================================
-    # Bent sheets have many edges and thin material, but lower top2% than flat plates
-    # Must check BEFORE traditional plate detection to catch shaped sheet metal
+    
+    # 1A. Face analysis - most reliable plate detection
+    # Plates have 2 large parallel planar faces (top/bottom)
+    if _is_plate_by_face_analysis(solid, threshold=PLATE_FACE_TOP2_THRESHOLD_PCT):
+        trace["rules"].append("plate_face")
+        return ("plaat", trace) if return_trace else "plaat"
+    
+    # 1B. Bent sheet detection (formed/folded sheet metal)
+    # U-profiles, channels, trays have many edges + low volume ratio
     if _detect_bent_sheet(solid, volume, dims):
         bend_angle_sum = _estimate_bend_angle_sum(solid)
         trace["features"]["bend_angle_sum"] = round(bend_angle_sum, 3)
 
-        # Closed loop profile rule requested by user:
-        # if sum of bend angles >= 360°, classify as profile instead of bent sheet.
+        # Check if bent sheet is actually a closed profile (bend_sum ≥ 360°)
         if bend_angle_sum >= 360.0:
-            trace["rules"].append("closed_profile_bend_sum")
+            trace["rules"].append("bent_sheet_closed_profile")
             return ("profiel", trace) if return_trace else "profiel"
 
         trace["rules"].append("bent_sheet_metal")
         return ("plaat", trace) if return_trace else "plaat"
     
-    # ============================================================================
-    # STEP 2: PLATE DETECTION
-    # ============================================================================
-    
-    # PLAAT check: Use face analysis as primary method (more reliable)
-    # Lower threshold (50%) for industrial plates with holes/cutouts/weld preparations
-    if _is_plate_by_face_analysis(solid, threshold=PLATE_FACE_TOP2_THRESHOLD_PCT):
-        trace["rules"].append("plate_face")
-        return ("plaat", trace) if return_trace else "plaat"
-    
-    # Fallback: traditional thin plate check for very thin plates (< 25mm)
-    # thickness_ratio < 0.15 means thickness is less than 15% of width = flat
+    # 1C. Thin plate fallback (flat plates < 25mm thick)
     if smallest < PLATE_THICK_MAX_MM and thickness_ratio < PLATE_THICKNESS_RATIO_MAX and aspect_ratio > PLATE_ASPECT_RATIO_MIN:
         trace["rules"].append("plate_thin")
         return ("plaat", trace) if return_trace else "plaat"
     
     # ============================================================================
-    # STEP 3: PROFILE DETECTION
+    # STEP 2: SOLID PROFILE DETECTION (v3.0)
+    # Solid rectangular beam/profile (elongated, reasonable volume fill)
     # ============================================================================
-    
-    # PROFIEL check: solid beam/profile
-    # Primary criteria: rectangular cross section (cross_ratio 0.5-2.0), elongated (length_ratio >= 5.0)
     if smallest >= PROFILE_SMALLEST_MIN_MM and length_ratio >= PROFILE_LENGTH_RATIO_MIN and PROFILE_CROSS_RATIO_MIN <= cross_ratio <= PROFILE_CROSS_RATIO_MAX:
-        # Secondary check: must have significant volume fill
-        # High volume_ratio (>0.5) = definitely solid profiel
-        # Medium volume_ratio (0.15-0.5) = could be profiel with internal features OR formed plate
-        
         if volume_ratio > PROFILE_VOLUME_RATIO_STRONG_MIN:
-            # Clear case: solid rectangular beam
-            trace["rules"].append("profile_primary_strong")
+            trace["rules"].append("profile_solid_strong")
             return ("profiel", trace) if return_trace else "profiel"
         elif volume_ratio >= PROFILE_VOLUME_RATIO_WEAK_MIN:
-            # Ambiguous: could be profiel with internal features or formed plate
-            # Use surface complexity as tiebreaker (lower = likely profiel)
-            # Formed plates with bends have higher surface area relative to volume
             try:
                 surface_area = _get_solid_surface_area(solid)
                 if surface_area > 0:
-                    # Surface to volume ratio: profiel should have lower SA/V than formed sheet
                     sa_v_ratio = surface_area / volume
-                    # Rough threshold: constant profiel < 1.5 cm^-1, formed plate > 1.0 cm^-1
-                    if sa_v_ratio < PROFILE_SA_V_RATIO_MAX:  # More surface fill = solid
-                        trace["rules"].append("profile_primary_weak_sav")
+                    if sa_v_ratio < PROFILE_SA_V_RATIO_MAX:
+                        trace["rules"].append("profile_solid_weak_sav")
                         return ("profiel", trace) if return_trace else "profiel"
             except:
                 pass
     
     # ============================================================================
-    # STEP 4: DEFAULT
+    # STEP 3: STANDARD CATALOG PARTS (v3.0 - MOVED LAST!)
+    # Only check standard DIN/EN parts if not plaat or profiel
     # ============================================================================
     
-    # Default: includes formed sheet metal with bends, machined parts, etc.
+    # 3A. Hollow tube detection (EN 10210-2, etc.)
+    # Cylindrical faces ≥60%, low volume ratio (hollow), NOT bent sheet
+    if _detect_hollow_tube(solid, volume, dims):
+        trace["rules"].append("standard_hollow_tube")
+        return ("anders", trace) if return_trace else "anders"
+    
+    # 3B. Variable thickness profile (DIN 1026 UNP, I-beams, etc.)
+    # Top 2 faces differ >20%, elongated
+    if _detect_variable_thickness(solid, dims):
+        trace["rules"].append("standard_variable_thickness")
+        return ("anders", trace) if return_trace else "anders"
+    
+    # ============================================================================
+    # STEP 4: DEFAULT (v3.0)
+    # ============================================================================
+    
+    # Default: machined parts, complex geometry, etc.
     trace["rules"].append("default_anders")
     return ("anders", trace) if return_trace else "anders"
 

@@ -88,7 +88,6 @@ def main():
             bom_list=bom_list,
             material=material,
             output_xml_path=str(output_xml),
-            work_dir=str(step_file.parent / "output"),
             reference_xml_path=str(reference_xml) if reference_xml else None
         )
 
