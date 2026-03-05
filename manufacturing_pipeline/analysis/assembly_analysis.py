@@ -283,6 +283,52 @@ def solids_are_equal(solid1, solid2, tolerance: float = 0.01) -> bool:
     return True
 
 
+def get_solid_bbox_center(solid) -> Tuple[float, float, float]:
+    """Get center point of bounding box."""
+    try:
+        from OCP.Bnd import Bnd_Box
+        from OCP.BRepBndLib import BRepBndLib
+        
+        bbox = Bnd_Box()
+        BRepBndLib.Add_s(solid, bbox)
+        if bbox.IsVoid():
+            return (0.0, 0.0, 0.0)
+        
+        xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
+        return (
+            (xmin + xmax) / 2.0,
+            (ymin + ymax) / 2.0,
+            (zmin + zmax) / 2.0
+        )
+    except Exception:
+        return (0.0, 0.0, 0.0)
+
+
+def solids_are_equal_with_position_check(solid1, solid2, tolerance: float = 0.01, position_tolerance: float = 1.0) -> bool:
+    """Check if two solids are geometrically equal AND in similar position.
+    
+    This prevents merging mirror variants that have identical geometry but different positions.
+    position_tolerance is in mm - solids more than 1mm apart are considered different instances.
+    Using 1mm as threshold: identical parts in same location vs. duplicated/mirrored parts.
+    """
+    # First check geometry
+    if not solids_are_equal(solid1, solid2, tolerance):
+        return False
+    
+    # Then check position - if centers are far apart, they're likely mirrors/different instances
+    center1 = get_solid_bbox_center(solid1)
+    center2 = get_solid_bbox_center(solid2)
+    
+    distance = ((center1[0] - center2[0])**2 + 
+                (center1[1] - center2[1])**2 + 
+                (center1[2] - center2[2])**2) ** 0.5
+    
+    if distance > position_tolerance:
+        return False  # Too far apart, likely different instances (mirrors, arrays, etc.)
+    
+    return True
+
+
 # =============================================================================
 # FASTENER DETECTION
 # =============================================================================
@@ -1643,40 +1689,50 @@ def analyze_assembly(
         solids.append(TopoDS.Solid_s(exp.Current()))
         exp.Next()
 
-    # Group identical solids
+    # STEP-GUIDED GROUPING
+    # Use shape_rep_counts to assign names sequentially, then group by name
+    # This preserves mirror distinctions (different STEP names) while grouping true duplicates
+    
+    shape_rep_counts = parse_step_shape_rep_name_counts(step_file_path) if step_file_path else None
+    
+    # Phase 1: Assign STEP names to all solids sequentially
+    solid_names = []
+    solid_idx = 0
+    
+    if shape_rep_counts:
+        for step_name, instance_count in shape_rep_counts.items():
+            for i in range(instance_count):
+                if solid_idx < len(solids):
+                    solid_names.append(step_name)
+                    solid_idx += 1
+    
+    # Fill remaining with generic names
+    while solid_idx < len(solids):
+        solid_names.append(f"Part_{solid_idx + 1}")
+        solid_idx += 1
+    
+    # Phase 2: Group solids by their assigned STEP name
     grouped_solids = []  # [(representative_solid, count, volume, dims, part_name)]
-
-    # If we have STEP assembly structure, use part names to identify unique parts
     part_name_to_solid = {}
+    name_groups = {}  # {step_name: [solid_indices]}
     
     for idx, solid in enumerate(solids):
-        volume = get_solid_volume(solid)
-        dims = get_solid_bounding_box(solid)
-
-        # Check if matches existing group
-        found = False
-        for i, (rep, count, vol, d, pname) in enumerate(grouped_solids):
-            if solids_are_equal(solid, rep):
-                grouped_solids[i] = (rep, count + 1, vol, d, pname)
-                found = True
-                break
-
-        if not found:
-            part_name = f"Part_{len(grouped_solids) + 1}"
-            grouped_solids.append((solid, 1, volume, dims, part_name))
-            part_name_to_solid[part_name] = solid
-
-    # If we have STEP part counts, try to match them to our grouped solids
-    if step_parts_count:
-        # Update counts based on STEP assembly structure
-        step_parts_list = list(step_parts_count.keys())
-        for i, (solid, geom_count, vol, dims, pname) in enumerate(grouped_solids):
-            # Try to find matching part name from STEP
-            if i < len(step_parts_list):
-                step_part_name = step_parts_list[i]
-                step_count = step_parts_count[step_part_name]
-                # Update with accurate count from STEP file
-                grouped_solids[i] = (solid, step_count, vol, dims, step_part_name)
+        name = solid_names[idx] if idx < len(solid_names) else f"Part_{idx+1}"
+        if name not in name_groups:
+            name_groups[name] = []
+        name_groups[name].append(idx)
+    
+    # Create grouped_solids entries
+    for name, indices in name_groups.items():
+        # Use first solid as representative
+        rep_idx = indices[0]
+        rep_solid = solids[rep_idx]
+        volume = get_solid_volume(rep_solid)
+        dims = get_solid_bounding_box(rep_solid)
+        count = len(indices)
+        
+        grouped_solids.append((rep_solid, count, volume, dims, name))
+        part_name_to_solid[name] = rep_solid
     
     # Generate BOM items
     bom_items = []

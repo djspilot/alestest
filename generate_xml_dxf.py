@@ -33,7 +33,7 @@ def _parse_args() -> argparse.Namespace:
         '--output',
         type=str,
         default='',
-        help='Path to generated XML output (default: data/output/<step_name>_generated.xml)'
+        help='Path to generated XML output (default: <step_dir>/<step_name>_generated.xml)'
     )
     parser.add_argument(
         '--material',
@@ -57,9 +57,13 @@ def _resolve_paths(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     step_file = Path(args.step).resolve() if args.step else default_step
 
     if args.output:
-        output_xml = Path(args.output).resolve()
+        requested_output = Path(args.output).expanduser()
+        if requested_output.is_absolute():
+            output_xml = requested_output.resolve()
+        else:
+            output_xml = (step_file.parent / requested_output).resolve()
     else:
-        output_xml = (script_dir / 'data' / 'output' / f'{step_file.stem}_generated.xml').resolve()
+        output_xml = (step_file.parent / f'{step_file.stem}_generated.xml').resolve()
 
     if args.reference:
         reference_xml = Path(args.reference).resolve()
@@ -115,7 +119,11 @@ def main():
         
         # Analyze assembly
         print(f"\n[INFO] Analyzing assembly...")
-        result = analyze_assembly_complete(doc, str(step_file))
+        result = analyze_assembly_complete(
+            doc, 
+            assembly_name=step_file.stem,
+            step_file_path=str(step_file)
+        )
         print(f"[OK] Assembly analyzed")
         bom_list = result.get('flat_bom', [])
         print(f"    - Parts in BOM: {len(bom_list)}")
@@ -129,7 +137,6 @@ def main():
             bom_list,
             material=args.material,
             output_xml_path=str(output_xml),
-            work_dir=str(output_xml.parent),
             reference_xml_path=str(reference_xml) if reference_xml and reference_xml.exists() else None
         )
         

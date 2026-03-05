@@ -31,3 +31,20 @@ AI-voorbeelden/
 
 # Temporary local test outputs
 test_*_output.txt
+
+# Debug scripts and temporary files
+debug_*.py
+check_*.py
+compare_*.py
+extract_*.py
+identify_*.py
+inspect_*.py
+merge_*.py
+parse_step_links.py
+trace_*.py
+deep_*.py
+test_classify_direct.py
+test_shape_names.py
+*.log
+output.txt
+tmp_*.xml

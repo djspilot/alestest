@@ -11,7 +11,6 @@ from xml.dom import minidom
 import os
 import sys
 import re
-from collections import defaultdict
 
 # Add manufacturing_pipeline to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -68,10 +67,6 @@ try:
     HAS_PROFILE_FEATURES = True
 except ImportError:
     HAS_PROFILE_FEATURES = False
-
-
-# Configuration for DXF output path - can be overridden
-DXF_OUTPUT_BASE_PATH = None  # Default: use same directory as STEP file
 
 
 def _merge_bends_colinear(bend_angles, bend_radii, bend_lengths):
@@ -475,7 +470,7 @@ def export_bom_to_xml(
         bom_list: List of BOM items from analyze_assembly_complete()
                  Each item: {part_name, quantity, part_class, ...}
         material: Material code (e.g., 'steel_s235', 'steel_304')
-        output_xml_path: Output XML filepath (default: input_file.xml)
+        output_xml_path: Output XML filepath (default: <step_dir>/<step_name>.xml)
         work_dir: Working directory for temp files (default: same as STEP)
         reference_xml_path: Optional existing XML to copy trusted sheet values from
 
@@ -486,31 +481,45 @@ def export_bom_to_xml(
         raise RuntimeError("CadQuery required for BOM-to-XML export")
 
     # Setup paths
-    step_path = Path(step_file_path)
+    step_path = Path(step_file_path).expanduser()
+    if not step_path.is_absolute():
+        step_path = step_path.resolve()
+
     if not step_path.exists():
         raise FileNotFoundError(f"STEP file not found: {step_file_path}")
 
-    work_dir = Path(work_dir or step_path.parent)
-    work_dir.mkdir(parents=True, exist_ok=True)
+    source_output_dir = step_path.parent
+
+    # Keep an optional work directory for temporary artifacts only.
+    work_dir_path = Path(work_dir).expanduser().resolve() if work_dir else source_output_dir
+    work_dir_path.mkdir(parents=True, exist_ok=True)
 
     if output_xml_path is None:
-        output_xml_path = str(work_dir / f"{step_path.stem}.xml")
+        output_path = source_output_dir / f"{step_path.stem}.xml"
+    else:
+        requested_output_path = Path(output_xml_path).expanduser()
+        if requested_output_path.is_absolute():
+            output_path = requested_output_path
+        else:
+            # Relative output paths are resolved against the STEP directory.
+            output_path = (source_output_dir / requested_output_path).resolve()
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # ========================================================================== 
     # NAMING STRATEGY (same logic as export_classification_excel.py)
     # ==========================================================================
     # 1. Try STEP assembly structure names
-    # 2. Fallback to SHAPE_REPRESENTATION names + occurrence counts (quantity-aware)
+    # 2. Cluster-based matching on (part_class, quantity) to avoid
+    #    index-only swaps between sheet/profile names
     # 3. Fallback to sequential product names
     # 4. Generate: {base_name}-p1, {base_name}-p2, etc.
     
     step_parts = parse_step_assembly_structure(str(step_path)) if HAS_ASSEMBLY_GEOM else None
     step_product_names = None
-    step_product_name_counts = None
     
     if not step_parts and HAS_ASSEMBLY_GEOM:
         step_product_names = parse_step_product_names(str(step_path))
-        step_product_name_counts = parse_step_shape_rep_name_counts(str(step_path))
     
     # Base name for generated part names
     base_name = step_path.stem
@@ -521,36 +530,46 @@ def export_bom_to_xml(
     product_name_idx = 0
     used_product_names = set()
 
-    # Quantity-aware name assignment (robust against order mismatch)
-    # Build idx -> name map by matching BOM quantity to SHAPE_REP occurrence count.
-    qty_name_map = {}
-    if step_product_names and step_product_name_counts:
-        names_by_qty = defaultdict(list)
-        for step_name in step_product_names:
-            try:
-                qty = int(step_product_name_counts.get(step_name, 1) or 1)
-            except Exception:
-                qty = 1
-            if qty < 1:
-                qty = 1
-            names_by_qty[qty].append(step_name)
+    # Cluster BOM items by (classification, quantity) to reduce cross-type swaps.
+    bom_clusters = {}
+    for bom_idx, bom_item in enumerate(bom_list):
+        cluster_key = (
+            str(bom_item.get('part_class', 'unknown') or 'unknown').strip().lower(),
+            int(bom_item.get('quantity', 1) or 1),
+        )
+        if cluster_key not in bom_clusters:
+            bom_clusters[cluster_key] = []
+        bom_clusters[cluster_key].append(bom_idx)
 
-        bom_indices_by_qty = defaultdict(list)
-        for bom_idx, bom_item in enumerate(bom_list):
-            try:
-                bom_qty = int(bom_item.get('quantity', 1) or 1)
-            except Exception:
-                bom_qty = 1
-            if bom_qty < 1:
-                bom_qty = 1
-            bom_indices_by_qty[bom_qty].append(bom_idx)
-
-        for qty, bom_indices in bom_indices_by_qty.items():
-            name_candidates = names_by_qty.get(qty, [])
-            for pos, bom_idx in enumerate(bom_indices):
-                if pos < len(name_candidates):
-                    qty_name_map[bom_idx] = name_candidates[pos]
-                    used_product_names.add(name_candidates[pos])
+    # Create cluster -> candidate names map using quantity-based matching
+    # with alphabetical sorting for determinism when multiple candidates exist.
+    name_by_cluster = {}
+    if step_product_names:
+        shape_rep_counts = parse_step_shape_rep_name_counts(str(step_path))  if HAS_ASSEMBLY_GEOM else {}
+        
+        # For each cluster, find names with matching quantity
+        for cluster_key in sorted(bom_clusters.keys()):
+            part_class, quantity = cluster_key
+            cluster_size = len(bom_clusters[cluster_key])
+            
+            # Find all names with this quantity from SHAPE_REP counts
+            matching_names = [
+                name for name, count in (shape_rep_counts or {}).items()
+                if count == quantity and name not in used_product_names
+            ]
+            
+            # Sort alphabetically for deterministic assignment
+            matching_names.sort()
+            
+            # Take as many as we need for this cluster
+            names_for_cluster = matching_names[:cluster_size]
+            
+            # Mark as used
+            for name in names_for_cluster:
+                used_product_names.add(name)
+            
+            if names_for_cluster:
+                name_by_cluster[cluster_key] = names_for_cluster
     
     # Apply naming to each BOM item
     for idx, bom_item in enumerate(bom_list):
@@ -567,8 +586,6 @@ def export_bom_to_xml(
             or name_lower.startswith('vaste vorm')
         )
         
-
-
         # Prefer existing meaningful BOM name (critical for reference XML name matching)
         # Keep generated fallback only for generic/empty names.
         if bom_part_name and not is_generic_bom_name:
@@ -589,13 +606,22 @@ def export_bom_to_xml(
             new_part_name = bom_part_name
             used_step_parts.add(bom_part_name)
 
-        elif not new_part_name and idx in qty_name_map:
-            candidate_product_name = qty_name_map[idx]
-            if candidate_product_name and candidate_product_name.upper() != 'UNKNOWN':
-                new_part_name = candidate_product_name
+        if not new_part_name:
+            cluster_key = (
+                str(bom_item.get('part_class', 'unknown') or 'unknown').strip().lower(),
+                int(bom_item.get('quantity', 1) or 1),
+            )
+            cluster_names = name_by_cluster.get(cluster_key, [])
+            cluster_items = bom_clusters.get(cluster_key, [])
+            if cluster_names and idx in cluster_items:
+                cluster_pos = cluster_items.index(idx)
+                if cluster_pos < len(cluster_names):
+                    candidate_product_name = cluster_names[cluster_pos]
+                    if candidate_product_name and candidate_product_name.upper() != 'UNKNOWN':
+                        new_part_name = candidate_product_name
 
-        elif not new_part_name and step_product_names:
-            # Sequential fallback for leftovers not matched by quantity.
+        if not new_part_name and step_product_names:
+            # Sequential fallback for leftovers not matched by cluster.
             while product_name_idx < len(step_product_names):
                 candidate_product_name = step_product_names[product_name_idx]
                 product_name_idx += 1
@@ -679,7 +705,7 @@ def export_bom_to_xml(
                     bom_item,
                     step_path,
                     step_path.stem,
-                    work_dir,
+                    work_dir_path,
                     material,
                     k_factor,
                     part_solid,
@@ -733,7 +759,6 @@ def export_bom_to_xml(
 
     # Write XML
     xml_string = _prettify_xml(root)
-    output_path = Path(output_xml_path)
     output_path.write_text(xml_string, encoding='utf-8')
 
     print(f"\n[OK] XML exported: {output_path}")
@@ -867,7 +892,12 @@ def _get_reference_values_for_part(ref_by_name: Dict[str, Dict[str, float]], ref
 
 
 def _build_representative_solids(doc) -> List[Any]:
-    """Build representative solids by grouping equal solids (assembly-analysis style)."""
+    """Extract all solids from STEP document (no grouping).
+    
+    NOTE: We used to do geometry-based grouping here, but that merges mirror
+    variants (e.g., 10000503252 LEFT + 10000503253 RIGHT) as identical.
+    Now we return all 25 solids and let the BOM item loop handle them 1-to-1.
+    """
     if not HAS_ASSEMBLY_GEOM:
         return []
 
@@ -884,17 +914,9 @@ def _build_representative_solids(doc) -> List[Any]:
             solids.append(TopoDS.Solid_s(exp.Current()))
             exp.Next()
 
-        grouped_representatives = []
-        for solid in solids:
-            found = False
-            for rep in grouped_representatives:
-                if solids_are_equal(solid, rep):
-                    found = True
-                    break
-            if not found:
-                grouped_representatives.append(solid)
-
-        return grouped_representatives
+        # CRITICAL FIX: Return all solids, no grouping
+        # This ensures 25 BOM items get matched 1-to-1 with 25 solids
+        return solids  # Was: grouped_representatives after geometry comparison
     except Exception:
         return []
 
@@ -1234,11 +1256,8 @@ def _process_plaat_item(
     if HAS_DXF_METRICS and part_solid is not None and nr_bends_value == 0:
         # Flat plate - generate DXF from 2D projection
         try:
-            # Determine DXF output path (use STEP directory or configured base path)
-            if DXF_OUTPUT_BASE_PATH:
-                dxf_dir = Path(DXF_OUTPUT_BASE_PATH)
-            else:
-                dxf_dir = step_path.parent
+            # Keep DXF in the same directory as the source STEP file.
+            dxf_dir = step_path.parent
             
             dxf_name = f"{part_name}.dxf"
             dxf_path = dxf_dir / dxf_name
@@ -1457,6 +1476,9 @@ def _process_profiel_item(
     ET.SubElement(calc_result, 'Tube_PartName').text = output_part_name
     ET.SubElement(calc_result, 'Tube_Name').text = part_name
     ET.SubElement(calc_result, 'Tube_Count').text = str(quantity)
+    ET.SubElement(calc_result, 'Sheet_Name').text = part_name  # For unified merging
+    ET.SubElement(calc_result, 'Sheet_Count').text = str(quantity)  # For consistency with plaat items
+    ET.SubElement(calc_result, 'Sheet_Type').text = 'Profile'  # Indicates this is a profile
     
     # Initialize with default values
     tube_type = 'Profile'
@@ -1563,4 +1585,7 @@ def _process_others_item(bom_item: Dict[str, Any], source_step_name: str = '') -
     ET.SubElement(calc_result, 'Others_Name').text = output_name
     ET.SubElement(calc_result, 'Others_Type').text = 'Other'
     ET.SubElement(calc_result, 'Others_Count').text = str(quantity)
+    ET.SubElement(calc_result, 'Sheet_Name').text = part_name  # For unified merging
+    ET.SubElement(calc_result, 'Sheet_Count').text = str(quantity)  # For consistency
+    ET.SubElement(calc_result, 'Sheet_Type').text = 'Other'  # Indicates this is other component
     return calc_result
