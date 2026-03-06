@@ -1676,27 +1676,30 @@ def analyze_assembly(
         exp.Next()
 
     # STEP-GUIDED GROUPING
-    # Use shape_rep_counts to assign names sequentially, then group by name
-    # This preserves mirror distinctions (different STEP names) while grouping true duplicates
-    
+    # Priority for exporter compatibility:
+    # 1) SHAPE_REPRESENTATION counts (best geometry-order signal)
+    # 2) NEXT_ASSEMBLY_USAGE_OCCURRENCE counts (assembly fallback)
+    # 3) Generic Part_n names (safe default)
     shape_rep_counts = parse_step_shape_rep_name_counts(step_file_path) if step_file_path else None
-    
-    # Phase 1: Assign STEP names to all solids sequentially
-    solid_names = []
+    name_source_counts = shape_rep_counts if shape_rep_counts else step_parts_count
+
+    # Phase 1: assign names to solids sequentially from the best available source.
+    solid_names: List[str] = []
     solid_idx = 0
-    
-    if shape_rep_counts:
-        for step_name, instance_count in shape_rep_counts.items():
-            for i in range(instance_count):
-                if solid_idx < len(solids):
-                    solid_names.append(step_name)
-                    solid_idx += 1
-    
-    # Fill remaining with generic names
+
+    if name_source_counts:
+        for step_name, instance_count in name_source_counts.items():
+            for _ in range(max(0, int(instance_count))):
+                if solid_idx >= len(solids):
+                    break
+                solid_names.append(step_name)
+                solid_idx += 1
+
+    # Fill remaining with generic names when parser data is incomplete/missing.
     while solid_idx < len(solids):
         solid_names.append(f"Part_{solid_idx + 1}")
         solid_idx += 1
-    
+
     # Phase 2: Group solids by their assigned STEP name
     grouped_solids = []  # [(representative_solid, count, volume, dims, part_name)]
     part_name_to_solid = {}
