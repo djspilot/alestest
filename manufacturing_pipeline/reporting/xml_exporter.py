@@ -1220,6 +1220,9 @@ def _process_plaat_item(
                 else:
                     print(f"    [WARN] Ignoring implausible fallback unfold dims: {flat_length:.1f} x {flat_width:.1f} mm")
                 calc_result.find('Sheet_UnfoldSuccess').text = 'True'
+
+                if unfold_result.get('dxf_output'):
+                    calc_result.find('Sheet_FilePathDXF').text = str(unfold_result['dxf_output'])
                 
                 # Add bend parameters from unfold result if available
                 if unfold_result.get('bend_angles'):
@@ -1476,9 +1479,6 @@ def _process_profiel_item(
     ET.SubElement(calc_result, 'Tube_PartName').text = output_part_name
     ET.SubElement(calc_result, 'Tube_Name').text = part_name
     ET.SubElement(calc_result, 'Tube_Count').text = str(quantity)
-    ET.SubElement(calc_result, 'Sheet_Name').text = part_name  # For unified merging
-    ET.SubElement(calc_result, 'Sheet_Count').text = str(quantity)  # For consistency with plaat items
-    ET.SubElement(calc_result, 'Sheet_Type').text = 'Profile'  # Indicates this is a profile
     
     # Initialize with default values
     tube_type = 'Profile'
@@ -1585,7 +1585,4 @@ def _process_others_item(bom_item: Dict[str, Any], source_step_name: str = '') -
     ET.SubElement(calc_result, 'Others_Name').text = output_name
     ET.SubElement(calc_result, 'Others_Type').text = 'Other'
     ET.SubElement(calc_result, 'Others_Count').text = str(quantity)
-    ET.SubElement(calc_result, 'Sheet_Name').text = part_name  # For unified merging
-    ET.SubElement(calc_result, 'Sheet_Count').text = str(quantity)  # For consistency
-    ET.SubElement(calc_result, 'Sheet_Type').text = 'Other'  # Indicates this is other component
     return calc_result

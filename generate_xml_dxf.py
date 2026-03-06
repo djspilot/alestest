@@ -188,13 +188,25 @@ def compare_xmls(generated_path: Path, reference_path: Path):
 
         def _item_key(item: ET.Element) -> str:
             sheet_name = _norm(item.findtext('Sheet_Name', ''))
+            tube_name = _norm(item.findtext('Tube_Name', ''))
+            others_name = _norm(item.findtext('Others_Name', ''))
             part_name = _norm(item.findtext('Sheet_PartName', ''))
+            tube_part_name = _norm(item.findtext('Tube_PartName', ''))
+            others_part_name = _norm(item.findtext('Others_PartName', ''))
             item_type = _norm(item.findtext('Sheet_Type', ''))
             thickness = (item.findtext('Sheet_Thickness', '') or '').strip()
             if sheet_name:
                 return f"sheet:{sheet_name}"
+            if tube_name:
+                return f"tube:{tube_name}"
+            if others_name:
+                return f"other:{others_name}"
             if part_name:
                 return f"part:{part_name}|type:{item_type}|t:{thickness}"
+            if tube_part_name:
+                return f"tube_part:{tube_part_name}"
+            if others_part_name:
+                return f"other_part:{others_part_name}"
             return ''
 
         gen_by_key = {}
