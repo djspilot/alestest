@@ -1771,10 +1771,12 @@ def _build_reference_database() -> Dict[str, Dict[str, float]]:
                 seen_paths.add(resolved)
 
                 file_name = xml_file.name
-                if re.search(r"(?i)_bom_features\.xml$", file_name):
+                # Prefer authoritative Results*.xml over generated *_bom_features.xml.
+                # *_bom_features remains useful as fallback when no Results file exists.
+                if re.search(r"(?i)result", file_name):
+                    priority = 2
+                elif re.search(r"(?i)_bom_features\.xml$", file_name):
                     priority = 1
-                elif re.search(r"(?i)result", file_name):
-                    priority = 0
                 else:
                     continue
 
@@ -1920,10 +1922,12 @@ def _build_reference_classifications() -> Dict[str, Dict[str, str]]:
                 seen_paths.add(resolved)
 
                 file_name = xml_file.name
-                if re.search(r"(?i)_bom_features\.xml$", file_name):
+                # Prefer authoritative Results*.xml over generated *_bom_features.xml.
+                # *_bom_features remains useful as fallback when no Results file exists.
+                if re.search(r"(?i)result", file_name):
+                    priority = 2
+                elif re.search(r"(?i)_bom_features\.xml$", file_name):
                     priority = 1
-                elif re.search(r"(?i)result", file_name):
-                    priority = 0
                 else:
                     continue
 

@@ -68,6 +68,180 @@ try:
 except ImportError:
     HAS_PROFILE_FEATURES = False
 
+try:
+    from manufacturing_pipeline.analysis.cut_features import extract_cut_features_for_sheet
+    HAS_CUT_FEATURES = True
+except ImportError:
+    HAS_CUT_FEATURES = False
+
+
+# -----------------------------------------------------------------------------
+# Feature schema (structured and extendable)
+# -----------------------------------------------------------------------------
+
+FEATURE_SCHEMA_VERSION = "2026-03-06"
+
+# Declared feature fields per functional classification bucket.
+# This keeps the current field contract explicit and makes future extensions easy.
+CLASSIFICATION_FEATURE_SCHEMA: Dict[str, Dict[str, Any]] = {
+    "vlakke_plaat": {
+        "part_class": "plaat",
+        "required": [
+            "Sheet_PartName", "Sheet_Name", "Sheet_Type", "Sheet_Count", "Sheet_Material",
+            "Sheet_Thickness", "Sheet_BoxX", "Sheet_BoxY",
+            "Sheet_NrHoles", "Sheet_HoleContours", "Sheet_HoleRadii",
+            "Sheet_Volume", "Sheet_TopArea", "Sheet_BottomArea",
+            "Sheet_BoxArea", "Sheet_AreaNoHoles", "Sheet_TotalArea",
+            "Sheet_OuterContour", "Sheet_TotalContour", "Sheet_Weight",
+            "Sheet_UnfoldSuccess", "Sheet_FilePathDXF",
+        ],
+        "optional": [
+            "Sheet_NrBends", "Sheet_BendAngles", "Sheet_BendInnerRadii", "Sheet_BendLength",
+        ],
+    },
+    "gezette_plaat": {
+        "part_class": "plaat",
+        "required": [
+            "Sheet_PartName", "Sheet_Name", "Sheet_Type", "Sheet_Count", "Sheet_Material",
+            "Sheet_Thickness", "Sheet_BoxX", "Sheet_BoxY",
+            "Sheet_NrBends", "Sheet_BendAngles", "Sheet_BendInnerRadii", "Sheet_BendLength",
+            "Sheet_NrHoles", "Sheet_HoleContours", "Sheet_HoleRadii",
+            "Sheet_Volume", "Sheet_TopArea", "Sheet_BottomArea",
+            "Sheet_BoxArea", "Sheet_AreaNoHoles", "Sheet_TotalArea",
+            "Sheet_OuterContour", "Sheet_TotalContour", "Sheet_Weight",
+            "Sheet_UnfoldSuccess", "Sheet_FilePathDXF",
+        ],
+        "optional": [],
+    },
+    "profiel": {
+        "part_class": "profiel",
+        "required": [
+            "Tube_PartName", "Tube_Name", "Tube_Count",
+            "Tube_Type", "Tube_Thickness", "Tube_Width", "Tube_Height",
+            "Tube_BoxDeltaX", "Tube_BoxDeltaY", "Tube_BoxDeltaZ",
+            "Tube_Material", "Tube_InnerRadius", "Tube_OuterRadius",
+            "Tube_Success", "Tube_FilePath", "Tube_Weight",
+        ],
+        "optional": [],
+    },
+    "anders": {
+        "part_class": "anders",
+        "required": [
+            "Others_PartName", "Others_Name", "Others_Type", "Others_Count",
+        ],
+        "optional": [],
+    },
+}
+
+
+def get_feature_schema_by_classification() -> Dict[str, Dict[str, Any]]:
+    """Return a copy-safe view of the feature schema per classification bucket."""
+    schema_copy: Dict[str, Dict[str, Any]] = {}
+    for bucket, spec in CLASSIFICATION_FEATURE_SCHEMA.items():
+        schema_copy[bucket] = {
+            "part_class": spec.get("part_class", ""),
+            "required": list(spec.get("required", [])),
+            "optional": list(spec.get("optional", [])),
+        }
+    return schema_copy
+
+
+def _resolve_feature_bucket(part_class: str, calc_result: ET.Element) -> str:
+    """Map runtime item to one of: vlakke_plaat, gezette_plaat, profiel, anders."""
+    if part_class == "plaat":
+        try:
+            bends = int(float(calc_result.findtext("Sheet_NrBends", "0") or 0))
+        except Exception:
+            bends = 0
+        return "gezette_plaat" if bends > 0 else "vlakke_plaat"
+    if part_class == "profiel":
+        return "profiel"
+    return "anders"
+
+
+def _new_feature_coverage_tracker() -> Dict[str, Dict[str, Any]]:
+    """Initialize counters for field coverage by classification bucket."""
+    tracker: Dict[str, Dict[str, Any]] = {}
+    for bucket, spec in CLASSIFICATION_FEATURE_SCHEMA.items():
+        tracker[bucket] = {
+            "items": 0,
+            "required_present": 0,
+            "optional_present": 0,
+            "required_declared": len(spec.get("required", [])),
+            "optional_declared": len(spec.get("optional", [])),
+            "missing_required_counts": {},
+        }
+    return tracker
+
+
+def _update_feature_coverage(
+    tracker: Dict[str, Dict[str, Any]],
+    bucket: str,
+    calc_result: ET.Element,
+) -> List[str]:
+    """Update feature coverage counters and return missing required fields for this item."""
+    if bucket not in tracker:
+        return []
+
+    spec = CLASSIFICATION_FEATURE_SCHEMA.get(bucket, {})
+    required = list(spec.get("required", []))
+    optional = list(spec.get("optional", []))
+
+    stats = tracker[bucket]
+    stats["items"] += 1
+
+    missing_required: List[str] = []
+
+    for field_name in required:
+        elem = calc_result.find(field_name)
+        if elem is not None and elem.text is not None and str(elem.text).strip() != "":
+            stats["required_present"] += 1
+        else:
+            missing_required.append(field_name)
+            missing_counts = stats["missing_required_counts"]
+            missing_counts[field_name] = int(missing_counts.get(field_name, 0)) + 1
+
+    for field_name in optional:
+        elem = calc_result.find(field_name)
+        if elem is not None and elem.text is not None and str(elem.text).strip() != "":
+            stats["optional_present"] += 1
+
+    return missing_required
+
+
+def _print_feature_coverage_summary(tracker: Dict[str, Dict[str, Any]]) -> None:
+    """Log concise feature coverage summary by classification bucket."""
+    print("\n[INFO] Feature schema coverage summary")
+    print(f"  - Schema version: {FEATURE_SCHEMA_VERSION}")
+
+    for bucket in ["vlakke_plaat", "gezette_plaat", "profiel", "anders"]:
+        stats = tracker.get(bucket)
+        if not stats:
+            continue
+
+        items = int(stats.get("items", 0))
+        req_decl = int(stats.get("required_declared", 0))
+        opt_decl = int(stats.get("optional_declared", 0))
+        req_present = int(stats.get("required_present", 0))
+        opt_present = int(stats.get("optional_present", 0))
+
+        req_total = items * req_decl
+        opt_total = items * opt_decl
+
+        req_pct = (100.0 * req_present / req_total) if req_total > 0 else 100.0
+        opt_pct = (100.0 * opt_present / opt_total) if opt_total > 0 else 100.0
+
+        print(
+            f"  - {bucket}: items={items}, required={req_present}/{req_total} ({req_pct:.1f}%), "
+            f"optional={opt_present}/{opt_total} ({opt_pct:.1f}%)"
+        )
+
+        missing_counts = stats.get("missing_required_counts", {})
+        if missing_counts:
+            top_missing = sorted(missing_counts.items(), key=lambda kv: kv[1], reverse=True)[:3]
+            missing_txt = ", ".join(f"{name}({count})" for name, count in top_missing)
+            print(f"    missing required (top): {missing_txt}")
+
 
 def _merge_bends_colinear(bend_angles, bend_radii, bend_lengths):
     """
@@ -663,8 +837,26 @@ def export_bom_to_xml(
     k_factor = _get_k_factor(material)
     print(f"  [INFO] K-factor: {k_factor} (material: {material})")
 
-    # Build representative solids in the same grouping style as assembly analysis
+    # Build representative solids and a name-aware mapping for robust BOM matching.
     representative_solids = _build_representative_solids(doc)
+    part_name_to_solid_indices = _build_part_name_to_solid_indices(
+        str(step_path),
+        representative_solids,
+    )
+    solid_index_to_name = _invert_part_name_to_solid_indices(part_name_to_solid_indices)
+    solid_volumes_mm3 = _compute_solid_volumes_mm3(representative_solids)
+    used_solid_indices = set()
+
+    if part_name_to_solid_indices:
+        print(
+            "  [INFO] Name-aware solid mapping ready: "
+            f"{len(part_name_to_solid_indices)} names, {len(representative_solids)} solids"
+        )
+    else:
+        print(
+            "  [WARN] Name-aware solid mapping unavailable; "
+            f"falling back to index order for {len(representative_solids)} solids"
+        )
 
     # Process each BOM item
     print(f"\n[XML Export] Processing {len(bom_list)} BOM items...")
@@ -673,6 +865,7 @@ def export_bom_to_xml(
     class_counts = {'plaat': 0, 'profiel': 0, 'anders': 0}  # Track by class (line-based)
     unclassified_count = 0  # Items with missing/unknown part_class
     bom_piece_count = 0  # Sum of quantities (stuk-count), separate from line count
+    feature_coverage = _new_feature_coverage_tracker()
     
     for idx, bom_item in enumerate(bom_list, 1):
         print(f"\n  [{idx}/{len(bom_list)}] {bom_item.get('part_name', 'Unknown')}")
@@ -689,7 +882,40 @@ def export_bom_to_xml(
         except Exception:
             bom_piece_count += 1
 
-        part_solid = representative_solids[idx - 1] if (idx - 1) < len(representative_solids) else None
+        part_solid = None
+        normalized_bom_name = _normalize_part_name(str(bom_item.get('part_name', '') or ''))
+        selected_solid_idx = _select_solid_index_for_bom_item(
+            bom_item=bom_item,
+            normalized_bom_name=normalized_bom_name,
+            preferred_idx=idx - 1,
+            total_solids=len(representative_solids),
+            part_name_to_solid_indices=part_name_to_solid_indices,
+            solid_volumes_mm3=solid_volumes_mm3,
+            used_indices=used_solid_indices,
+            default_material=material,
+        )
+
+        if selected_solid_idx is not None:
+            used_solid_indices.add(selected_solid_idx)
+            part_solid = representative_solids[selected_solid_idx]
+
+            # Keep output naming aligned with the solid that was actually selected.
+            canonical_name = solid_index_to_name.get(selected_solid_idx)
+            if canonical_name:
+                current_name = str(bom_item.get('part_name', '') or '').strip()
+                current_norm = _normalize_part_name(current_name)
+                if canonical_name != current_norm:
+                    print(
+                        f"    [INFO] Renaming by solid match: "
+                        f"{current_name or '<empty>'} -> {canonical_name}"
+                    )
+                    bom_item['part_name'] = canonical_name
+
+        if part_solid is None:
+            print(
+                f"    [WARN] No representative solid for BOM line {idx} "
+                f"(available solids: {len(representative_solids)})"
+            )
         
         # Determine sequence index for sheet items (only for plaat class)
         seq_idx = plaat_seq_index if part_class == 'plaat' else None
@@ -724,6 +950,14 @@ def export_bom_to_xml(
                 calc_result = _process_others_item(bom_item, step_path.stem)
 
             if calc_result is not None:
+                feature_bucket = _resolve_feature_bucket(part_class, calc_result)
+                missing_required = _update_feature_coverage(feature_coverage, feature_bucket, calc_result)
+                if missing_required:
+                    print(
+                        f"    [WARN] Missing declared required features "
+                        f"({feature_bucket}): {', '.join(missing_required)}"
+                    )
+
                 root.append(calc_result)
                 processed_count += 1
                 class_counts[part_class] += 1
@@ -756,6 +990,8 @@ def export_bom_to_xml(
         f"Verwerkt={processed_count}, NietGeclassificeerd={unclassified_count}, "
         f"Status={'OK' if processed_count == len(bom_list) else 'INCOMPLETE'}"
     )
+
+    _print_feature_coverage_summary(feature_coverage)
 
     # Write XML
     xml_string = _prettify_xml(root)
@@ -921,6 +1157,245 @@ def _build_representative_solids(doc) -> List[Any]:
         return []
 
 
+def _build_part_name_to_solid_indices(step_file_path: str, solids: List[Any]) -> Dict[str, List[int]]:
+    """Build mapping: normalized part name -> candidate solid indices.
+
+    Strategy:
+    1) Use SHAPE_REPRESENTATION counts when available.
+    2) Fallback to NEXT_ASSEMBLY_USAGE_OCCURRENCE counts.
+    3) Match names to solids via assembly-analysis volume matcher when available.
+    4) Fallback to sequential expansion by count.
+    """
+    if not HAS_ASSEMBLY_GEOM or not solids:
+        return {}
+
+    step_path = str(step_file_path) if step_file_path else ""
+    shape_rep_counts = parse_step_shape_rep_name_counts(step_path) if step_path else None
+    step_parts_counts = parse_step_assembly_structure(step_path) if step_path else None
+    name_source_counts = shape_rep_counts if shape_rep_counts else step_parts_counts
+
+    if not name_source_counts:
+        return {}
+
+    solid_names: List[str] = []
+
+    # Preferred: use the same volume-driven name matcher as assembly analysis.
+    try:
+        from manufacturing_pipeline.analysis.assembly_analysis import (
+            _build_reference_database,
+            _match_solids_to_names_bipartite,
+        )
+
+        reference_database = _build_reference_database()
+        solid_names = _match_solids_to_names_bipartite(
+            solids,
+            name_source_counts,
+            Path(step_path).name if step_path else "",
+            reference_database,
+        )
+    except Exception:
+        solid_names = []
+
+    if not solid_names:
+        names_flat: List[str] = []
+        for name, count in name_source_counts.items():
+            try:
+                repeats = max(0, int(count))
+            except Exception:
+                repeats = 0
+            for _ in range(repeats):
+                names_flat.append(str(name))
+
+        while len(names_flat) < len(solids):
+            names_flat.append(f"Part_{len(names_flat) + 1}")
+
+        solid_names = names_flat[:len(solids)]
+
+    mapping: Dict[str, List[int]] = {}
+    for solid_idx, assigned_name in enumerate(solid_names):
+        key = _normalize_part_name(str(assigned_name or ""))
+        if not key:
+            continue
+        if key not in mapping:
+            mapping[key] = []
+        mapping[key].append(solid_idx)
+
+    return mapping
+
+
+def _pick_fallback_solid_index(preferred_idx: int, total_solids: int, used_indices: set) -> Optional[int]:
+    """Pick an unused solid index, preferring the index-aligned candidate."""
+    if total_solids <= 0:
+        return None
+
+    if 0 <= preferred_idx < total_solids and preferred_idx not in used_indices:
+        return preferred_idx
+
+    # First search forward from preferred index, then wrap.
+    start_idx = preferred_idx if preferred_idx >= 0 else 0
+    for solid_idx in range(start_idx, total_solids):
+        if solid_idx not in used_indices:
+            return solid_idx
+    for solid_idx in range(0, start_idx):
+        if solid_idx not in used_indices:
+            return solid_idx
+
+    return None
+
+
+def _invert_part_name_to_solid_indices(
+    part_name_to_solid_indices: Dict[str, List[int]],
+) -> Dict[int, str]:
+    """Build reverse lookup: solid index -> normalized part name."""
+    reverse: Dict[int, str] = {}
+    for normalized_name, indices in part_name_to_solid_indices.items():
+        if not normalized_name:
+            continue
+        for idx in indices:
+            if idx not in reverse:
+                reverse[idx] = normalized_name
+    return reverse
+
+
+def _compute_solid_volumes_mm3(solids: List[Any]) -> List[float]:
+    """Compute representative solid volumes once for volume-aware matching."""
+    volumes: List[float] = []
+    if not HAS_ASSEMBLY_GEOM:
+        return [0.0 for _ in solids]
+
+    for solid in solids:
+        try:
+            volumes.append(float(get_solid_volume(solid) or 0.0))
+        except Exception:
+            volumes.append(0.0)
+    return volumes
+
+
+def _get_material_density_kg_m3(material: str) -> float:
+    """Return rough material density in kg/m^3 for mass->volume conversion."""
+    token = str(material or '').strip().lower()
+    if not token:
+        return 7850.0
+
+    # Stainless and RVS families.
+    if any(key in token for key in ['stainless', 'rvs', 'inox', '304', '316']):
+        return 8000.0
+
+    # Aluminum families.
+    if any(key in token for key in ['aluminum', 'aluminium', 'al ', 'alu']):
+        return 2700.0
+
+    # Default: carbon steel family.
+    return 7850.0
+
+
+def _estimate_expected_volume_mm3_from_bom(
+    bom_item: Dict[str, Any],
+    default_material: str,
+) -> Optional[float]:
+    """Estimate per-part expected volume from BOM mass fields."""
+    mass_per_unit_kg: Optional[float] = None
+
+    try:
+        raw_mass = bom_item.get('mass_per_unit_kg', None)
+        if raw_mass is not None:
+            mass_per_unit_kg = float(raw_mass)
+    except Exception:
+        mass_per_unit_kg = None
+
+    if mass_per_unit_kg is None or mass_per_unit_kg <= 0:
+        try:
+            total_mass_kg = float(bom_item.get('total_mass_kg', 0) or 0)
+            qty = float(bom_item.get('quantity', 1) or 1)
+            if total_mass_kg > 0 and qty > 0:
+                mass_per_unit_kg = total_mass_kg / qty
+        except Exception:
+            mass_per_unit_kg = None
+
+    if mass_per_unit_kg is None or mass_per_unit_kg <= 0:
+        return None
+
+    material_token = str(bom_item.get('material', '') or default_material)
+    density_kg_m3 = _get_material_density_kg_m3(material_token)
+    if density_kg_m3 <= 0:
+        return None
+
+    # volume_mm3 = (mass_kg / density_kg_m3) * 1e9
+    expected_volume = (mass_per_unit_kg / density_kg_m3) * 1_000_000_000.0
+    return expected_volume if expected_volume > 0 else None
+
+
+def _relative_volume_error(actual_volume_mm3: float, expected_volume_mm3: float) -> float:
+    """Compute relative volume error (0=perfect, higher=worse)."""
+    if expected_volume_mm3 <= 0:
+        return float('inf')
+    if actual_volume_mm3 <= 0:
+        return float('inf')
+    return abs(actual_volume_mm3 - expected_volume_mm3) / expected_volume_mm3
+
+
+def _select_solid_index_for_bom_item(
+    bom_item: Dict[str, Any],
+    normalized_bom_name: str,
+    preferred_idx: int,
+    total_solids: int,
+    part_name_to_solid_indices: Dict[str, List[int]],
+    solid_volumes_mm3: List[float],
+    used_indices: set,
+    default_material: str,
+) -> Optional[int]:
+    """Select best solid index using name-first mapping with volume-aware tie-breaks."""
+    if total_solids <= 0:
+        return None
+
+    available_indices = [i for i in range(total_solids) if i not in used_indices]
+    if not available_indices:
+        return None
+
+    name_candidates = [
+        i
+        for i in part_name_to_solid_indices.get(normalized_bom_name, [])
+        if i not in used_indices
+    ]
+
+    expected_volume = _estimate_expected_volume_mm3_from_bom(bom_item, default_material)
+
+    # If we can estimate volume, use it to resolve ambiguous/misaligned name matches.
+    if expected_volume is not None and solid_volumes_mm3:
+        def _err(idx: int) -> float:
+            return _relative_volume_error(solid_volumes_mm3[idx], expected_volume)
+
+        best_global_idx = min(available_indices, key=_err)
+        best_global_err = _err(best_global_idx)
+
+        if name_candidates:
+            best_name_idx = min(name_candidates, key=_err)
+            best_name_err = _err(best_name_idx)
+
+            # Keep name-driven mapping when it is already good or nearly as good.
+            if best_name_err <= 0.25 or best_name_err <= (best_global_err + 0.05):
+                return best_name_idx
+
+            # Override only when global match is materially better and still credible.
+            if best_global_err <= 0.35 and (best_name_err - best_global_err) >= 0.15:
+                print(
+                    f"    [INFO] Volume tie-break override for {bom_item.get('part_name', 'Unknown')}: "
+                    f"solid[{best_name_idx}] -> solid[{best_global_idx}] "
+                    f"(err {best_name_err:.2f} -> {best_global_err:.2f})"
+                )
+                return best_global_idx
+
+            return best_name_idx
+
+        return best_global_idx
+
+    # Name-based selection when volume evidence is unavailable.
+    if name_candidates:
+        return name_candidates[0]
+
+    return _pick_fallback_solid_index(preferred_idx, total_solids, used_indices)
+
+
 def _extract_dims_from_solid(part_solid) -> tuple:
     """Extract (length, width, thickness) from solid using assembly-analysis geometry method."""
     if not HAS_ASSEMBLY_GEOM or part_solid is None:
@@ -981,6 +1456,7 @@ def _process_plaat_item(
     length = 0.0
     width = 0.0
     thickness = 0.0
+    cut_features_result = None
 
     if reference_values is not None:
         length = float(reference_values.get('box_x', 0.0))
@@ -1003,6 +1479,22 @@ def _process_plaat_item(
             width = sorted_dims[1]
             length = sorted_dims[2]
 
+    # Extra geometry source: cut features (box, holes, contours)
+    # Keep as fallback to avoid overriding trusted reference values.
+    if HAS_CUT_FEATURES and part_solid is not None:
+        try:
+            cut_features_result = extract_cut_features_for_sheet(part_solid)
+            if cut_features_result is not None and (length <= 0 or width <= 0):
+                if float(cut_features_result.box_x) > 0 and float(cut_features_result.box_y) > 0:
+                    length = float(cut_features_result.box_x)
+                    width = float(cut_features_result.box_y)
+                    print(
+                        f"    [INFO] Dims from cut features: "
+                        f"L={length:.1f}, W={width:.1f} mm (source={cut_features_result.source})"
+                    )
+        except Exception as e:
+            print(f"    [WARN] Cut feature extraction failed: {str(e)[:60]}")
+
     if length > 0 and width > 0 and thickness > 0:
         print(f"    [INFO] Dims: L={length:.1f}, W={width:.1f}, T={thickness:.1f} mm")
     else:
@@ -1024,6 +1516,21 @@ def _process_plaat_item(
     ET.SubElement(calc_result, 'Sheet_HoleRadii').text = ''
     ET.SubElement(calc_result, 'Sheet_UnfoldSuccess').text = 'False'
     ET.SubElement(calc_result, 'Sheet_FilePathDXF').text = ''
+
+    # If cut features are available, use them as early fallback for hole fields.
+    if cut_features_result is not None and int(getattr(cut_features_result, 'nr_holes', 0) or 0) > 0:
+        try:
+            hole_count = int(cut_features_result.nr_holes)
+            hole_contours = list(getattr(cut_features_result, 'hole_contours', []) or [])
+            hole_radii = list(getattr(cut_features_result, 'hole_radii', []) or [])
+
+            calc_result.find('Sheet_NrHoles').text = str(hole_count)
+            if hole_contours:
+                calc_result.find('Sheet_HoleContours').text = '_'.join(_format_float(v) for v in hole_contours)
+            if hole_radii:
+                calc_result.find('Sheet_HoleRadii').text = '_'.join(_format_float(v) for v in hole_radii)
+        except Exception as e:
+            print(f"    [WARN] Could not apply cut-feature hole fallback: {str(e)[:60]}")
 
     # PROACTIVE UNFOLD: Try unfold for all sheet metal parts to detect bends
     # This catches bent sheets that classify as "plaat" via shell detection
@@ -1256,6 +1763,21 @@ def _process_plaat_item(
         'top_area': float(reference_values.get('top_area', 0) or 0) if (reference_values and float(reference_values.get('top_area', 0) or 0) > 0 and nr_bends_value > 0) else None,
         'area_no_holes': float(reference_values.get('area_no_holes', 0) or 0) if (reference_values and float(reference_values.get('area_no_holes', 0) or 0) > 0 and nr_bends_value > 0) else None,
     }
+
+    cut_metric_overrides = {
+        'outer_contour': None,
+        'total_contour': None,
+    }
+    if cut_features_result is not None:
+        try:
+            outer_from_cut = float(getattr(cut_features_result, 'outer_contour', 0.0) or 0.0)
+            total_from_cut = float(getattr(cut_features_result, 'total_contour', 0.0) or 0.0)
+            if outer_from_cut > 0:
+                cut_metric_overrides['outer_contour'] = outer_from_cut
+            if total_from_cut > 0:
+                cut_metric_overrides['total_contour'] = total_from_cut
+        except Exception:
+            pass
     if HAS_DXF_METRICS and part_solid is not None and nr_bends_value == 0:
         # Flat plate - generate DXF from 2D projection
         try:
@@ -1325,9 +1847,13 @@ def _process_plaat_item(
             print(f"    [WARN] Unfolded DXF processing failed: {str(e)[:80]}")
 
     # ========== GEOMETRY AND AREA CALCULATIONS ==========
-    # Volume and area calculations based on bounding box dimensions
-    volume = length * width * thickness
-    ET.SubElement(calc_result, 'Sheet_Volume').text = _format_float(volume)
+    # Prefer true CAD solid volume when available; bbox volume is only a fallback.
+    solid_volume = 0.0
+    if part_solid is not None and HAS_ASSEMBLY_GEOM:
+        try:
+            solid_volume = float(get_solid_volume(part_solid) or 0.0)
+        except Exception:
+            solid_volume = 0.0
 
     # Top area (flat surface for sheet metal)
     top_area = dxf_metric_overrides['top_area'] if dxf_metric_overrides['top_area'] is not None else (length * width)
@@ -1336,6 +1862,22 @@ def _process_plaat_item(
     # Bottom area (same as top for sheet metal)
     bottom_area = top_area
     ET.SubElement(calc_result, 'Sheet_BottomArea').text = _format_float(bottom_area)
+
+    # Bent parts can report an inflated bbox-based thickness. If we have true
+    # solid volume, infer a more realistic sheet thickness from area.
+    if nr_bends_value > 0 and solid_volume > 0 and top_area > 0:
+        estimated_thickness = solid_volume / top_area
+        if 0.2 <= estimated_thickness <= 30.0 and (
+            thickness <= 0 or thickness > (estimated_thickness * 1.8)
+        ):
+            thickness = estimated_thickness
+            thickness_elem = calc_result.find('Sheet_Thickness')
+            if thickness_elem is not None:
+                thickness_elem.text = _format_float(thickness)
+
+    approx_volume = length * width * thickness
+    volume = solid_volume if solid_volume > 0 else approx_volume
+    ET.SubElement(calc_result, 'Sheet_Volume').text = _format_float(volume)
 
     # Box surface area (all 6 faces of bounding box)
     if thickness > 0:
@@ -1356,11 +1898,27 @@ def _process_plaat_item(
 
     # Outer contour (cutting perimeter)
     # For flat sheet: 2 * (length + width)
-    outer_contour = dxf_metric_overrides['outer_contour'] if dxf_metric_overrides['outer_contour'] is not None else (2 * (length + width))
+    outer_contour = (
+        dxf_metric_overrides['outer_contour']
+        if dxf_metric_overrides['outer_contour'] is not None
+        else (
+            cut_metric_overrides['outer_contour']
+            if cut_metric_overrides['outer_contour'] is not None
+            else (2 * (length + width))
+        )
+    )
     ET.SubElement(calc_result, 'Sheet_OuterContour').text = _format_float(outer_contour)
 
     # Total contour (including internal cuts if any)
-    total_contour = dxf_metric_overrides['total_contour'] if dxf_metric_overrides['total_contour'] is not None else outer_contour
+    total_contour = (
+        dxf_metric_overrides['total_contour']
+        if dxf_metric_overrides['total_contour'] is not None
+        else (
+            cut_metric_overrides['total_contour']
+            if cut_metric_overrides['total_contour'] is not None
+            else outer_contour
+        )
+    )
     ET.SubElement(calc_result, 'Sheet_TotalContour').text = _format_float(total_contour)
 
     # Weight estimation (material density in g/cm³)
