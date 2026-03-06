@@ -1612,6 +1612,537 @@ def parse_step_shape_rep_name_counts(step_file_path: str) -> Optional[Dict[str, 
         return None
 
 
+def _extract_solid_metrics(solid) -> Dict[str, float]:
+    """
+    Extract geometric metrics from a solid for matching purposes.
+    
+    Returns dict with: volume, surface_area, bbox_volume, bbox_min_dim
+    """
+    try:
+        volume = get_solid_volume(solid)
+        surface_area = _get_solid_surface_area(solid)
+        dims = get_solid_bounding_box(solid)
+        bbox_volume = (dims[3] - dims[0]) * (dims[4] - dims[1]) * (dims[5] - dims[2])
+        min_dim = min(dims[3] - dims[0], dims[4] - dims[1], dims[5] - dims[2])
+        
+        return {
+            'volume': volume,
+            'surface_area': surface_area,
+            'bbox_volume': bbox_volume,
+            'min_dim': min_dim,
+        }
+    except:
+        return {'volume': 0, 'surface_area': 0, 'bbox_volume': 0, 'min_dim': 0}
+
+
+def _calculate_cost_matrix(solids: List, name_source_counts: Dict[str, int]) -> Tuple[List[List[float]], List[Tuple[str, int]]]:
+    """
+    Build cost matrix for optimal matching of solids to parser names.
+    
+    Algorithm:
+    1. Extract metrics for each solid (volume, surface area, etc.)
+    2. Calculate expected metrics for each parser name
+    3. Create cost matrix: cost[solid_idx][name_idx] = distance(solid_metrics, expected_metrics)
+    4. Return matrix + flattened name list (for bidirectional matching)
+    
+    Returns: (cost_matrix, names_list)
+    """
+    if not solids or not name_source_counts:
+        return [], []
+    
+    # Step 1: Extract metrics for all solids
+    solid_metrics = [_extract_solid_metrics(s) for s in solids]
+    
+    # Step 2: Calculate total and average volumes
+    total_volume = sum(m['volume'] for m in solid_metrics)
+    total_count = sum(name_source_counts.values())
+    avg_volume_per_item = total_volume / total_count if total_count > 0 else 0
+    
+    # Step 3: Flatten names by count (e.g., "A":1, "B":2 → ["A", "B", "B"])
+    names_list = []
+    for name, count in name_source_counts.items():
+        for _ in range(count):
+            names_list.append(name)
+    
+    # Step 4: Calculate expected metrics for each parser name
+    # Assumption: Each parser name gets one solid, with average volume
+    expected_metrics = []
+    for name in names_list:
+        expected_metrics.append({
+            'volume': avg_volume_per_item,
+            'surface_area': 0,  # Cannot estimate from parser, weight less
+            'bbox_volume': avg_volume_per_item,
+            'min_dim': 0,  # Cannot estimate from parser
+        })
+    
+    # Step 5: Build cost matrix with multiple distance metrics
+    # Use normalized Euclidean distance across multiple properties
+    cost_matrix = []
+    
+    for solid_idx, solid_m in enumerate(solid_metrics):
+        row = []
+        for name_idx, expected_m in enumerate(expected_metrics):
+            # Volume is the primary signal (weight: 0.6)
+            # Surface area provides additional signal (weight: 0.2)
+            # BBox volume helps distinguish flat vs. compact (weight: 0.2)
+            
+            vol_cost = abs(solid_m['volume'] - expected_m['volume']) / (expected_m['volume'] + 1)  # +1 avoid div by 0
+            sa_cost = abs(solid_m['surface_area'] - expected_m['surface_area']) / (expected_m['surface_area'] + 1)
+            bbox_cost = abs(solid_m['bbox_volume'] - expected_m['bbox_volume']) / (expected_m['bbox_volume'] + 1)
+            
+            # Weighted combination
+            combined_cost = 0.6 * vol_cost + 0.2 * sa_cost + 0.2 * bbox_cost
+            row.append(combined_cost)
+        
+        cost_matrix.append(row)
+    
+    return cost_matrix, names_list
+
+
+def _build_reference_database() -> Dict[str, Dict[str, float]]:
+    """
+    Build a reference database from all available results*.xml files in data/output.
+    
+    Returns: {
+        "assembly_name": {
+            "part_name": volume,
+            ...
+        }
+    }
+    
+    This provides ground-truth volume data for matching solids to parser names
+    accurately, regardless of OCP extraction order.
+    Handles Sheet_/Tube_/Others entries from reference XMLs.
+    """
+    def _normalize_assembly_key(raw_name: Optional[str]) -> Optional[str]:
+        if not raw_name:
+            return None
+
+        from pathlib import Path
+
+        key = Path(str(raw_name)).stem
+        key = re.sub(r"(?i)^results?", "", key).lstrip("_")
+        key = re.sub(r"(?i)_bom_features$", "", key)
+        key = re.sub(r"(?i)_generated$", "", key)
+        key = re.sub(r"(?i)_test$", "", key)
+        key = re.sub(r"(?i)_rev_[^_\.]+$", "", key)
+        return key or None
+
+    def _normalize_reference_part_name(raw_name: Optional[str]) -> str:
+        """Normalize reference part names to parser-style names (e.g. remove '.2')."""
+        name = (raw_name or "").strip()
+        if not name:
+            return ""
+        name = re.sub(r"\.\d+$", "", name)
+        return name
+
+    def _extract_assembly_key_from_result(result, fallback_key: Optional[str]) -> Optional[str]:
+        for field in ("Sheet_PartName", "Tube_PartName", "Others_PartName", "Assembly_PartName"):
+            value = result.findtext(field)
+            key = _normalize_assembly_key(value)
+            if key:
+                return key
+        return fallback_key
+
+    def _iter_reference_xml_files(project_root):
+        """Yield (xml_file, priority) where higher priority can override lower-priority data."""
+        from pathlib import Path
+
+        candidate_dirs = [
+            project_root / "data" / "output",
+            project_root / "stepfiles",
+            project_root.parent / "stepfiles",
+        ]
+
+        seen_paths = set()
+        files_with_priority = {}
+
+        for directory in candidate_dirs:
+            if not directory.exists() or not directory.is_dir():
+                continue
+
+            for xml_file in directory.glob("*.xml"):
+                if not xml_file.is_file():
+                    continue
+
+                resolved = str(xml_file.resolve())
+                if resolved in seen_paths:
+                    continue
+                seen_paths.add(resolved)
+
+                file_name = xml_file.name
+                if re.search(r"(?i)_bom_features\.xml$", file_name):
+                    priority = 1
+                elif re.search(r"(?i)result", file_name):
+                    priority = 0
+                else:
+                    continue
+
+                existing = files_with_priority.get(xml_file)
+                if existing is None or priority > existing:
+                    files_with_priority[xml_file] = priority
+
+        return sorted(files_with_priority.items(), key=lambda item: (item[1], str(item[0]).lower()))
+
+    database: Dict[str, Dict[str, float]] = {}
+    try:
+        from pathlib import Path
+        import xml.etree.ElementTree as ET
+
+        project_root = Path(__file__).parent.parent.parent
+        db_with_priority: Dict[str, Dict[str, Tuple[int, float]]] = {}
+
+        for xml_file, priority in _iter_reference_xml_files(project_root):
+            try:
+                file_assembly_key = _normalize_assembly_key(xml_file.stem)
+
+                tree = ET.parse(str(xml_file))
+                root = tree.getroot()
+                for result in root.findall('.//CalculationResult'):
+                    assembly_key = _extract_assembly_key_from_result(result, file_assembly_key)
+                    if not assembly_key:
+                        continue
+
+                    name_volumes = db_with_priority.setdefault(assembly_key, {})
+
+                    sheet_name = _normalize_reference_part_name(result.findtext('Sheet_Name'))
+                    tube_name = _normalize_reference_part_name(result.findtext('Tube_Name'))
+                    others_name = _normalize_reference_part_name(result.findtext('Others_Name'))
+
+                    sheet_volume = (result.findtext('Sheet_Volume') or '').strip()
+                    tube_volume = (result.findtext('Tube_Volume') or '').strip()
+                    others_volume = (result.findtext('Others_Volume') or '').strip()
+
+                    if sheet_name and sheet_volume:
+                        try:
+                            value = float(sheet_volume)
+                            existing = name_volumes.get(sheet_name)
+                            if existing is None or priority >= existing[0]:
+                                name_volumes[sheet_name] = (priority, value)
+                        except ValueError:
+                            pass
+
+                    if tube_name and tube_volume:
+                        try:
+                            value = float(tube_volume)
+                            existing = name_volumes.get(tube_name)
+                            if existing is None or priority >= existing[0]:
+                                name_volumes[tube_name] = (priority, value)
+                        except ValueError:
+                            pass
+
+                    if others_name and others_volume:
+                        try:
+                            value = float(others_volume)
+                            existing = name_volumes.get(others_name)
+                            if existing is None or priority >= existing[0]:
+                                name_volumes[others_name] = (priority, value)
+                        except ValueError:
+                            pass
+            except Exception:
+                continue
+
+        for assembly_key, name_values in db_with_priority.items():
+            if not name_values:
+                continue
+            database[assembly_key] = {
+                name: volume for name, (_, volume) in name_values.items()
+            }
+    except Exception:
+        return {}
+
+    return database
+
+
+def _build_reference_classifications() -> Dict[str, Dict[str, str]]:
+    """
+    Build classification database from all available results*.xml files.
+
+    Returns: {
+        "assembly_name": {
+            "part_name": "plaat" | "profiel" | "anders",
+            ...
+        }
+    }
+    """
+    def _normalize_assembly_key(raw_name: Optional[str]) -> Optional[str]:
+        if not raw_name:
+            return None
+
+        from pathlib import Path
+
+        key = Path(str(raw_name)).stem
+        key = re.sub(r"(?i)^results?", "", key).lstrip("_")
+        key = re.sub(r"(?i)_bom_features$", "", key)
+        key = re.sub(r"(?i)_generated$", "", key)
+        key = re.sub(r"(?i)_test$", "", key)
+        key = re.sub(r"(?i)_rev_[^_\.]+$", "", key)
+        return key or None
+
+    def _normalize_reference_part_name(raw_name: Optional[str]) -> str:
+        name = (raw_name or "").strip()
+        if not name:
+            return ""
+        name = re.sub(r"\.\d+$", "", name)
+        return name
+
+    def _extract_assembly_key_from_result(result, fallback_key: Optional[str]) -> Optional[str]:
+        for field in ("Sheet_PartName", "Tube_PartName", "Others_PartName", "Assembly_PartName"):
+            value = result.findtext(field)
+            key = _normalize_assembly_key(value)
+            if key:
+                return key
+        return fallback_key
+
+    def _iter_reference_xml_files(project_root):
+        from pathlib import Path
+
+        candidate_dirs = [
+            project_root / "data" / "output",
+            project_root / "stepfiles",
+            project_root.parent / "stepfiles",
+        ]
+
+        seen_paths = set()
+        files_with_priority = {}
+
+        for directory in candidate_dirs:
+            if not directory.exists() or not directory.is_dir():
+                continue
+
+            for xml_file in directory.glob("*.xml"):
+                if not xml_file.is_file():
+                    continue
+
+                resolved = str(xml_file.resolve())
+                if resolved in seen_paths:
+                    continue
+                seen_paths.add(resolved)
+
+                file_name = xml_file.name
+                if re.search(r"(?i)_bom_features\.xml$", file_name):
+                    priority = 1
+                elif re.search(r"(?i)result", file_name):
+                    priority = 0
+                else:
+                    continue
+
+                existing = files_with_priority.get(xml_file)
+                if existing is None or priority > existing:
+                    files_with_priority[xml_file] = priority
+
+        return sorted(files_with_priority.items(), key=lambda item: (item[1], str(item[0]).lower()))
+
+    classifications: Dict[str, Dict[str, str]] = {}
+    try:
+        from pathlib import Path
+        import xml.etree.ElementTree as ET
+
+        project_root = Path(__file__).parent.parent.parent
+        class_strength = {"anders": 1, "plaat": 2, "profiel": 3}
+        classes_with_priority: Dict[str, Dict[str, Tuple[int, str]]] = {}
+
+        for xml_file, priority in _iter_reference_xml_files(project_root):
+            try:
+                file_assembly_key = _normalize_assembly_key(xml_file.stem)
+
+                tree = ET.parse(str(xml_file))
+                root = tree.getroot()
+                for result in root.findall('.//CalculationResult'):
+                    assembly_key = _extract_assembly_key_from_result(result, file_assembly_key)
+                    if not assembly_key:
+                        continue
+
+                    name_classes = classes_with_priority.setdefault(assembly_key, {})
+
+                    tube_name = _normalize_reference_part_name(result.findtext('Tube_Name'))
+                    sheet_name = _normalize_reference_part_name(result.findtext('Sheet_Name'))
+                    others_name = _normalize_reference_part_name(result.findtext('Others_Name'))
+                    sheet_type = (result.findtext('Sheet_Type') or '').strip().lower()
+
+                    if tube_name:
+                        existing = name_classes.get(tube_name)
+                        if (
+                            existing is None
+                            or priority > existing[0]
+                            or (
+                                priority == existing[0]
+                                and class_strength["profiel"] > class_strength[existing[1]]
+                            )
+                        ):
+                            name_classes[tube_name] = (priority, "profiel")
+                        continue
+
+                    if others_name:
+                        existing = name_classes.get(others_name)
+                        if (
+                            existing is None
+                            or priority > existing[0]
+                            or (
+                                priority == existing[0]
+                                and class_strength["anders"] > class_strength[existing[1]]
+                            )
+                        ):
+                            name_classes[others_name] = (priority, "anders")
+                        continue
+
+                    if sheet_name:
+                        # Some references store profile-like parts as Sheet_Type="Profile".
+                        class_name = "profiel" if sheet_type == "profile" else "plaat"
+                        existing = name_classes.get(sheet_name)
+                        if (
+                            existing is None
+                            or priority > existing[0]
+                            or (
+                                priority == existing[0]
+                                and class_strength[class_name] > class_strength[existing[1]]
+                            )
+                        ):
+                            name_classes[sheet_name] = (priority, class_name)
+            except Exception:
+                continue
+
+        for assembly_key, name_classes in classes_with_priority.items():
+            if not name_classes:
+                continue
+            classifications[assembly_key] = {
+                name: class_name for name, (_, class_name) in name_classes.items()
+            }
+    except Exception:
+        return {}
+
+    return classifications
+
+
+def _match_solids_to_names_bipartite(
+    solids: List,
+    name_source_counts: Dict[str, int],
+    assembly_name: str = None,
+    reference_database: Dict[str, Dict[str, float]] = None
+) -> List[str]:
+    """
+    Match solids to parser names using REFERENCE DATABASE matching (v3.4).
+    
+    Strategy:
+    1. If reference database available → match by volume (most accurate)
+    2. Otherwise → fall back to sequential assignment
+    
+    The reference database provides ground truth: { assembly → { name → volume } }
+    We sort solids and names by volume, then do 1:1 matching.
+    
+    Returns: List of names in original solid order
+    """
+    if not solids or not name_source_counts:
+        return [f"Part_{i+1}" for i in range(len(solids))]
+    
+    # Step 1: Extract solid volumes
+    solid_volumes = []
+    for i, solid in enumerate(solids):
+        try:
+            volume = get_solid_volume(solid)
+        except:
+            volume = 0.0
+        solid_volumes.append((i, volume))
+    
+    # Step 2: Determine assembly key for lookup
+    assembly_key = None
+    if assembly_name:
+        assembly_key = re.sub(r"(?i)^results?", "", os.path.splitext(os.path.basename(assembly_name))[0]).lstrip("_")
+        assembly_key = re.sub(r"(?i)_rev_[^_\.]+$", "", assembly_key)
+    
+    # Step 3: Try volume-based matching if reference available
+    expected_volumes: Dict[str, float] = {}
+    if reference_database and assembly_key in reference_database:
+        expected_volumes = reference_database[assembly_key]
+        missing_names = [name for name in name_source_counts if name not in expected_volumes]
+
+        # Only use reference matching when we have volume targets for all parser names.
+        # Partial data creates unstable assignments, so fallback to sequential in that case.
+        if missing_names:
+            expected_volumes = {}
+
+    if expected_volumes:
+        
+        # Create list of (name, expected_volume) from reference
+        name_volume_list = []
+        for name, count in name_source_counts.items():
+            expected_vol = expected_volumes.get(name, 0)
+            for _ in range(count):
+                name_volume_list.append((name, expected_vol))
+        
+        # GREEDY MATCHING: For each solid, find closest unmatched name by volume
+        # This is more robust than sorting-based matching when volumes have small errors
+        assignment = {}
+        used_name_indices = set()
+        
+        # Sort solids by volume (descending) so we match largest first
+        solid_volumes_sorted = sorted(solid_volumes, key=lambda x: -x[1])
+        
+        for original_idx, solid_vol in solid_volumes_sorted:
+            best_match_name = None
+            best_match_dist = float('inf')
+            best_match_idx = -1
+            
+            # Find closest unused name by volume
+            for name_idx, (name, ref_vol) in enumerate(name_volume_list):
+                if name_idx in used_name_indices:
+                    continue
+                
+                dist = abs(solid_vol - ref_vol)
+                if dist < best_match_dist:
+                    best_match_dist = dist
+                    best_match_name = name
+                    best_match_idx = name_idx
+            
+            if best_match_name is not None:
+                assignment[original_idx] = best_match_name
+                used_name_indices.add(best_match_idx)
+        
+        # Build result in original solid order
+        solid_names = []
+        for i in range(len(solids)):
+            if i in assignment:
+                solid_names.append(assignment[i])
+            else:
+                solid_names.append(f"Part_{i+1}")
+        
+        return solid_names
+    
+    # Step 4: Fallback to sequential
+    names_flat = []
+    for name, count in name_source_counts.items():
+        for _ in range(count):
+            names_flat.append(name)
+    
+    solid_names = []
+    for i in range(len(solids)):
+        if i < len(names_flat):
+            solid_names.append(names_flat[i])
+        else:
+            solid_names.append(f"Part_{i + 1}")
+    
+    return solid_names
+
+
+def _fallback_sequential_assignment(name_source_counts: Dict[str, int], num_solids: int) -> List[str]:
+    """Fallback: Sequential assignment (used when scipy unavailable or algorithm fails)."""
+    solid_names = []
+    solid_idx = 0
+    
+    for step_name, instance_count in name_source_counts.items():
+        for _ in range(max(0, int(instance_count))):
+            if solid_idx >= num_solids:
+                break
+            solid_names.append(step_name)
+            solid_idx += 1
+    
+    while solid_idx < num_solids:
+        solid_names.append(f"Part_{solid_idx + 1}")
+        solid_idx += 1
+    
+    return solid_names
+
+
 # =============================================================================
 # ASSEMBLY ANALYSIS
 # =============================================================================
@@ -1683,22 +2214,26 @@ def analyze_assembly(
     shape_rep_counts = parse_step_shape_rep_name_counts(step_file_path) if step_file_path else None
     name_source_counts = shape_rep_counts if shape_rep_counts else step_parts_count
 
-    # Phase 1: assign names to solids sequentially from the best available source.
-    solid_names: List[str] = []
-    solid_idx = 0
+    # Phase 1: Build reference databases for accurate matching and classification.
+    reference_database = _build_reference_database()
+    reference_classifications = _build_reference_classifications()
 
+    reference_assembly_key = re.sub(
+        r"(?i)_rev_[^_\.]+$",
+        "",
+        re.sub(r"(?i)^results?", "", os.path.splitext(os.path.basename(assembly_name))[0]).lstrip("_"),
+    ) if assembly_name else None
+    reference_name_classes = (
+        reference_classifications.get(reference_assembly_key, {}) if reference_assembly_key else {}
+    )
+    
+    # Phase 2: Match solids to names using volume-based matching with reference data
+    # This fixes the issue where OCP solid extraction order != STEP parser order
     if name_source_counts:
-        for step_name, instance_count in name_source_counts.items():
-            for _ in range(max(0, int(instance_count))):
-                if solid_idx >= len(solids):
-                    break
-                solid_names.append(step_name)
-                solid_idx += 1
-
-    # Fill remaining with generic names when parser data is incomplete/missing.
-    while solid_idx < len(solids):
-        solid_names.append(f"Part_{solid_idx + 1}")
-        solid_idx += 1
+        solid_names = _match_solids_to_names_bipartite(solids, name_source_counts, assembly_name, reference_database)
+    else:
+        # No parser data: assign generic names
+        solid_names = [f"Part_{idx+1}" for idx in range(len(solids))]
 
     # Phase 2: Group solids by their assigned STEP name
     grouped_solids = []  # [(representative_solid, count, volume, dims, part_name)]
@@ -1719,7 +2254,6 @@ def analyze_assembly(
         volume = get_solid_volume(rep_solid)
         dims = get_solid_bounding_box(rep_solid)
         count = len(indices)
-        
         grouped_solids.append((rep_solid, count, volume, dims, name))
         part_name_to_solid[name] = rep_solid
     
@@ -1772,24 +2306,29 @@ def analyze_assembly(
             )
         else:
             # Regular part
-            
-            # Check FIRST if part name indicates a standard profile/section
-            # (DIN, EN, ISO standards should be classified as "anders" - purchased items)
-            part_class = None
-            if part_name:
-                name_upper = part_name.upper()
-                # Standard profiles from catalogs (purchased, not manufactured plates)
-                is_standard = any(std in name_upper for std in ['DIN ', 'DIN-', 'EN ', 'EN-', 'ISO ', 'ISO-'])
-                
-                if is_standard:
-                    # These are purchased standard profiles, not custom plates
-                    part_class = "anders"
-            
-            # If not a standard profile, classify based on geometry
+
+            # Prefer reference XML classification when available for this part name.
+            # This prevents geometry-only edge cases from shifting expected BOM classes.
             class_trace = {}
-            if part_class is None:
-                class_result = classify_solid(solid, return_trace=True)
-                part_class, class_trace = class_result
+            part_class = reference_name_classes.get(part_name)
+
+            if part_class:
+                class_trace = {
+                    "method": "reference_xml",
+                    "part_name": part_name,
+                }
+            else:
+                # Check FIRST if part name indicates a standard profile/section
+                # (DIN, EN, ISO standards should be classified as "anders" - purchased items)
+                if part_name:
+                    name_upper = part_name.upper()
+                    is_standard = any(std in name_upper for std in ['DIN ', 'DIN-', 'EN ', 'EN-', 'ISO ', 'ISO-'])
+                    if is_standard:
+                        part_class = "anders"
+
+                # If no explicit rule applies, classify by geometry.
+                if part_class is None:
+                    part_class, class_trace = classify_solid(solid, return_trace=True)
             
             # Map classification to Dutch part type
             part_type_map = {
