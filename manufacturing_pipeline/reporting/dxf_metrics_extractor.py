@@ -28,7 +28,7 @@ except ImportError:
     HAS_EZDXF = False
 
 try:
-    from shapely.geometry import Polygon, box
+    from shapely.geometry import Polygon, box, MultiPoint
     from shapely.ops import unary_union
     HAS_SHAPELY = True
 except ImportError:
@@ -122,10 +122,7 @@ def extract_metrics_from_dxf(dxf_path: Path) -> Optional[Dict[str, Any]]:
         if not loops or not loops.get('hole_loops') or len(loops.get('hole_loops', [])) == 0:
             print(f"[DEBUG] LWPOLYLINE holes not found, trying ARC/LINE contour detection...")
             loops_alt = _detect_hole_contours_from_arcs(msp)
-            if loops_alt and loops_alt.get('hole_loops'):
-                if loops.get('outer_loop'):
-                    # Keep outer loop from LWPOLYLINE, add holes from ARC/LINE
-                    loops_alt['outer_loop'] = loops['outer_loop']
+            if loops_alt and loops_alt.get('outer_loop'):
                 loops = loops_alt
         
         if not loops or not loops.get('outer_loop'):
@@ -459,12 +456,154 @@ def _read_polylines_from_dxf(msp) -> Optional[Dict[str, List]]:
         
         return {
             'outer_loop': outer_loop,
-            'hole_loops': hole_loops
+            'hole_loops': hole_loops,
+            'source': 'lwpolyline',
         }
         
     except Exception as e:
         print(f"[WARN] DXF reading failed: {str(e)[:60]}")
         return None
+
+
+def _dot3(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _norm3(v: Tuple[float, float, float]) -> float:
+    return math.sqrt(_dot3(v, v))
+
+
+def _normalize3(v: Tuple[float, float, float]) -> Optional[Tuple[float, float, float]]:
+    length = _norm3(v)
+    if length <= 1e-12:
+        return None
+    return (v[0] / length, v[1] / length, v[2] / length)
+
+
+def _mat_vec_mul3(matrix: List[List[float]], vector: Tuple[float, float, float]) -> Tuple[float, float, float]:
+    return (
+        matrix[0][0] * vector[0] + matrix[0][1] * vector[1] + matrix[0][2] * vector[2],
+        matrix[1][0] * vector[0] + matrix[1][1] * vector[1] + matrix[1][2] * vector[2],
+        matrix[2][0] * vector[0] + matrix[2][1] * vector[1] + matrix[2][2] * vector[2],
+    )
+
+
+def _power_iteration_symmetric3(
+    matrix: List[List[float]],
+    iterations: int = 24,
+) -> Tuple[Optional[Tuple[float, float, float]], float]:
+    """Approximate dominant eigenvector/eigenvalue for a symmetric 3x3 matrix."""
+    seeds = (
+        (1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, 0.0, 1.0),
+        (1.0, 1.0, 1.0),
+    )
+    best_vector = None
+    best_eigenvalue = -1.0
+
+    for seed in seeds:
+        vector = _normalize3(seed)
+        if vector is None:
+            continue
+
+        for _ in range(iterations):
+            w = _mat_vec_mul3(matrix, vector)
+            candidate = _normalize3(w)
+            if candidate is None:
+                break
+            vector = candidate
+
+        w_final = _mat_vec_mul3(matrix, vector)
+        eigenvalue = _dot3(vector, w_final)
+        if eigenvalue > best_eigenvalue:
+            best_eigenvalue = eigenvalue
+            best_vector = vector
+
+    return best_vector, best_eigenvalue
+
+
+def _orthogonal_fallback_axis(axis: Tuple[float, float, float]) -> Optional[Tuple[float, float, float]]:
+    """Build a stable axis orthogonal to the input axis."""
+    references = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    ref = min(references, key=lambda candidate: abs(_dot3(axis, candidate)))
+    cross = (
+        axis[1] * ref[2] - axis[2] * ref[1],
+        axis[2] * ref[0] - axis[0] * ref[2],
+        axis[0] * ref[1] - axis[1] * ref[0],
+    )
+    return _normalize3(cross)
+
+
+def _estimate_planar_basis_from_points(
+    points_3d: List[Tuple[float, float, float]],
+) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]:
+    """Estimate a 2D projection basis from 3D points using covariance PCA."""
+    if len(points_3d) < 3:
+        return None
+
+    count = float(len(points_3d))
+    mean_x = sum(point[0] for point in points_3d) / count
+    mean_y = sum(point[1] for point in points_3d) / count
+    mean_z = sum(point[2] for point in points_3d) / count
+
+    c_xx = c_xy = c_xz = 0.0
+    c_yy = c_yz = c_zz = 0.0
+    for point_x, point_y, point_z in points_3d:
+        dx = point_x - mean_x
+        dy = point_y - mean_y
+        dz = point_z - mean_z
+        c_xx += dx * dx
+        c_xy += dx * dy
+        c_xz += dx * dz
+        c_yy += dy * dy
+        c_yz += dy * dz
+        c_zz += dz * dz
+
+    divisor = max(count - 1.0, 1.0)
+    covariance = [
+        [c_xx / divisor, c_xy / divisor, c_xz / divisor],
+        [c_xy / divisor, c_yy / divisor, c_yz / divisor],
+        [c_xz / divisor, c_yz / divisor, c_zz / divisor],
+    ]
+
+    axis_u, eigen_u = _power_iteration_symmetric3(covariance)
+    if axis_u is None or eigen_u <= 1e-12:
+        return None
+
+    deflated = [
+        [covariance[row][col] - eigen_u * axis_u[row] * axis_u[col] for col in range(3)]
+        for row in range(3)
+    ]
+    axis_v_raw, _ = _power_iteration_symmetric3(deflated)
+
+    if axis_v_raw is None:
+        axis_v = _orthogonal_fallback_axis(axis_u)
+        if axis_v is None:
+            return None
+        return axis_u, axis_v
+
+    projection = _dot3(axis_v_raw, axis_u)
+    axis_v_ortho = (
+        axis_v_raw[0] - projection * axis_u[0],
+        axis_v_raw[1] - projection * axis_u[1],
+        axis_v_raw[2] - projection * axis_u[2],
+    )
+    axis_v = _normalize3(axis_v_ortho)
+    if axis_v is None:
+        axis_v = _orthogonal_fallback_axis(axis_u)
+    if axis_v is None:
+        return None
+
+    return axis_u, axis_v
+
+
+def _project_point_to_basis(
+    point_3d: Tuple[float, float, float],
+    basis_u: Tuple[float, float, float],
+    basis_v: Tuple[float, float, float],
+) -> Tuple[float, float]:
+    return (_dot3(point_3d, basis_u), _dot3(point_3d, basis_v))
 
 
 def _detect_hole_contours_from_arcs(msp) -> Optional[Dict[str, List]]:
@@ -527,24 +666,23 @@ def _detect_hole_contours_from_arcs(msp) -> Optional[Dict[str, List]]:
                 start_angle = entity.dxf.start_angle
                 end_angle = entity.dxf.end_angle
                 
-                # Sample arc into multiple line segments (10-degree increments)
-                import math
-                angles = []
-                angle = start_angle
-                while angle < end_angle:
-                    angles.append(angle)
-                    angle += 10
-                angles.append(end_angle)
-                
+                # Sample arc into line segments; handle 360° wrap robustly.
+                delta = end_angle - start_angle
+                if delta <= 0.0:
+                    delta += 360.0
+                steps = max(8, int(delta / 5.0))
+
                 arc_pts = []
-                for a in angles:
-                    rad = math.radians(a)
+                center_z = float(getattr(center, 'z', 0.0))
+                for i in range(steps + 1):
+                    angle = start_angle + (delta * i / steps)
+                    rad = math.radians(angle)
                     x = center.x + radius * math.cos(rad)
                     y = center.y + radius * math.sin(rad)
-                    arc_pts.append((x, y))
-                
+                    arc_pts.append((x, y, center_z))
+
                 for i in range(len(arc_pts) - 1):
-                    entities.append(('line', arc_pts[i], arc_pts[i+1]))
+                    entities.append(('line', arc_pts[i], arc_pts[i + 1]))
             except Exception as e:
                 print(f"[DEBUG] Arc error: {e}")
                 pass
@@ -554,7 +692,11 @@ def _detect_hole_contours_from_arcs(msp) -> Optional[Dict[str, List]]:
             try:
                 p1 = entity.dxf.start
                 p2 = entity.dxf.end
-                entities.append(('line', (p1.x, p1.y), (p2.x, p2.y)))
+                entities.append((
+                    'line',
+                    (float(p1.x), float(p1.y), float(getattr(p1, 'z', 0.0))),
+                    (float(p2.x), float(p2.y), float(getattr(p2, 'z', 0.0))),
+                ))
             except:
                 pass
         
@@ -563,9 +705,41 @@ def _detect_hole_contours_from_arcs(msp) -> Optional[Dict[str, List]]:
             return None
         
         print(f"[DEBUG] Found {len(entities)} ARC/LINE segments")
+
+        all_points_3d = []
+        for _, point_a, point_b in entities:
+            all_points_3d.append(point_a)
+            all_points_3d.append(point_b)
+
+        basis = _estimate_planar_basis_from_points(all_points_3d)
+        if basis:
+            basis_u, basis_v = basis
+            projected_entities = [
+                (
+                    etype,
+                    _project_point_to_basis(point_a, basis_u, basis_v),
+                    _project_point_to_basis(point_b, basis_u, basis_v),
+                )
+                for etype, point_a, point_b in entities
+            ]
+            all_points_2d = [_project_point_to_basis(point, basis_u, basis_v) for point in all_points_3d]
+            print(f"[DEBUG] 3D->2D projection enabled for ARC/LINE contours")
+        else:
+            projected_entities = [(etype, (a[0], a[1]), (b[0], b[1])) for etype, a, b in entities]
+            all_points_2d = [(point[0], point[1]) for point in all_points_3d]
+            print(f"[DEBUG] Projection fallback to XY plane")
+
+        projected_bbox_2d = None
+        if all_points_2d:
+            xs = [point[0] for point in all_points_2d]
+            ys = [point[1] for point in all_points_2d]
+            projected_bbox_2d = {
+                'width': max(xs) - min(xs),
+                'height': max(ys) - min(ys),
+            }
         
         # Group entities into contours (closed loops)
-        contours = _group_entities_into_contours(entities)
+        contours = _group_entities_into_contours(projected_entities)
         
         if not contours:
             print(f"[WARN] No closed contours detected")
@@ -598,7 +772,10 @@ def _detect_hole_contours_from_arcs(msp) -> Optional[Dict[str, List]]:
         
         result = {
             'outer_loop': outer_loop,
-            'hole_loops': hole_loops
+            'hole_loops': hole_loops,
+            'all_points_2d': all_points_2d,
+            'projected_bbox_2d': projected_bbox_2d,
+            'source': 'arc_line',
         }
         
         # Add DXF bbox if available
@@ -700,6 +877,40 @@ def _group_entities_into_contours(entities: List) -> List[List]:
     return contours
 
 
+def _extract_obb_dimensions(shape_geometry) -> Optional[Tuple[float, float]]:
+    """Return (long_side, short_side) from minimum rotated rectangle."""
+    try:
+        if shape_geometry is None or shape_geometry.is_empty:
+            return None
+
+        obb = shape_geometry.minimum_rotated_rectangle
+        if not hasattr(obb, 'exterior'):
+            min_x, min_y, max_x, max_y = shape_geometry.bounds
+            span_x = max_x - min_x
+            span_y = max_y - min_y
+            if span_x <= 1e-9 or span_y <= 1e-9:
+                return None
+            return max(span_x, span_y), min(span_x, span_y)
+
+        coords = list(obb.exterior.coords)
+        if len(coords) < 5:
+            return None
+
+        edge_lengths = []
+        for i in range(4):
+            p1 = coords[i]
+            p2 = coords[i + 1]
+            edge_lengths.append(math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2))
+
+        edge_lengths = sorted(length for length in edge_lengths if length > 1e-9)
+        if len(edge_lengths) < 2:
+            return None
+
+        return edge_lengths[-1], edge_lengths[-2]
+    except Exception:
+        return None
+
+
 def _metrics_from_loops(loops: Dict[str, List]) -> Dict[str, Any]:
     """Calculate metrics from loop data using shapely.
     
@@ -725,6 +936,9 @@ def _metrics_from_loops(loops: Dict[str, List]) -> Dict[str, Any]:
         hole_loops = loops.get('hole_loops', [])
         face_area_3d = loops.get('face_area')  # Get original 3D face area if available
         bbox_dxf = loops.get('bbox_from_dxf')  # DXF header bounding box
+        all_points_2d = loops.get('all_points_2d', [])
+        projected_bbox_2d = loops.get('projected_bbox_2d')
+        loops_source = loops.get('source', '')
         
         if not outer_loop or len(outer_loop) < 3:
             return metrics
@@ -734,26 +948,41 @@ def _metrics_from_loops(loops: Dict[str, List]) -> Dict[str, Any]:
             metrics['box_x'] = bbox_dxf['width']
             metrics['box_y'] = bbox_dxf['height']
             print(f"[DEBUG] Using DXF bbox: {metrics['box_x']:.2f} x {metrics['box_y']:.2f}")
+        elif projected_bbox_2d:
+            width = float(projected_bbox_2d.get('width', 0.0))
+            height = float(projected_bbox_2d.get('height', 0.0))
+            metrics['box_x'] = max(width, height)
+            metrics['box_y'] = min(width, height)
+            print(f"[DEBUG] Using projected bbox: {metrics['box_x']:.2f} x {metrics['box_y']:.2f}")
         else:
-            # Create outer polygon and calculate OBB
-            outer_poly = Polygon(outer_loop)
-            
-            # Oriented Bounding Box (OBB)
-            obb = outer_poly.minimum_rotated_rectangle
-            edge_lengths = []
-            for i in range(4):
-                p1 = obb.exterior.coords[i]
-                p2 = obb.exterior.coords[(i + 1) % 4]
-                dist = math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
-                edge_lengths.append(dist)
-            
-            edge_lengths.sort()
-            metrics['box_x'] = edge_lengths[2]  # Second-longest edge
-            metrics['box_y'] = edge_lengths[1]  # Shorter edge (not diagonal)
-            print(f"[DEBUG] Using OBB: {metrics['box_x']:.2f} x {metrics['box_y']:.2f}")
+            obb_dims = None
+
+            if all_points_2d and len(all_points_2d) >= 3:
+                obb_dims = _extract_obb_dimensions(MultiPoint(all_points_2d))
+                if obb_dims:
+                    print(f"[DEBUG] Using projected point-cloud OBB: {obb_dims[0]:.2f} x {obb_dims[1]:.2f}")
+
+            if obb_dims is None:
+                outer_for_obb = Polygon(outer_loop)
+                if not outer_for_obb.is_valid:
+                    outer_for_obb = MultiPoint(outer_loop).convex_hull
+                obb_dims = _extract_obb_dimensions(outer_for_obb)
+                if obb_dims:
+                    print(f"[DEBUG] Using outer-loop OBB: {obb_dims[0]:.2f} x {obb_dims[1]:.2f}")
+
+            if obb_dims:
+                metrics['box_x'] = obb_dims[0]
+                metrics['box_y'] = obb_dims[1]
         
         # Create outer polygon for other metrics
         outer_poly = Polygon(outer_loop)
+        if not outer_poly.is_valid:
+            repaired = outer_poly.buffer(0)
+            if not repaired.is_empty:
+                if repaired.geom_type == 'MultiPolygon':
+                    outer_poly = max(repaired.geoms, key=lambda geom: geom.area)
+                else:
+                    outer_poly = repaired
         
         # Outer contour (perimeter)
         metrics['outer_contour'] = outer_poly.length
@@ -762,13 +991,24 @@ def _metrics_from_loops(loops: Dict[str, List]) -> Dict[str, Any]:
         hole_areas = []
         hole_perimeters = []
         total_hole_area = 0.0
+        outer_area_reference = abs(outer_poly.area)
+        outer_perimeter_reference = max(outer_poly.length, 1e-9)
         
         for hole_loop in hole_loops:
             if len(hole_loop) >= 3:
                 hole_poly = Polygon(hole_loop)
-                hole_perimeters.append(hole_poly.length)
-                hole_areas.append(hole_poly.area)
-                total_hole_area += hole_poly.area
+                hole_area = abs(hole_poly.area)
+                hole_perimeter = hole_poly.length
+
+                # ARC/LINE-derived contours can include duplicate shell loops from 3D DXF exports.
+                # Reject implausibly large "holes" in that mode.
+                if loops_source == 'arc_line':
+                    if hole_area >= outer_area_reference * 0.8 or hole_perimeter >= outer_perimeter_reference * 0.9:
+                        continue
+
+                hole_perimeters.append(hole_perimeter)
+                hole_areas.append(hole_area)
+                total_hole_area += hole_area
         
         metrics['nr_holes'] = len(hole_perimeters)
         metrics['hole_contours'] = '_'.join(f"{p:.2f}" for p in hole_perimeters)

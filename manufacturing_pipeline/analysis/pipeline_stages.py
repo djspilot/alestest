@@ -45,7 +45,11 @@ def run_geometry_and_topology_stages(
         step_file
     )
     if not production_only:
-        print("STEP file loaded successfully.")
+        xcaf_names = getattr(shape, "_xcaf_solid_names", None)
+        if xcaf_names:
+            print(f"STEP file loaded successfully (XCAF, {len(xcaf_names)} named solids).")
+        else:
+            print("STEP file loaded successfully.")
 
     # Stage 2: Detect holes
     holes = runner.get_or_run(

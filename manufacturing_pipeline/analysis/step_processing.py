@@ -21,11 +21,60 @@ import os
 import uuid
 from collections import Counter
 
+
+def _load_step_via_xcaf(filepath):
+    """Try to build a CadQuery object from XCAF solids; return None on failure."""
+    try:
+        from manufacturing_pipeline.core.xcaf_reader import xcaf_match_solids_to_names
+
+        result = xcaf_match_solids_to_names(filepath)
+        if result is None:
+            return None
+
+        solids, solid_names = result
+        if not solids:
+            return None
+
+        cq_solids = []
+        for solid in solids:
+            cq_solids.append(cq.Shape.cast(solid))
+
+        if len(cq_solids) == 1:
+            wp = cq.Workplane(obj=cq_solids[0])
+        else:
+            compound = cq.Compound.makeCompound(cq_solids)
+            wp = cq.Workplane(obj=compound)
+
+        # Optional metadata for downstream consumers that want deterministic naming.
+        try:
+            setattr(wp, "_xcaf_solid_names", list(solid_names))
+            setattr(wp, "_xcaf_source_step", str(filepath))
+        except Exception:
+            pass
+
+        return wp
+    except Exception:
+        return None
+
+
 def load_step_file(filepath):
     """
-    Load a STEP file and return the CadQuery Workplane/Shape.
+    Load and parse a STEP file and return a CadQuery Workplane/Shape.
+
+    Priority:
+    1) XCAF reader (direct product tree parsing)
+    2) CadQuery importer fallback
     """
-    # CadQuery's importer returns a Workplane object
+    if not filepath:
+        raise ValueError("STEP filepath is required")
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"STEP file not found: {filepath}")
+
+    xcaf_shape = _load_step_via_xcaf(filepath)
+    if xcaf_shape is not None:
+        return xcaf_shape
+
+    # CadQuery importer fallback (existing behavior)
     return cq.importers.importStep(filepath)
 
 def analyze_sheet_metal(solid):

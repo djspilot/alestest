@@ -2198,27 +2198,51 @@ def analyze_assembly(
     except Exception:
         shape = cq_object
 
-    # Try to get part counts from STEP file assembly structure first
-    step_parts_count = None
-    if step_file_path:
-        step_parts_count = parse_step_assembly_structure(step_file_path)
-    
-    # Collect all solids
+    # Solid extraction and name mapping
+    # Priority:
+    # 1) XCAF tree traversal (direct name-solid mapping)
+    # 2) Regex + volume matching (legacy fallback)
+    # 3) Generic Part_n names
+    xcaf_used = False
     solids = []
-    exp = TopExp_Explorer(shape, TopAbs_SOLID)
-    while exp.More():
-        solids.append(TopoDS.Solid_s(exp.Current()))
-        exp.Next()
+    solid_names = []
 
-    # STEP-GUIDED GROUPING
-    # Priority for exporter compatibility:
-    # 1) SHAPE_REPRESENTATION counts (best geometry-order signal)
-    # 2) NEXT_ASSEMBLY_USAGE_OCCURRENCE counts (assembly fallback)
-    # 3) Generic Part_n names (safe default)
-    shape_rep_counts = parse_step_shape_rep_name_counts(step_file_path) if step_file_path else None
-    name_source_counts = shape_rep_counts if shape_rep_counts else step_parts_count
+    # Primary method: XCAF direct mapping.
+    if step_file_path:
+        try:
+            from manufacturing_pipeline.core.xcaf_reader import xcaf_match_solids_to_names
 
-    # Phase 1: Build reference databases for accurate matching and classification.
+            xcaf_result = xcaf_match_solids_to_names(step_file_path)
+            if xcaf_result is not None:
+                xcaf_solids, xcaf_names = xcaf_result
+                if xcaf_solids:
+                    solids = xcaf_solids
+                    solid_names = xcaf_names
+                    xcaf_used = True
+        except Exception:
+            xcaf_used = False
+
+    # Fallback path: existing parser + volume matching flow.
+    if not xcaf_used:
+        step_parts_count = None
+        if step_file_path:
+            step_parts_count = parse_step_assembly_structure(step_file_path)
+
+        exp = TopExp_Explorer(shape, TopAbs_SOLID)
+        while exp.More():
+            solids.append(TopoDS.Solid_s(exp.Current()))
+            exp.Next()
+
+        shape_rep_counts = parse_step_shape_rep_name_counts(step_file_path) if step_file_path else None
+        name_source_counts = shape_rep_counts if shape_rep_counts else step_parts_count
+
+        if name_source_counts:
+            reference_database = _build_reference_database()
+            solid_names = _match_solids_to_names_bipartite(solids, name_source_counts, assembly_name, reference_database)
+        else:
+            solid_names = [f"Part_{idx+1}" for idx in range(len(solids))]
+
+    # Reference databases are still used by classification/cost phases.
     reference_database = _build_reference_database()
     reference_classifications = _build_reference_classifications()
 
@@ -2231,14 +2255,6 @@ def analyze_assembly(
         reference_classifications.get(reference_assembly_key, {}) if reference_assembly_key else {}
     )
     
-    # Phase 2: Match solids to names using volume-based matching with reference data
-    # This fixes the issue where OCP solid extraction order != STEP parser order
-    if name_source_counts:
-        solid_names = _match_solids_to_names_bipartite(solids, name_source_counts, assembly_name, reference_database)
-    else:
-        # No parser data: assign generic names
-        solid_names = [f"Part_{idx+1}" for idx in range(len(solids))]
-
     # Phase 2: Group solids by their assigned STEP name
     grouped_solids = []  # [(representative_solid, count, volume, dims, part_name)]
     part_name_to_solid = {}

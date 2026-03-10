@@ -79,6 +79,15 @@ try:
 except ImportError:
     HAS_CUT_FEATURES = False
 
+try:
+    from manufacturing_pipeline.core.xcaf_reader import (
+        xcaf_get_name_counts,
+        xcaf_match_solids_to_names,
+    )
+    HAS_XCAF_READER = True
+except ImportError:
+    HAS_XCAF_READER = False
+
 
 # -----------------------------------------------------------------------------
 # Feature schema (structured and extendable)
@@ -544,6 +553,75 @@ def _format_float(value: float, precision: int = 2) -> str:
     return formatted if formatted else '0'
 
 
+def _estimate_sheet_thickness_for_unfold(
+    raw_thickness: float,
+    bend_radii: Optional[List[float]] = None,
+    unfold_thickness: float = 0.0,
+    flat_length: float = 0.0,
+    flat_width: float = 0.0,
+) -> float:
+    """Estimate physical sheet thickness for unfold plausibility checks.
+
+    Raw box-derived thickness can be very wrong for bent parts (e.g. arm height).
+    Prefer unfold-reported thickness or bend inner radii, and only trust raw
+    thickness when it is plausible relative to unfolded extents.
+    """
+    candidates: List[float] = []
+
+    flat_min = min(flat_length, flat_width) if flat_length > 0 and flat_width > 0 else 0.0
+    plausible_max = flat_min * 0.35 if flat_min > 0 else 0.0
+
+    def _add_candidate(value: float) -> None:
+        if value is None:
+            return
+        try:
+            val = float(value)
+        except Exception:
+            return
+        if val <= 0:
+            return
+        if plausible_max > 0 and val > plausible_max:
+            return
+        candidates.append(val)
+
+    _add_candidate(unfold_thickness)
+
+    if bend_radii:
+        for radius in bend_radii:
+            _add_candidate(radius)
+
+    _add_candidate(raw_thickness)
+
+    if not candidates:
+        return 0.0
+
+    return min(candidates)
+
+
+def _is_plausible_unfold_dims(
+    flat_length: float,
+    flat_width: float,
+    raw_thickness: float,
+    bend_radii: Optional[List[float]] = None,
+    unfold_thickness: float = 0.0,
+) -> bool:
+    """Return True when unfolded dimensions look physically plausible."""
+    if flat_length <= 0 or flat_width <= 0:
+        return False
+
+    estimated_thickness = _estimate_sheet_thickness_for_unfold(
+        raw_thickness=raw_thickness,
+        bend_radii=bend_radii,
+        unfold_thickness=unfold_thickness,
+        flat_length=flat_length,
+        flat_width=flat_width,
+    )
+
+    expected_min = max(2.0, estimated_thickness * 3.0) if estimated_thickness > 0 else 2.0
+    min_flat = min(flat_length, flat_width)
+    return min_flat > expected_min
+
+
 def _infer_material(category: str) -> str:
     """Infer material type from part category.
 
@@ -694,7 +772,22 @@ def export_bom_to_xml(
     # 3. Fallback to sequential product names
     # 4. Generate: {base_name}-p1, {base_name}-p2, etc.
     
-    step_parts = parse_step_assembly_structure(str(step_path)) if HAS_ASSEMBLY_GEOM else None
+    # Primary naming source: XCAF product tree counts.
+    xcaf_name_counts = None
+    if HAS_XCAF_READER:
+        try:
+            xcaf_name_counts = xcaf_get_name_counts(str(step_path))
+            if xcaf_name_counts:
+                print(
+                    "  [XCAF] Name source active: "
+                    f"{len(xcaf_name_counts)} unique names"
+                )
+        except Exception:
+            xcaf_name_counts = None
+
+    step_parts = xcaf_name_counts
+    if not step_parts and HAS_ASSEMBLY_GEOM:
+        step_parts = parse_step_assembly_structure(str(step_path))
     step_product_names = None
     
     if not step_parts and HAS_ASSEMBLY_GEOM:
@@ -844,6 +937,23 @@ def export_bom_to_xml(
 
     # Build representative solids and a name-aware mapping for robust BOM matching.
     representative_solids = _build_representative_solids(doc)
+
+    # If available, align representative solids with XCAF extraction order.
+    # This keeps solid indices stable with XCAF-derived part names.
+    if HAS_XCAF_READER:
+        try:
+            xcaf_result = xcaf_match_solids_to_names(str(step_path))
+            if xcaf_result is not None:
+                xcaf_solids, _xcaf_names = xcaf_result
+                if xcaf_solids and len(xcaf_solids) == len(representative_solids):
+                    representative_solids = xcaf_solids
+                    print(
+                        "  [XCAF] Using XCAF solid order for XML mapping: "
+                        f"{len(representative_solids)} solids"
+                    )
+        except Exception:
+            pass
+
     part_name_to_solid_indices = _build_part_name_to_solid_indices(
         str(step_path),
         representative_solids,
@@ -1195,10 +1305,34 @@ def _build_part_name_to_solid_indices(step_file_path: str, solids: List[Any]) ->
     3) Match names to solids via assembly-analysis volume matcher when available.
     4) Fallback to sequential expansion by count.
     """
-    if not HAS_ASSEMBLY_GEOM or not solids:
+    if not solids:
+        return {}
+
+    if not HAS_ASSEMBLY_GEOM and not HAS_XCAF_READER:
         return {}
 
     step_path = str(step_file_path) if step_file_path else ""
+
+    # Primary strategy: direct XCAF name/solid mapping.
+    if HAS_XCAF_READER and step_path:
+        try:
+            xcaf_result = xcaf_match_solids_to_names(step_path)
+            if xcaf_result is not None:
+                xcaf_solids, xcaf_names = xcaf_result
+                if xcaf_solids and xcaf_names and len(xcaf_solids) == len(solids):
+                    mapping: Dict[str, List[int]] = {}
+                    for solid_idx, assigned_name in enumerate(xcaf_names):
+                        key = _normalize_part_name(str(assigned_name or ""))
+                        if not key:
+                            continue
+                        if key not in mapping:
+                            mapping[key] = []
+                        mapping[key].append(solid_idx)
+                    if mapping:
+                        return mapping
+        except Exception:
+            pass
+
     shape_rep_counts = parse_step_shape_rep_name_counts(step_path) if step_path else None
     step_parts_counts = parse_step_assembly_structure(step_path) if step_path else None
     name_source_counts = shape_rep_counts if shape_rep_counts else step_parts_counts
@@ -1631,10 +1765,14 @@ def _process_plaat_item(
                         calc_result.find('Sheet_BendLength').text = '_'.join(_format_float(l) for l in bend_lengths)
                         flat_length = float(unfold_result.get('flat_length', 0) or 0)
                         flat_width = float(unfold_result.get('flat_width', 0) or 0)
-                        min_flat = min(flat_length, flat_width)
-                        expected_min = max(2.0, thickness * 3.0) if thickness > 0 else 2.0
-                        # Reject clearly implausible unfold dimensions (e.g., one axis collapsing to thickness)
-                        if flat_length > 0 and flat_width > 0 and min_flat > expected_min:
+                        unfold_thickness = float(unfold_result.get('thickness', 0) or 0)
+                        if _is_plausible_unfold_dims(
+                            flat_length=flat_length,
+                            flat_width=flat_width,
+                            raw_thickness=thickness,
+                            bend_radii=bend_radii,
+                            unfold_thickness=unfold_thickness,
+                        ):
                             calc_result.find('Sheet_BoxX').text = _format_float(flat_length)
                             calc_result.find('Sheet_BoxY').text = _format_float(flat_width)
                             length = flat_length
@@ -1684,9 +1822,15 @@ def _process_plaat_item(
                     if unfold_result and unfold_result.get('success'):
                         flat_length = float(unfold_result.get('flat_length', 0) or 0)
                         flat_width = float(unfold_result.get('flat_width', 0) or 0)
-                        min_flat = min(flat_length, flat_width)
-                        expected_min = max(2.0, thickness * 3.0) if thickness > 0 else 2.0
-                        if flat_length > 0 and flat_width > 0 and min_flat > expected_min:
+                        unfold_thickness = float(unfold_result.get('thickness', 0) or 0)
+                        unfold_radii = unfold_result.get('bend_radii') or []
+                        if _is_plausible_unfold_dims(
+                            flat_length=flat_length,
+                            flat_width=flat_width,
+                            raw_thickness=thickness,
+                            bend_radii=unfold_radii,
+                            unfold_thickness=unfold_thickness,
+                        ):
                             print(f"    [OK] Unfold: {flat_length:.1f} x {flat_width:.1f} mm")
                             calc_result.find('Sheet_BoxX').text = _format_float(flat_length)
                             calc_result.find('Sheet_BoxY').text = _format_float(flat_width)
@@ -1825,11 +1969,16 @@ def _process_plaat_item(
         if unfold_result and unfold_result.get('success'):
             flat_length = float(unfold_result.get('flat_length', 0) or 0)
             flat_width = float(unfold_result.get('flat_width', 0) or 0)
-
-            min_flat = min(flat_length, flat_width)
-            expected_min = max(2.0, thickness * 3.0) if thickness > 0 else 2.0
             if flat_length > 0 and flat_width > 0:
-                if min_flat > expected_min:
+                unfold_thickness = float(unfold_result.get('thickness', 0) or 0)
+                unfold_radii = unfold_result.get('bend_radii') or []
+                if _is_plausible_unfold_dims(
+                    flat_length=flat_length,
+                    flat_width=flat_width,
+                    raw_thickness=thickness,
+                    bend_radii=unfold_radii,
+                    unfold_thickness=unfold_thickness,
+                ):
                     print(f"    [OK] Unfold (fallback): {flat_length:.1f} x {flat_width:.1f} mm")
                     calc_result.find('Sheet_BoxX').text = _format_float(flat_length)
                     calc_result.find('Sheet_BoxY').text = _format_float(flat_width)
