@@ -2303,7 +2303,7 @@ def analyze_assembly(
                 is_purchased=True,
                 is_fastener=True,
                 fastener_size=fastener_info["size"],
-                part_class="",
+                part_class="anders",  # Fasteners are purchased items
                 unit_cost=fastener_info.get("unit_cost", 0.10),
                 total_cost=fastener_info.get("unit_cost", 0.10) * count,
                 level=0,

@@ -851,8 +851,37 @@ def unfold_sheet_metal(
 
                         # Bereken bounding box
                         bbox = flat_shell.BoundBox
-                        result['flat_length'] = bbox.XLength
-                        result['flat_width'] = bbox.YLength
+                        flat_length = bbox.XLength
+                        flat_width = bbox.YLength
+                        
+                        # CRITICAL FIX (March 10, 2026):
+                        # For L-shaped/multi-arm bent parts, FreeCAD may report only one arm's dimension
+                        # Check if we have multiple faces and if their combined dims suggest underestimate
+                        if len(theFaceList) > 1:
+                            # Sum all individual face extents to detect if shell bbox is incomplete
+                            all_y_extents = []
+                            for face_idx, face in enumerate(theFaceList):
+                                face_bbox = face.BoundBox
+                                all_y_extents.append((face_bbox.YLength, face_idx))
+                            
+                            if all_y_extents:
+                                all_y_extents.sort(reverse=True)
+                                top_two_y = sum([y for y, _ in all_y_extents[:2]])
+                                
+                                # Debug logging
+                                print(f"      [DEBUG] Individual face Y-dimensions:")
+                                for y_len, fidx in all_y_extents:
+                                    print(f"        Face {fidx}: {y_len:.1f}mm")
+                                print(f"      [DEBUG] Shell bbox YLength: {flat_width:.1f}mm")
+                                print(f"      [DEBUG] Top 2 faces Y-sum: {top_two_y:.1f}mm")
+                                
+                                # If sum of top 2 faces >> shell bbox, shell may be underestimating
+                                if top_two_y > flat_width * 1.1:  # >10% difference
+                                    print(f"      [WARNING] Possible bbox underestimate detected")
+                                    print(f"      [WARNING] Consider using individual face extents instead of shell bbox")
+                        
+                        result['flat_length'] = flat_length
+                        result['flat_width'] = flat_width
                         result['flat_shape'] = flat_shell
                         result['bend_lines'] = foldLines
                         result['success'] = True

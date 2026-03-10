@@ -29,10 +29,15 @@ except ImportError:
     HAS_UNFOLD = False
 
 try:
-    from manufacturing_pipeline.analysis.sheetmetal_analysis import MATERIAL_BEND_PROPERTIES
+    from manufacturing_pipeline.analysis.sheetmetal_analysis import (
+        MATERIAL_BEND_PROPERTIES,
+        analyze_sheet_metal_geometry,
+    )
     HAS_MATERIAL_PROPS = True
+    HAS_SHEETMETAL_ANALYSIS = True
 except ImportError:
     HAS_MATERIAL_PROPS = False
+    HAS_SHEETMETAL_ANALYSIS = False
 
 try:
     import cadquery as cq
@@ -884,34 +889,36 @@ def export_bom_to_xml(
 
         part_solid = None
         normalized_bom_name = _normalize_part_name(str(bom_item.get('part_name', '') or ''))
-        selected_solid_idx = _select_solid_index_for_bom_item(
-            bom_item=bom_item,
-            normalized_bom_name=normalized_bom_name,
-            preferred_idx=idx - 1,
-            total_solids=len(representative_solids),
-            part_name_to_solid_indices=part_name_to_solid_indices,
-            solid_volumes_mm3=solid_volumes_mm3,
-            used_indices=used_solid_indices,
-            default_material=material,
-        )
+        selected_solid_idx = None
+        if part_class in ('plaat', 'profiel'):
+            selected_solid_idx = _select_solid_index_for_bom_item(
+                bom_item=bom_item,
+                normalized_bom_name=normalized_bom_name,
+                preferred_idx=idx - 1,
+                total_solids=len(representative_solids),
+                part_name_to_solid_indices=part_name_to_solid_indices,
+                solid_volumes_mm3=solid_volumes_mm3,
+                used_indices=used_solid_indices,
+                default_material=material,
+            )
 
-        if selected_solid_idx is not None:
-            used_solid_indices.add(selected_solid_idx)
-            part_solid = representative_solids[selected_solid_idx]
+            if selected_solid_idx is not None:
+                used_solid_indices.add(selected_solid_idx)
+                part_solid = representative_solids[selected_solid_idx]
 
-            # Keep output naming aligned with the solid that was actually selected.
-            canonical_name = solid_index_to_name.get(selected_solid_idx)
-            if canonical_name:
-                current_name = str(bom_item.get('part_name', '') or '').strip()
-                current_norm = _normalize_part_name(current_name)
-                if canonical_name != current_norm:
-                    print(
-                        f"    [INFO] Renaming by solid match: "
-                        f"{current_name or '<empty>'} -> {canonical_name}"
-                    )
-                    bom_item['part_name'] = canonical_name
+                # Keep output naming aligned with the solid that was actually selected.
+                canonical_name = solid_index_to_name.get(selected_solid_idx)
+                if canonical_name:
+                    current_name = str(bom_item.get('part_name', '') or '').strip()
+                    current_norm = _normalize_part_name(current_name)
+                    if canonical_name != current_norm:
+                        print(
+                            f"    [INFO] Renaming by solid match: "
+                            f"{current_name or '<empty>'} -> {canonical_name}"
+                        )
+                        bom_item['part_name'] = canonical_name
 
-        if part_solid is None:
+        if part_class in ('plaat', 'profiel') and part_solid is None:
             print(
                 f"    [WARN] No representative solid for BOM line {idx} "
                 f"(available solids: {len(representative_solids)})"
@@ -979,16 +986,38 @@ def export_bom_to_xml(
     ET.SubElement(doc_control, 'Aantal_Profiel').text = str(class_counts['profiel'])
     ET.SubElement(doc_control, 'Aantal_Anders').text = str(class_counts['anders'])
     ET.SubElement(doc_control, 'Aantal_NietGeclassificeerd').text = str(unclassified_count)
-    ET.SubElement(doc_control, 'Status').text = 'OK' if processed_count == len(bom_list) else 'INCOMPLETE'
+    
+    # CONTROLE: Verschil tussen BOM items en geëxporteerde items
+    verschil = len(bom_list) - processed_count
+    ET.SubElement(doc_control, 'Controle_Verschil_BOM_Exported').text = str(verschil)
+    
+    # Status bepaling
+    status = 'OK'
+    waarschuwingen = []
+    
+    if processed_count != len(bom_list):
+        status = 'INCOMPLETE'
+        waarschuwingen.append(f'{verschil} BOM items niet verwerkt')
+    
+    if unclassified_count > 0:
+        if status == 'OK':
+            status = 'WARNING'
+        waarschuwingen.append(f'{unclassified_count} items zonder classificatie')
+    
+    ET.SubElement(doc_control, 'Status').text = status
     ET.SubElement(doc_control, 'Classificatie_Status').text = 'OK' if unclassified_count == 0 else 'UNCLASSIFIED_PARTS'
+    
+    if waarschuwingen:
+        ET.SubElement(doc_control, 'Waarschuwingen').text = '; '.join(waarschuwingen)
     
     # Insert at the beginning of root
     root.insert(0, doc_control)
     
     print(
         f"\n[INFO] Document control: Regels={len(bom_list)}, Stuks={bom_piece_count}, "
-        f"Verwerkt={processed_count}, NietGeclassificeerd={unclassified_count}, "
-        f"Status={'OK' if processed_count == len(bom_list) else 'INCOMPLETE'}"
+        f"Verwerkt={processed_count}, Verschil={verschil}, "
+        f"NietGeclassificeerd={unclassified_count}, "
+        f"Status={status}"
     )
 
     _print_feature_coverage_summary(feature_coverage)
@@ -1415,6 +1444,31 @@ def _extract_dims_from_solid(part_solid) -> tuple:
         return (0.0, 0.0, 0.0)
 
 
+def _snap_sheet_thickness(thickness_value: float) -> float:
+    """Snap thickness to a nearby standard gauge when within a small tolerance."""
+    try:
+        value = float(thickness_value or 0.0)
+    except Exception:
+        return thickness_value
+
+    if value <= 0:
+        return value
+
+    standard_values = [
+        0.8, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0,
+        5.0, 6.0, 8.0, 10.0, 12.0, 15.0, 20.0, 25.0, 30.0,
+    ]
+
+    nearest = min(standard_values, key=lambda candidate: abs(candidate - value))
+    rel_diff = abs(nearest - value) / max(nearest, 1e-9)
+
+    # Snap only when very close (3%) to avoid masking real geometry differences.
+    if rel_diff <= 0.03:
+        return nearest
+
+    return value
+
+
 def _process_plaat_item(
     bom_item: Dict[str, Any],
     step_path: Path,
@@ -1669,6 +1723,63 @@ def _process_plaat_item(
         except Exception as e:
             print(f"    [WARN] Analysis: {str(e)[:40]}")
 
+    # Robust fallback: detect bends/thickness from sheetmetal analyzer directly.
+    # This catches cases where planar-face heuristics classify as flat,
+    # while geometry actually contains bends (e.g. 10001091136_Rev_00).
+    if HAS_SHEETMETAL_ANALYSIS and part_solid is not None:
+        try:
+            sm_data = analyze_sheet_metal_geometry(part_solid)
+
+            sm_thickness = float(sm_data.get('thickness', 0) or 0)
+            if sm_thickness > 0 and (
+                thickness <= 0 or thickness > (sm_thickness * 1.8)
+            ):
+                thickness = sm_thickness
+                thickness_elem = calc_result.find('Sheet_Thickness')
+                if thickness_elem is not None:
+                    thickness_elem.text = _format_float(thickness)
+
+            current_bends = int(calc_result.findtext('Sheet_NrBends', '0') or 0)
+            sm_bend_count = int(
+                sm_data.get('bend_count_for_erp', 0)
+                or sm_data.get('bend_count', 0)
+                or 0
+            )
+            sm_bends = list(sm_data.get('bends') or [])
+
+            if current_bends == 0 and sm_bend_count > 0 and sm_bends:
+                used_bends = sm_bends[:sm_bend_count]
+                bend_angles = []
+                bend_radii = []
+                bend_lengths = []
+
+                for bend in used_bends:
+                    angle = float(getattr(bend, 'angle', 0) or 0)
+                    radius = float(getattr(bend, 'inner_radius', 0) or 0)
+                    bend_len = float(getattr(bend, 'bend_length', 0) or 0)
+
+                    bend_angles.append(angle)
+                    bend_radii.append(radius)
+                    bend_lengths.append(bend_len)
+
+                calc_result.find('Sheet_NrBends').text = str(sm_bend_count)
+                calc_result.find('Sheet_BendAngles').text = '_'.join(
+                    _format_float(v) for v in bend_angles
+                )
+                calc_result.find('Sheet_BendInnerRadii').text = '_'.join(
+                    _format_float(v) for v in bend_radii
+                )
+                calc_result.find('Sheet_BendLength').text = '_'.join(
+                    _format_float(v) for v in bend_lengths
+                )
+
+                print(
+                    f"    [INFO] Sheetmetal fallback: "
+                    f"{sm_bend_count} bends, thickness={sm_thickness:.2f} mm"
+                )
+        except Exception as e:
+            print(f"    [WARN] Sheetmetal fallback failed: {str(e)[:60]}")
+
     # If reference XML provided explicit bends/holes counts, enforce those as final
     if reference_values is not None:
         if 'nr_bends' in reference_values:
@@ -1838,11 +1949,33 @@ def _process_plaat_item(
             print(f"    [WARN] DXF processing failed: {str(e)[:80]}")
     
     elif HAS_DXF_METRICS and part_solid is not None and nr_bends_value > 0 and calc_result.findtext('Sheet_UnfoldSuccess', 'False') == 'True':
-        # Unfolded plate - generate DXF from unfolded state
+        # Bent plate: when an unfold DXF exists, extract hole/contour/area metrics from it.
         try:
-            # Use same DXF generation for unfolded (no FreeCAD unfold output available here)
-            # This is for future use if we capture unfolded solids
-            pass
+            dxf_path_text = (calc_result.findtext('Sheet_FilePathDXF') or '').strip()
+            if dxf_path_text:
+                dxf_path = Path(dxf_path_text)
+                if dxf_path.exists():
+                    dxf_metrics = extract_metrics_from_dxf(dxf_path)
+                    if dxf_metrics:
+                        nr_holes = int(dxf_metrics.get('nr_holes', 0) or 0)
+                        hole_contours = dxf_metrics.get('hole_contours', '') or ''
+
+                        calc_result.find('Sheet_NrHoles').text = str(nr_holes)
+                        calc_result.find('Sheet_HoleContours').text = hole_contours
+
+                        outer_contour_dxf = float(dxf_metrics.get('outer_contour', 0.0) or 0.0)
+                        total_contour_dxf = float(dxf_metrics.get('total_contour', 0.0) or 0.0)
+                        area_no_holes = float(dxf_metrics.get('area_no_holes', 0.0) or 0.0)
+                        top_area_dxf = float(dxf_metrics.get('top_area', 0.0) or 0.0)
+
+                        if outer_contour_dxf > 0:
+                            dxf_metric_overrides['outer_contour'] = outer_contour_dxf
+                        if total_contour_dxf > 0:
+                            dxf_metric_overrides['total_contour'] = total_contour_dxf
+                        if area_no_holes > 0:
+                            dxf_metric_overrides['area_no_holes'] = area_no_holes
+                        if top_area_dxf > 0:
+                            dxf_metric_overrides['top_area'] = top_area_dxf
         except Exception as e:
             print(f"    [WARN] Unfolded DXF processing failed: {str(e)[:80]}")
 
@@ -1855,25 +1988,39 @@ def _process_plaat_item(
         except Exception:
             solid_volume = 0.0
 
-    # Top area (flat surface for sheet metal)
+    # Top area (flat surface for sheet metal).
+    # For bent parts without reference/DXF area, prefer solid_volume / thickness,
+    # which is much more stable than bbox length*width for formed geometry.
     top_area = dxf_metric_overrides['top_area'] if dxf_metric_overrides['top_area'] is not None else (length * width)
+    if (
+        reference_values is None
+        and nr_bends_value > 0
+        and solid_volume > 0
+        and thickness > 0
+    ):
+        derived_top_area = solid_volume / thickness
+        if derived_top_area > 0:
+            top_area = derived_top_area
     ET.SubElement(calc_result, 'Sheet_TopArea').text = _format_float(top_area)
 
     # Bottom area (same as top for sheet metal)
     bottom_area = top_area
     ET.SubElement(calc_result, 'Sheet_BottomArea').text = _format_float(bottom_area)
 
-    # Bent parts can report an inflated bbox-based thickness. If we have true
-    # solid volume, infer a more realistic sheet thickness from area.
-    if nr_bends_value > 0 and solid_volume > 0 and top_area > 0:
+    # Derive sheet thickness from true solid volume and top area when bbox-based
+    # thickness is unreliable (rotated/non-axis-aligned plates and formed parts).
+    # Keep reference XML values authoritative when provided.
+    if reference_values is None and solid_volume > 0 and top_area > 0:
         estimated_thickness = solid_volume / top_area
-        if 0.2 <= estimated_thickness <= 30.0 and (
-            thickness <= 0 or thickness > (estimated_thickness * 1.8)
-        ):
-            thickness = estimated_thickness
-            thickness_elem = calc_result.find('Sheet_Thickness')
-            if thickness_elem is not None:
-                thickness_elem.text = _format_float(thickness)
+        if 0.2 <= estimated_thickness <= 60.0:
+            estimated_thickness = _snap_sheet_thickness(estimated_thickness)
+            lower = estimated_thickness * 0.65
+            upper = estimated_thickness * 1.35
+            if thickness <= 0 or thickness < lower or thickness > upper:
+                thickness = estimated_thickness
+                thickness_elem = calc_result.find('Sheet_Thickness')
+                if thickness_elem is not None:
+                    thickness_elem.text = _format_float(thickness)
 
     approx_volume = length * width * thickness
     volume = solid_volume if solid_volume > 0 else approx_volume

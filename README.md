@@ -1,5 +1,32 @@
 # ALES Manufacturing Pipeline
 
+**Laatste update:** 10 maart 2026  
+**Versie:** 2.3 (GEZETTE PLAAT Feature Validation - Analyse Fase)
+
+### v2.3 Status: ANALYSE (10 maart 2026)
+
+**Bevindingen van vandaag:**
+- ✅ **Naamkoppeling (solid → part naam) werkt nu correct** voor 10001091875_Rev_00
+- 🔴 **CRITICAL BUG gevonden**: `Sheet_BoxY` incorrect (238mm i.p.v. 272mm) - zie [CRITICAL_BUG_BoxY_Dimension.md](CRITICAL_BUG_BoxY_Dimension.md)
+- 🔴 **NrHoles incorrect**: 6 gevonden i.p.v. 11 (DXF ARC/LINE primitieven i.p.v. LWPOLYLINE)
+
+**Root Cause BoxY (238 → 272mm)**:
+```
+FreeCAD unfold rapporteert de BoundBox van slechts één arm.
+Correct berekend:
+  Arm 1: 238mm - 8mm (dikte) = 230mm (uitgeslagen)
+  Arm 2:  50mm - 8mm (dikte) =  42mm (uitgeslagen)
+  TOTAAL UITGESLAGEN  =  272mm  ← verwacht
+```
+De fix vereist dat `freecad_unfold.py` de **som van alle uitgeslagen armen** berekent en niet de BoundBox van de shell.
+
+**Volgende stappen:**
+1. Fix `freecad_unfold.py` - someer individuele arm-lengtes ipv Shell BoundBox
+2. Fix NrHoles - DXF ARC/LINE contour detectie
+3. Volledige validatie priority-1 features GEZETTE PLAAT
+
+---
+
 **Laatste update:** 4 maart 2026  
 **Versie:** 2.2 ✓ COMMITTED (Profile Robustness + Koker Dikte Fix)
 
@@ -99,7 +126,7 @@ python test_bom_to_xml.py path/to/assembly.stp
 - **⭐ Gatdetectie + Snijdata (Fase 1: plaat/gezette plaat)** — 
   - Cylindrische gaten + vormgaten (slots/rectangles) met perimeters
   - Gatcontours, buitencontour, totale snijlengte
-  - X/Y box dimensions
+10000503252_Rev_00  - X/Y box dimensions
   - Flat pattern analyse (na unfold) of 3D fallback
 - **Zetanalyse** — Telt productierelevante zettingen, sluit profielen en afrondingen uit
 - **Plaatwerk ontvouwen** — FreeCAD SheetMetal workbench met multi-poging strategie (gezette_plaat only)

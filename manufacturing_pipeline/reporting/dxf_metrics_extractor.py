@@ -98,6 +98,10 @@ def extract_metrics_from_dxf(dxf_path: Path) -> Optional[Dict[str, Any]]:
     - total_contour: Sum of outer + hole perimeters
     - area_no_holes: Area of flat pattern minus holes
     - top_area: Area of flat pattern (same as area_no_holes for sheets)
+    
+    Supports both:
+    - Python-generated DXF (with LWPOLYLINE layers 'outer', 'hole_*')
+    - FreeCAD-generated DXF (with ARC/LINE contours)
     """
     if not HAS_EZDXF or not HAS_SHAPELY:
         print(f"[WARN] Metrics extraction requires ezdxf and shapely")
@@ -111,7 +115,19 @@ def extract_metrics_from_dxf(dxf_path: Path) -> Optional[Dict[str, Any]]:
         doc = ezdxf.readfile(str(dxf_path))
         msp = doc.modelspace()
         
+        # Try LWPOLYLINE approach first (Python-generated DXF)
         loops = _read_polylines_from_dxf(msp)
+        
+        # Fallback: detect holes from ARC/LINE contours (FreeCAD-generated DXF)
+        if not loops or not loops.get('hole_loops') or len(loops.get('hole_loops', [])) == 0:
+            print(f"[DEBUG] LWPOLYLINE holes not found, trying ARC/LINE contour detection...")
+            loops_alt = _detect_hole_contours_from_arcs(msp)
+            if loops_alt and loops_alt.get('hole_loops'):
+                if loops.get('outer_loop'):
+                    # Keep outer loop from LWPOLYLINE, add holes from ARC/LINE
+                    loops_alt['outer_loop'] = loops['outer_loop']
+                loops = loops_alt
+        
         if not loops or not loops.get('outer_loop'):
             print(f"[WARN] No polylines found in DXF")
             return None
@@ -451,8 +467,245 @@ def _read_polylines_from_dxf(msp) -> Optional[Dict[str, List]]:
         return None
 
 
+def _detect_hole_contours_from_arcs(msp) -> Optional[Dict[str, List]]:
+    """Detect hole contours from ARC and LINE entities (FreeCAD-generated DXF).
+    
+    FreeCAD exports sheet metal unfolds as ARC/LINE entities forming closed loops.
+    This function:
+    1. Collects all ARC and LINE entities
+    2. Groups them into closed contours (loops)
+    3. Identifies outer loop (largest area) and inner loops (holes)
+    
+    Returns dict with 'outer_loop', 'hole_loops', and 'bbox_from_dxf'.
+    """
+    try:
+        from shapely.geometry import Polygon, LineString, box as shapely_box
+        from shapely.ops import unary_union
+    except ImportError:
+        print(f"[WARN] Shapely required for ARC/LINE detection")
+        return None
+    
+    try:
+        # Try to get DXF extents first (before parsing entities)
+        # ezdxf: msp is a Modelspace, access doc via context
+        try:
+            doc = None
+            # Try to get document from msp
+            if hasattr(msp, 'doc'):
+                doc = msp.doc
+            elif hasattr(msp, 'dxf'):
+                # Alternative: get via dxf attribute
+                if hasattr(msp.dxf, 'doc'):
+                    doc = msp.dxf.doc
+            
+            bbox_from_dxf = None
+            if doc:
+                extmin = doc.header.get('$EXTMIN', None)
+                extmax = doc.header.get('$EXTMAX', None)
+                
+                if extmin and extmax:
+                    bbox_from_dxf = {
+                        'x_min': extmin[0],
+                        'y_min': extmin[1],
+                        'x_max': extmax[0],
+                        'y_max': extmax[1],
+                        'width': extmax[0] - extmin[0],
+                        'height': extmax[1] - extmin[1]
+                    }
+                    print(f"[DEBUG] DXF BBox from header: X={bbox_from_dxf['width']:.2f}, Y={bbox_from_dxf['height']:.2f}")
+        except Exception as e:
+            print(f"[DEBUG] Could not get DXF header bbox: {e}")
+            bbox_from_dxf = None
+        
+        entities = []
+        
+        # Collect all ARC and LINE entities with coordinates
+        for entity in msp.query('ARC'):
+            try:
+                center = entity.dxf.center
+                radius = entity.dxf.radius
+                start_angle = entity.dxf.start_angle
+                end_angle = entity.dxf.end_angle
+                
+                # Sample arc into multiple line segments (10-degree increments)
+                import math
+                angles = []
+                angle = start_angle
+                while angle < end_angle:
+                    angles.append(angle)
+                    angle += 10
+                angles.append(end_angle)
+                
+                arc_pts = []
+                for a in angles:
+                    rad = math.radians(a)
+                    x = center.x + radius * math.cos(rad)
+                    y = center.y + radius * math.sin(rad)
+                    arc_pts.append((x, y))
+                
+                for i in range(len(arc_pts) - 1):
+                    entities.append(('line', arc_pts[i], arc_pts[i+1]))
+            except Exception as e:
+                print(f"[DEBUG] Arc error: {e}")
+                pass
+        
+        # Collect LINE entities
+        for entity in msp.query('LINE'):
+            try:
+                p1 = entity.dxf.start
+                p2 = entity.dxf.end
+                entities.append(('line', (p1.x, p1.y), (p2.x, p2.y)))
+            except:
+                pass
+        
+        if not entities:
+            print(f"[DEBUG] No ARC/LINE entities found")
+            return None
+        
+        print(f"[DEBUG] Found {len(entities)} ARC/LINE segments")
+        
+        # Group entities into contours (closed loops)
+        contours = _group_entities_into_contours(entities)
+        
+        if not contours:
+            print(f"[WARN] No closed contours detected")
+            return None
+        
+        print(f"[DEBUG] Detected {len(contours)} contours")
+        
+        # Find outer loop (largest area)
+        outer_idx = 0
+        outer_area = 0
+        hole_loops = []
+        
+        for i, contour in enumerate(contours):
+            poly = Polygon(contour)
+            area = poly.area
+            
+            if area > outer_area:
+                # Previous outer becomes hole
+                if i > 0:
+                    hole_loops.append(contours[outer_idx])
+                outer_area = area
+                outer_idx = i
+            else:
+                hole_loops.append(contour)
+        
+        outer_loop = contours[outer_idx]
+        
+        print(f"[DEBUG] Outer loop: {len(outer_loop)} pts, area={outer_area:.1f}")
+        print(f"[DEBUG] Holes: {len(hole_loops)} loops")
+        
+        result = {
+            'outer_loop': outer_loop,
+            'hole_loops': hole_loops
+        }
+        
+        # Add DXF bbox if available
+        if bbox_from_dxf:
+            result['bbox_from_dxf'] = bbox_from_dxf
+        
+        return result
+        
+    except Exception as e:
+        print(f"[WARN] Arc detection failed: {str(e)[:60]}")
+        return None
+
+
+def _group_entities_into_contours(entities: List) -> List[List]:
+    """Group line/arc segments into closed loops.
+    
+    Args:
+        entities: List of ('line', p1, p2) tuples
+        
+    Returns:
+        List of contours, where each contour is a list of (x, y) points.
+        Filters out tiny/incomplete contours.
+    """
+    if not entities:
+        return []
+    
+    contours = []
+    remaining = list(entities)
+    
+    # Group segments into potential contours
+    raw_contours = []
+    
+    while remaining:
+        current_contour = [remaining[0][1], remaining[0][2]]
+        remaining.pop(0)
+        
+        # Grow this contour by finding connected segments
+        max_iterations = len(remaining) + 100  # Safety limit
+        iterations = 0
+        
+        while iterations < max_iterations:
+            iterations += 1
+            last_pt = current_contour[-1]
+            found = False
+            
+            for i, (etype, p1, p2) in enumerate(remaining):
+                tolerance = 1.0  # Distance tolerance 1mm for endpoint matching
+                
+                # Check if p1 connects to last point
+                dist1 = math.sqrt((p1[0] - last_pt[0])**2 + (p1[1] - last_pt[1])**2)
+                if dist1 < tolerance:
+                    current_contour.append(p2)
+                    remaining.pop(i)
+                    found = True
+                    break
+                
+                # Check if p2 connects to last point
+                dist2 = math.sqrt((p2[0] - last_pt[0])**2 + (p2[1] - last_pt[1])**2)
+                if dist2 < tolerance:
+                    current_contour.append(p1)
+                    remaining.pop(i)
+                    found = True
+                    break
+            
+            if not found:
+                break
+        
+        # Check if contour is closed
+        if len(current_contour) > 2:
+            first_pt = current_contour[0]
+            last_pt = current_contour[-1]
+            closure_dist = math.sqrt((first_pt[0] - last_pt[0])**2 + (first_pt[1] - last_pt[1])**2)
+            
+            if closure_dist < 2.0:  # Reasonably closed
+                # Remove duplicate closing point
+                contour_clean = current_contour[:-1]
+                raw_contours.append(contour_clean)
+    
+    # Filter contours by size: keep only significant ones
+    # - Minimum 10 points (avoid fragments)
+    # - Minimum 50mm perimeter (avoid tiny loops)
+    for contour in raw_contours:
+        if len(contour) < 10:
+            continue
+        
+        # Calculate perimeter
+        perim = 0
+        for i in range(len(contour)):
+            p1 = contour[i]
+            p2 = contour[(i+1) % len(contour)]
+            dist = math.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
+            perim += dist
+        
+        if perim < 50:  # Skip tiny contours
+            continue
+        
+        contours.append(contour)
+    
+    return contours
+
+
 def _metrics_from_loops(loops: Dict[str, List]) -> Dict[str, Any]:
-    """Calculate metrics from loop data using shapely."""
+    """Calculate metrics from loop data using shapely.
+    
+    Prefers DXF header bounding box if available (more reliable for FreeCAD exports).
+    Falls back to OBB calculation from contours if needed.
+    """
     if not HAS_SHAPELY:
         return {}
     
@@ -471,25 +724,36 @@ def _metrics_from_loops(loops: Dict[str, List]) -> Dict[str, Any]:
         outer_loop = loops.get('outer_loop', [])
         hole_loops = loops.get('hole_loops', [])
         face_area_3d = loops.get('face_area')  # Get original 3D face area if available
+        bbox_dxf = loops.get('bbox_from_dxf')  # DXF header bounding box
         
         if not outer_loop or len(outer_loop) < 3:
             return metrics
         
-        # Create outer polygon
+        # Use DXF header bbox if available (more reliable than OBB of contours)
+        if bbox_dxf:
+            metrics['box_x'] = bbox_dxf['width']
+            metrics['box_y'] = bbox_dxf['height']
+            print(f"[DEBUG] Using DXF bbox: {metrics['box_x']:.2f} x {metrics['box_y']:.2f}")
+        else:
+            # Create outer polygon and calculate OBB
+            outer_poly = Polygon(outer_loop)
+            
+            # Oriented Bounding Box (OBB)
+            obb = outer_poly.minimum_rotated_rectangle
+            edge_lengths = []
+            for i in range(4):
+                p1 = obb.exterior.coords[i]
+                p2 = obb.exterior.coords[(i + 1) % 4]
+                dist = math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
+                edge_lengths.append(dist)
+            
+            edge_lengths.sort()
+            metrics['box_x'] = edge_lengths[2]  # Second-longest edge
+            metrics['box_y'] = edge_lengths[1]  # Shorter edge (not diagonal)
+            print(f"[DEBUG] Using OBB: {metrics['box_x']:.2f} x {metrics['box_y']:.2f}")
+        
+        # Create outer polygon for other metrics
         outer_poly = Polygon(outer_loop)
-        
-        # Oriented Bounding Box (OBB)
-        obb = outer_poly.minimum_rotated_rectangle
-        edge_lengths = []
-        for i in range(4):
-            p1 = obb.exterior.coords[i]
-            p2 = obb.exterior.coords[(i + 1) % 4]
-            dist = math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
-            edge_lengths.append(dist)
-        
-        edge_lengths.sort()
-        metrics['box_x'] = edge_lengths[2]  # Second-longest edge
-        metrics['box_y'] = edge_lengths[1]  # Shorter edge (not diagonal)
         
         # Outer contour (perimeter)
         metrics['outer_contour'] = outer_poly.length
@@ -533,4 +797,6 @@ def _metrics_from_loops(loops: Dict[str, List]) -> Dict[str, Any]:
         
     except Exception as e:
         print(f"[WARN] Metrics calculation failed: {str(e)[:60]}")
+        import traceback
+        traceback.print_exc()
         return {}
