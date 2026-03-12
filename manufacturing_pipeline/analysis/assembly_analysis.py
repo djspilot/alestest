@@ -20,6 +20,11 @@ from collections import defaultdict
 
 from manufacturing_pipeline.analysis.classification_variables import (
     PLATE_FACE_TOP2_THRESHOLD_PCT,
+    PLATE_FEATURE_HEAVY_TOP2_MIN_PCT,
+    PLATE_FEATURE_HEAVY_FACE_COUNT_MIN,
+    PLATE_FEATURE_HEAVY_EDGE_FACE_RATIO_MIN,
+    PLATE_FEATURE_HEAVY_VOLUME_RATIO_MAX,
+    PLATE_FEATURE_HEAVY_ASPECT_RATIO_MIN,
     PLATE_THICK_MAX_MM,
     PLATE_THICKNESS_RATIO_MAX,
     PLATE_ASPECT_RATIO_MIN,
@@ -521,6 +526,48 @@ def _is_plate_by_face_analysis(solid, threshold: float = 60.0) -> bool:
         top2_planar_percent = _get_top2_parallel_planar_face_percent(solid)
         return top2_planar_percent > threshold
     except:
+        return False
+
+
+def _is_feature_heavy_plate_candidate(
+    solid,
+    dims: Tuple[float, float, float],
+    volume_ratio: float,
+    top2_planar_percent: float,
+) -> bool:
+    """Detect complex perforated/cutout-rich plates that miss the strict 50% rule.
+
+    This keeps the primary plate threshold strict (50%), while allowing a
+    separate route for heavy-feature sheet parts where top/bottom dominance drops
+    into the 30-50% band because of many small hole/cutout faces.
+    """
+    try:
+        if top2_planar_percent < PLATE_FEATURE_HEAVY_TOP2_MIN_PCT:
+            return False
+        if top2_planar_percent >= PLATE_FACE_TOP2_THRESHOLD_PCT:
+            return False
+
+        smallest, _, longest = dims
+        if smallest <= 0:
+            return False
+
+        aspect_ratio = longest / smallest
+        if aspect_ratio < PLATE_FEATURE_HEAVY_ASPECT_RATIO_MIN:
+            return False
+
+        if volume_ratio > PLATE_FEATURE_HEAVY_VOLUME_RATIO_MAX:
+            return False
+
+        face_count, edge_count = get_solid_topology_counts(solid)
+        if face_count < PLATE_FEATURE_HEAVY_FACE_COUNT_MIN or face_count <= 0:
+            return False
+
+        edge_face_ratio = edge_count / face_count
+        if edge_face_ratio < PLATE_FEATURE_HEAVY_EDGE_FACE_RATIO_MIN:
+            return False
+
+        return True
+    except Exception:
         return False
 
 
@@ -1028,7 +1075,18 @@ def _detect_closed_constant_cross_section(
         ):
             return False, metrics
 
+        # Exclude complex perforated plates from the hard profile override.
+        # Their section slices can look deceptively "closed + constant" despite
+        # being sheet parts with many cutouts/holes.
+        volume = get_solid_volume(solid)
+        bbox_volume = smallest * middle * longest
+        volume_ratio = volume / bbox_volume if bbox_volume > 0 else 0.0
+        top2_planar_percent = _get_top2_parallel_planar_face_percent(solid)
+        if _is_feature_heavy_plate_candidate(solid, dims, volume_ratio, top2_planar_percent):
+            return False, metrics
+
         bbox_extents = _get_solid_bbox_extents(solid)
+
         if not bbox_extents:
             return False, metrics
 
@@ -1126,6 +1184,10 @@ def classify_solid_scored(solid) -> Tuple[str, Dict[str, Any]]:
         aspect_ratio > SCORE_PLATE_SUPPORT_ASPECT_MIN):
         scores["plaat"] += 1.0
         reasons["plaat"].append("support-plate-shape")
+
+    if _is_feature_heavy_plate_candidate(solid, dims, volume_ratio, top2_percent):
+        scores["plaat"] += SCORE_PLATE_PRIMARY_POINTS + 1.0
+        reasons["plaat"].append("feature-heavy-plate")
 
     profile_primary = (
         smallest >= PROFILE_SMALLEST_MIN_MM and
@@ -1297,6 +1359,12 @@ def classify_solid(solid, return_trace: bool = False):
     # 1C. Thin plate fallback (flat plates < 25mm thick)
     if smallest < PLATE_THICK_MAX_MM and thickness_ratio < PLATE_THICKNESS_RATIO_MAX and aspect_ratio > PLATE_ASPECT_RATIO_MIN:
         trace["rules"].append("plate_thin")
+        return ("plaat", trace) if return_trace else "plaat"
+
+    # 1D. Feature-heavy plate fallback (many holes/cutouts, top2-planar 30-50%).
+    top2_planar_percent = trace["features"]["top2_planar_percent"]
+    if _is_feature_heavy_plate_candidate(solid, dims, volume_ratio, top2_planar_percent):
+        trace["rules"].append("plate_feature_heavy")
         return ("plaat", trace) if return_trace else "plaat"
     
     # ============================================================================

@@ -30,6 +30,15 @@ VERSION: 2.2 (Closed & Constant Cross-Section Override - 4 maart 2026)
 # Top2 faces analysis (primary plate detection method)
 PLATE_FACE_TOP2_THRESHOLD_PCT = 50.0  # >=50% surface area in top 2 faces → plate
 
+# Feature-heavy plate fallback for industrial parts with many holes/cutouts.
+# Keeps the global 50% threshold strict, but allows complex plates where
+# top2-planar drops into the 30-50% band due to hundreds of small faces.
+PLATE_FEATURE_HEAVY_TOP2_MIN_PCT = 30.0
+PLATE_FEATURE_HEAVY_FACE_COUNT_MIN = 40
+PLATE_FEATURE_HEAVY_EDGE_FACE_RATIO_MIN = 3.0
+PLATE_FEATURE_HEAVY_VOLUME_RATIO_MAX = 0.25
+PLATE_FEATURE_HEAVY_ASPECT_RATIO_MIN = 2.0
+
 # Thin plate bbox fallback (when face analysis inconclusive)
 PLATE_THICK_MAX_MM = 25.0              # <25mm thickness
 PLATE_THICKNESS_RATIO_MAX = 0.15       # smallest/middle < 0.15 (thin)
