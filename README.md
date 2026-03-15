@@ -439,7 +439,7 @@ v2_profile_sa_v_ratio_max = 1.2
 
 1. **Openen:** `manufacturing_pipeline/analysis/classification_variables.py`
 2. **Pas waarden aan** voor je industrie/producttype
-3. **Test:** `python export_classification_excel_v3.py mijnbestand.stp`
+3. **Test:** `python scripts/export_classification_excel.py mijnbestand.stp`
 4. **Check:** Excel output en `debug_*.py` scripts
 5. **Commit:** `git add -A && git commit -m "Tuning: aangepaste thresholds"`
 
@@ -473,11 +473,15 @@ v2_profile_sa_v_ratio_max = 1.2
 │   ├── reporting/                      # PDF, Excel, XML, CLI output
 │   └── scripts/                        # AAG analyzer, ERP vergelijking
 │
+├── profile_pipeline/                   # Cross-sectie profiel classificatie module
 ├── api/                                # REST API (FastAPI)
-├── deploy/                             # Deployment (file watcher, nginx, etc.)
+├── deploy/                             # Deployment (file watcher, nginx, deploy.sh)
+├── scripts/                            # Standalone analyse/validatie scripts
 ├── tests/                              # Testsuite
+│   └── legacy/                        # Oudere test scripts
 ├── docs/                               # Documentatie
-│   └── ENGINE.md                       # Technische engine-beschrijving
+│   ├── archive/                       # Historische changelogs, handoffs, validatie reports
+│   └── ENGINE.md                      # Technische engine-beschrijving
 └── data/                               # Runtime data (gitignored)
     ├── input/                          # STEP-bestanden voor analyse
     ├── output/                         # Analyseresultaten
