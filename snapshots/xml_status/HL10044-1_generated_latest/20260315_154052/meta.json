@@ -1,0 +1,22 @@
+{
+  "timestamp": "20260315_154052",
+  "tag": "hl10044_1_cutfeatures_reintegrated_v2",
+  "source_xml": "data\\output\\draadgaten\\HL10044-1_generated_latest.xml",
+  "source_xml_abs": "C:\\Data\\DS\\Python\\Spaceclaim_verv\\alestest\\data\\output\\draadgaten\\HL10044-1_generated_latest.xml",
+  "snapshot_xml": "snapshots\\xml_status\\HL10044-1_generated_latest\\20260315_154052\\HL10044-1_generated_latest.xml",
+  "snapshot_xml_abs": "C:\\Data\\DS\\Python\\Spaceclaim_verv\\alestest\\snapshots\\xml_status\\HL10044-1_generated_latest\\20260315_154052\\HL10044-1_generated_latest.xml",
+  "git": {
+    "branch": "main",
+    "commit": "ec2d822",
+    "dirty": true
+  },
+  "validation": {
+    "document_control_found": true,
+    "document_status": "OK",
+    "total_sheet_rows": 1,
+    "missing_xy_count": 0,
+    "missing_xy_names": [],
+    "bends_without_unfold_count": 0,
+    "bends_without_unfold_names": []
+  }
+}

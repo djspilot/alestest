@@ -111,6 +111,7 @@ CLASSIFICATION_FEATURE_SCHEMA: Dict[str, Dict[str, Any]] = {
         ],
         "optional": [
             "Sheet_NrBends", "Sheet_BendAngles", "Sheet_BendInnerRadii", "Sheet_BendLength",
+            "Sheet_HoleTypes", "Sheet_ThreadedHoles", "Sheet_CountersunkHoles", "Sheet_CountersunkAngles",
         ],
     },
     "gezette_plaat": {
@@ -125,7 +126,9 @@ CLASSIFICATION_FEATURE_SCHEMA: Dict[str, Dict[str, Any]] = {
             "Sheet_OuterContour", "Sheet_TotalContour", "Sheet_Weight",
             "Sheet_UnfoldSuccess", "Sheet_FilePathDXF",
         ],
-        "optional": [],
+        "optional": [
+            "Sheet_HoleTypes", "Sheet_ThreadedHoles", "Sheet_CountersunkHoles", "Sheet_CountersunkAngles",
+        ],
     },
     "profiel": {
         "part_class": "profiel",
@@ -420,6 +423,10 @@ def export_to_xml(result: Dict[str, Any], output_path: Path, part_name: Optional
     production = result.get('production', {})
     ET.SubElement(calc, 'Sheet_NrBends').text = str(production.get('bends_total', 0))
     ET.SubElement(calc, 'Sheet_NrHoles').text = str(production.get('holes_total', 0))
+    ET.SubElement(calc, 'Sheet_HoleTypes').text = ''
+    ET.SubElement(calc, 'Sheet_ThreadedHoles').text = '0'
+    ET.SubElement(calc, 'Sheet_CountersunkHoles').text = '0'
+    ET.SubElement(calc, 'Sheet_CountersunkAngles').text = ''
 
     # Material (from category or default)
     category = result.get('category', '')
@@ -479,8 +486,36 @@ def export_to_xml(result: Dict[str, Any], output_path: Path, part_name: Optional
             if h.get('diameter')
         )
 
+        hole_types_list = []
+        countersunk_angles = []
+        threaded_count = 0
+        countersunk_count = 0
+        for hole in hole_details:
+            hole_type = str(hole.get('type', 'round') or 'round').strip().lower()
+            if not hole_type:
+                hole_type = 'round'
+            hole_types_list.append(hole_type)
+
+            if hole_type in {'thread', 'threaded', 'tap', 'tapped'}:
+                threaded_count += 1
+
+            if 'countersunk' in hole_type:
+                countersunk_count += 1
+                try:
+                    angle_val = float(hole.get('countersink_angle', 0) or 0)
+                    if angle_val > 0:
+                        countersunk_angles.append(angle_val)
+                except Exception:
+                    pass
+
         ET.SubElement(calc, 'Sheet_HoleContours').text = hole_contours or ''
         ET.SubElement(calc, 'Sheet_HoleRadii').text = hole_radii or ''
+        calc.find('Sheet_HoleTypes').text = '_'.join(hole_types_list)
+        calc.find('Sheet_ThreadedHoles').text = str(threaded_count)
+        calc.find('Sheet_CountersunkHoles').text = str(countersunk_count)
+        calc.find('Sheet_CountersunkAngles').text = '_'.join(
+            _format_float(angle) for angle in countersunk_angles
+        )
     else:
         ET.SubElement(calc, 'Sheet_HoleContours').text = ''
         ET.SubElement(calc, 'Sheet_HoleRadii').text = ''
@@ -1702,6 +1737,10 @@ def _process_plaat_item(
     ET.SubElement(calc_result, 'Sheet_NrHoles').text = '0'
     ET.SubElement(calc_result, 'Sheet_HoleContours').text = ''
     ET.SubElement(calc_result, 'Sheet_HoleRadii').text = ''
+    ET.SubElement(calc_result, 'Sheet_HoleTypes').text = ''
+    ET.SubElement(calc_result, 'Sheet_ThreadedHoles').text = '0'
+    ET.SubElement(calc_result, 'Sheet_CountersunkHoles').text = '0'
+    ET.SubElement(calc_result, 'Sheet_CountersunkAngles').text = ''
     ET.SubElement(calc_result, 'Sheet_UnfoldSuccess').text = 'False'
     ET.SubElement(calc_result, 'Sheet_FilePathDXF').text = ''
 
@@ -1711,12 +1750,29 @@ def _process_plaat_item(
             hole_count = int(cut_features_result.nr_holes)
             hole_contours = list(getattr(cut_features_result, 'hole_contours', []) or [])
             hole_radii = list(getattr(cut_features_result, 'hole_radii', []) or [])
+            hole_types = [str(v).strip().lower() for v in list(getattr(cut_features_result, 'hole_types', []) or []) if str(v).strip()]
+            threaded_holes = int(getattr(cut_features_result, 'threaded_holes', 0) or 0)
+            countersunk_holes = int(getattr(cut_features_result, 'countersunk_holes', 0) or 0)
+            countersunk_angles = [
+                float(v)
+                for v in list(getattr(cut_features_result, 'countersunk_angles', []) or [])
+                if float(v) > 0
+            ]
 
             calc_result.find('Sheet_NrHoles').text = str(hole_count)
             if hole_contours:
                 calc_result.find('Sheet_HoleContours').text = '_'.join(_format_float(v) for v in hole_contours)
             if hole_radii:
                 calc_result.find('Sheet_HoleRadii').text = '_'.join(_format_float(v) for v in hole_radii)
+            if hole_types:
+                calc_result.find('Sheet_HoleTypes').text = '_'.join(hole_types)
+
+            calc_result.find('Sheet_ThreadedHoles').text = str(max(0, threaded_holes))
+            calc_result.find('Sheet_CountersunkHoles').text = str(max(0, countersunk_holes))
+            if countersunk_angles:
+                calc_result.find('Sheet_CountersunkAngles').text = '_'.join(
+                    _format_float(v) for v in countersunk_angles
+                )
         except Exception as e:
             print(f"    [WARN] Could not apply cut-feature hole fallback: {str(e)[:60]}")
 
@@ -2069,8 +2125,18 @@ def _process_plaat_item(
                     # Update hole information
                     nr_holes = dxf_metrics.get('nr_holes', 0)
                     hole_contours = dxf_metrics.get('hole_contours', '')
-                    calc_result.find('Sheet_NrHoles').text = str(nr_holes)
-                    calc_result.find('Sheet_HoleContours').text = hole_contours
+                    try:
+                        current_holes = int(float(calc_result.findtext('Sheet_NrHoles', '0') or 0))
+                    except Exception:
+                        current_holes = 0
+
+                    if current_holes <= 0 or int(nr_holes or 0) >= current_holes:
+                        calc_result.find('Sheet_NrHoles').text = str(nr_holes)
+                        calc_result.find('Sheet_HoleContours').text = hole_contours
+                    else:
+                        print(
+                            f"    [INFO] Keeping cut-feature holes ({current_holes}) over DXF ({nr_holes})"
+                        )
                     
                     # Store contour overrides (fields are created later)
                     outer_contour_dxf = dxf_metrics.get('outer_contour', 0.0)
@@ -2108,9 +2174,18 @@ def _process_plaat_item(
                     if dxf_metrics:
                         nr_holes = int(dxf_metrics.get('nr_holes', 0) or 0)
                         hole_contours = dxf_metrics.get('hole_contours', '') or ''
+                        try:
+                            current_holes = int(float(calc_result.findtext('Sheet_NrHoles', '0') or 0))
+                        except Exception:
+                            current_holes = 0
 
-                        calc_result.find('Sheet_NrHoles').text = str(nr_holes)
-                        calc_result.find('Sheet_HoleContours').text = hole_contours
+                        if current_holes <= 0 or nr_holes >= current_holes:
+                            calc_result.find('Sheet_NrHoles').text = str(nr_holes)
+                            calc_result.find('Sheet_HoleContours').text = hole_contours
+                        else:
+                            print(
+                                f"    [INFO] Keeping cut-feature holes ({current_holes}) over DXF ({nr_holes})"
+                            )
 
                         outer_contour_dxf = float(dxf_metrics.get('outer_contour', 0.0) or 0.0)
                         total_contour_dxf = float(dxf_metrics.get('total_contour', 0.0) or 0.0)

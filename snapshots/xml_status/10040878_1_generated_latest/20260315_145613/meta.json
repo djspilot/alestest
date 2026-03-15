@@ -1,0 +1,22 @@
+{
+  "timestamp": "20260315_145613",
+  "tag": "latest-code-10040878_1",
+  "source_xml": "C:\\Data\\DS\\Python\\Spaceclaim_verv\\stepfiles\\10040878_1_generated_latest.xml",
+  "source_xml_abs": "C:\\Data\\DS\\Python\\Spaceclaim_verv\\stepfiles\\10040878_1_generated_latest.xml",
+  "snapshot_xml": "snapshots\\xml_status\\10040878_1_generated_latest\\20260315_145613\\10040878_1_generated_latest.xml",
+  "snapshot_xml_abs": "C:\\Data\\DS\\Python\\Spaceclaim_verv\\alestest\\snapshots\\xml_status\\10040878_1_generated_latest\\20260315_145613\\10040878_1_generated_latest.xml",
+  "git": {
+    "branch": "main",
+    "commit": "ec2d822",
+    "dirty": false
+  },
+  "validation": {
+    "document_control_found": true,
+    "document_status": "OK",
+    "total_sheet_rows": 3,
+    "missing_xy_count": 0,
+    "missing_xy_names": [],
+    "bends_without_unfold_count": 0,
+    "bends_without_unfold_names": []
+  }
+}
