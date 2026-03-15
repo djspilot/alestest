@@ -356,18 +356,10 @@ def _merge_bends_colinear(bend_angles, bend_radii, bend_lengths):
         return merged_angles, merged_radii, merged_lengths
     
     elif num_bends == 4:
-        # Could be: 2 holes (3 segments) or 1 hole (2 segments) + something else
-        # Conservative: assume 1 hole, 2 segments (but some segments might have 2 bends)
-        # Heuristic: [2, 2] -> 2 bends
-        print(f"[INFO] Detected {num_bends} identical consecutive bends")
-        print(f"[INFO] Interpreting as 2 segments separated by 1 hole")
-        
-        merged_angles = [bend_angles[0], bend_angles[2]]
-        merged_radii = [bend_radii[0], bend_radii[2] if len(bend_radii) > 2 else bend_radii[0]]
-        merged_lengths = [bend_lengths[0], bend_lengths[2] if len(bend_lengths) > 2 else bend_lengths[0]]
-        
-        print(f"[INFO] Merged to 2 groups (pattern: 2 + 2)")
-        return merged_angles, merged_radii, merged_lengths
+        # Keep 4 as-is: this frequently represents real counter-bends
+        # (e.g. 90, -90, 90, -90) rather than hole-interrupted segments.
+        print(f"[INFO] Keeping {num_bends} bends as-is (avoid false 4->2 merge)")
+        return bend_angles, bend_radii, bend_lengths
     
     elif num_bends == 3:
         # Could be: 1 hole (2 segments, but odd distribution) or 2 holes (3 equal segments?)
