@@ -1049,11 +1049,16 @@ def deduplicate_holes(circular_holes, shaped_holes):
                 max_dim = 20.0 # Fallback
                 
             # If the circular hole is within the shaped hole's bounding area
-            # We assume it's part of the shape (e.g. a corner radius)
-            # Threshold: Distance < (Shape Size / 2 + Circle Radius)
-            # But since centers might be offset, we use a generous overlap check.
-            # If distance is small (< 15mm) and the circle is smaller or similar size to the shape
-            
+            # we assume it's part of the shape (e.g. a corner radius).
+            # Size check: the circular hole diameter must be comparable to the
+            # shaped hole's smallest dimension (e.g. corner radius ≈ min_dim/2).
+            # A small drill hole near a large opening is NOT a duplicate.
+            min_dim = min(dims) if len(dims) >= 2 else max_dim
+            circ_diam = circ.diameter
+            if circ_diam < min_dim * 0.25:
+                # Circle is much smaller than the shape — independent hole
+                continue
+
             if dist < (max_dim * 0.8):
                 is_duplicate = True
                 break
