@@ -240,13 +240,28 @@ def run_analysis(step_file, output_dir, args):
 
     part_name = os.path.splitext(os.path.basename(step_file))[0]
 
-    print("\n[1/6] Loading STEP file...")
+    print("\n[1/7] Loading STEP file...")
     shape = load_step_file(step_file)
 
     # ================================================================
-    # STEP 2: AAG Feature Recognition (The "Brain")
+    # STEP 1.5: Profile Router (Pre-classification)
     # ================================================================
-    print("[2/6] Running AAG Feature Recognition...")
+    print("[2/7] Running profile router...")
+    try:
+        from manufacturing_pipeline.analysis.router import route_step_file as _route_step_file
+        route_result = _route_step_file(step_file)
+        print(f"  Route: {route_result.category.value.upper()} "
+              f"(profiel: {route_result.profile_label}, "
+              f"confidence: {route_result.confidence:.0%})")
+        print(f"  {route_result.reasoning}")
+    except Exception as e:
+        print(f"  Warning: Router failed ({e}), continuing without routing")
+        route_result = None
+
+    # ================================================================
+    # STEP 3: AAG Feature Recognition (The "Brain")
+    # ================================================================
+    print("[3/7] Running AAG Feature Recognition...")
     
     # Run via subprocess to use FreeCAD's robust geometry engine
     aag_data = run_aag_analysis(step_file)
@@ -271,7 +286,7 @@ def run_analysis(step_file, output_dir, args):
     # ================================================================
     # STEP 3: Standard Geometry Analysis
     # ================================================================
-    print("[3/6] Analyzing dimensions & geometry...")
+    print("[4/7] Analyzing dimensions & geometry...")
     analysis = analyze_part_geometry(shape, part_name)
 
     # ================================================================
@@ -356,7 +371,7 @@ def run_analysis(step_file, output_dir, args):
     should_unfold = (part_category == "GEBOGEN PLAATWERK") and not args.no_unfold
 
     if should_unfold:
-        print("\n[4/6] Unfolding sheet metal...")
+        print("\n[5/7] Unfolding sheet metal...")
         unfold_result = run_unfold_to_step(step_file, output_dir, part_name, analysis)
 
         if unfold_result and unfold_result.get('success'):
@@ -384,12 +399,12 @@ def run_analysis(step_file, output_dir, args):
         else:
             print(f"  ⚠ Unfold niet gelukt: {unfold_result.get('error', 'onbekend') if unfold_result else 'geen resultaat'}")
     else:
-        print(f"\n[4/6] Unfold: Niet nodig ({part_category})")
+        print(f"\n[5/7] Unfold: Niet nodig ({part_category})")
 
     # ================================================================
     # STEP 6: Detect holes - on FLAT pattern if available
     # ================================================================
-    print("\n[5/6] Detecting holes...")
+    print("\n[6/7] Detecting holes...")
 
     if flat_shape is not None:
         print(f"  Analyseren op: UITSLAG (flat pattern)")
@@ -421,7 +436,7 @@ def run_analysis(step_file, output_dir, args):
     # ================================================================
     # STEP 7: Save results
     # ================================================================
-    print("\n[6/6] Saving results...")
+    print("\n[7/7] Saving results...")
 
     # Update analysis with flat dimensions if available
     if unfold_result and unfold_result.get('success'):
@@ -474,6 +489,7 @@ def run_analysis(step_file, output_dir, args):
     analysis.part_category = part_category
     analysis.unfold_result = unfold_result
     analysis.flat_step_path = flat_step_path
+    analysis.route_result = route_result  # Profile router result
     if aag_result.success:
         analysis.aag_result = aag_result.data # Store AAG result for PDF
 

@@ -2,6 +2,13 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional, Tuple
 
+class RouteCategory(Enum):
+    """Pre-routing classificatie: bepaalt welk pad de pipeline volgt."""
+    PLAAT = "plaat"        # Vlakke plaat / plaatwerk (incl. gebogen plaat)
+    PROFIEL = "profiel"    # Stalen profiel (I/U/L/T/koker)
+    ROND = "rond"          # Rond staal / buis / draaistuk
+    OVERIG = "overig"      # Niet geclassificeerd
+
 class ValidationStatus(Enum):
     VALID = "valid"
     WARNING = "warning"        # Minor discrepancy

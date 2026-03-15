@@ -59,7 +59,7 @@ def _import_full_pipeline():
 
 def save_to_json(filename, part_name, holes, matches, is_turned, geom_props=None,
                  face_analysis=None, topology_stats=None, component_classification=None,
-                 detailed_parts=None, manufacturing_data=None, verbose=True):
+                 detailed_parts=None, manufacturing_data=None, route_result=None, verbose=True):
     """Save full-pipeline analysis results to a JSON file."""
     from dataclasses import asdict
 
@@ -85,6 +85,16 @@ def save_to_json(filename, part_name, holes, matches, is_turned, geom_props=None
         ],
         "manufacturing_analysis": manufacturing_data,
     }
+
+    if route_result is not None:
+        data["route"] = {
+            "category": route_result.category.value,
+            "profile_label": route_result.profile_label,
+            "confidence": route_result.confidence,
+            "reasoning": route_result.reasoning,
+            "variant": route_result.variant,
+            "method": route_result.method,
+        }
 
     with open(filename, "w", encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
@@ -141,6 +151,22 @@ def run_full_pipeline(step_file, pdf_file, db_path, schema_path, args, config, c
         no_cache=args.no_cache,
         verbose=not production_only,
     )
+
+    # === Pre-routing ===
+    if not production_only:
+        print("Running profile router...")
+    try:
+        from manufacturing_pipeline.analysis.router import route_step_file as _route_step_file
+        route_result = _route_step_file(step_file)
+        if not production_only:
+            print(f"  Route: {route_result.category.value.upper()} "
+                  f"(profiel: {route_result.profile_label}, "
+                  f"confidence: {route_result.confidence:.0%})")
+            print(f"  {route_result.reasoning}\n")
+    except Exception as e:
+        if not production_only:
+            print(f"  Warning: Router failed ({e}), continuing without routing\n")
+        route_result = None
 
     try:
         # Stages 1-7: Geometry and Topology
@@ -206,7 +232,8 @@ def run_full_pipeline(step_file, pdf_file, db_path, schema_path, args, config, c
         save_to_json(
             json_file, part_name, holes, matches, is_turned,
             geom_props, face_analysis, topology_stats, component_classification,
-            detailed_parts, manufacturing_data, verbose=not production_only,
+            detailed_parts, manufacturing_data, route_result=route_result,
+            verbose=not production_only,
         )
 
         if not getattr(args, "no_report", False):
