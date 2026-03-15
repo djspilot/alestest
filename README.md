@@ -1,100 +1,38 @@
 # ALES Manufacturing Pipeline
 
-**Laatste update:** 10 maart 2026  
-**Versie:** 2.3 (GEZETTE PLAAT Feature Validation - Analyse Fase)
+**Laatste update:** 15 maart 2026
+**Versie:** 3.0 (Profile Router Integration)
 
-### v2.3 Status: ANALYSE (10 maart 2026)
+> Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis.
 
-**Bevindingen van vandaag:**
-- ✅ **Naamkoppeling (solid → part naam) werkt nu correct** voor 10001091875_Rev_00
-- 🔴 **CRITICAL BUG gevonden**: `Sheet_BoxY` incorrect (238mm i.p.v. 272mm) - zie [CRITICAL_BUG_BoxY_Dimension.md](CRITICAL_BUG_BoxY_Dimension.md)
-- 🔴 **NrHoles incorrect**: 6 gevonden i.p.v. 11 (DXF ARC/LINE primitieven i.p.v. LWPOLYLINE)
+### v3.0 — Profile Router Integration (15 maart 2026)
 
-**Root Cause BoxY (238 → 272mm)**:
+**Nieuw: Pre-routing classificatie via cross-sectie analyse**
+
+De pipeline bepaalt nu vóór alle analyse welk type onderdeel het is:
+
+| Route | Beschrijving | Profiellabels |
+|-------|-------------|---------------|
+| **PLAAT** | Vlakke plaat / plaatwerk | `PLAT_STAAL` |
+| **PROFIEL** | Stalen profiel (ingekocht) | `I/U/L/T_FAMILY`, `RECHTHOEKIGE_KOKER` |
+| **ROND** | Rond staal / buis / draaistuk | `ROND_STAAL`, `RONDE_BUIS` |
+| **OVERIG** | Niet-geclassificeerd | `ANDERS` |
+
+**Nieuwe modules:**
+- `manufacturing_pipeline/analysis/profile_classifier.py` — Cross-sectie profiel classifier
+- `manufacturing_pipeline/analysis/router.py` — Router: `route_step_file()`, `route_solid()`, `map_profile_label()`
+- `manufacturing_pipeline/core/models.py` — `RouteCategory` enum
+
+**Analyse flow (quick mode):**
 ```
-FreeCAD unfold rapporteert de BoundBox van slechts één arm.
-Correct berekend:
-  Arm 1: 238mm - 8mm (dikte) = 230mm (uitgeslagen)
-  Arm 2:  50mm - 8mm (dikte) =  42mm (uitgeslagen)
-  TOTAAL UITGESLAGEN  =  272mm  ← verwacht
+[1/7] STEP laden
+[2/7] Profile Router → PLAAT / PROFIEL / ROND / OVERIG
+[3/7] AAG Feature Recognition
+[4/7] Geometrie analyse
+[5/7] Unfold (indien plaatwerk)
+[6/7] Gaten detectie
+[7/7] Resultaten opslaan
 ```
-De fix vereist dat `freecad_unfold.py` de **som van alle uitgeslagen armen** berekent en niet de BoundBox van de shell.
-
-**Volgende stappen:**
-1. Fix `freecad_unfold.py` - someer individuele arm-lengtes ipv Shell BoundBox
-2. Fix NrHoles - DXF ARC/LINE contour detectie
-3. Volledige validatie priority-1 features GEZETTE PLAAT
-
----
-
-**Laatste update:** 4 maart 2026  
-**Versie:** 2.2 ✓ COMMITTED (Profile Robustness + Koker Dikte Fix)
-
-### v2.2 Changelog (4 maart 2026)
-
-**Nieuwe features/fixes:**
-- ✓ **Hard profile override op doorsnede-gedrag**
-  - Multi-slice cross-section check langs lengterichting (20/40/60/80%)
-  - Gesloten-contour ratio + perimeter-constantheid + edge-stabiliteit
-  - Doel: gesloten extrusies (kokers) betrouwbaar als `profiel`, ook bij tuning van bent-sheet regels
-- ✓ **Rectangular tube dikteberekening gecorrigeerd**
-  - Oude benadering op `volume_ratio` kon te hoge waardes geven (bijv. 100x50 → ~15 mm)
-  - Vervangen door analytische hollow-box vergelijking:
-    - `4t² - 2(W+H)t + fWH = 0`
-    - `t = ((W+H) - sqrt((W+H)^2 - 4fWH)) / 4`
-  - Resultaat: 100x50-kokers in `10001091875_Rev_00.step` nu correct op **3 mm**
-- ✓ XML output geverifieerd: `Tube_Type=R_100x50x3`, `Tube_Thickness=3`
-
-**Documentatie:**
-- Zie [CLASSIFICATION_METHODOLOGY.md](CLASSIFICATION_METHODOLOGY.md) voor classificatielogica + profieldikteformule
-- Zie [docs/CLASSIFICATION_DECISION_TREE.md](docs/CLASSIFICATION_DECISION_TREE.md) voor de bijgewerkte beslisboom
-
----
-
-**Laatste update:** 3 maart 2026  
-**Versie:** 2.1.2 ✓ COMMITTED (Fase 1: Gaten + Snijdata plaat/gezette plaat)
-
-### v2.1.2 Changelog (3 maart 2026)
-
-**Nieuwe features:**
-- ✓ **Fase 1: Cut Features Detection voor Plaat/Gezette Plaat**
-  - Gatdetectie: cylindrisch + vormgaten (slots/rectangles) met perimeters
-  - Gatcontours berekening per gat (inner wire perimeter)
-  - Buitencontour berekening (outer wire largest planar face)
-  - Totale snijlengte: sum(gatcontours) + buitencontour
-  - X/Y box dimensions extraction
-  - Flat pattern analyse strategie (na unfold) met 3D fallback
-- ✓ XML export integratie: Sheet_NrHoles, Sheet_HoleContours, Sheet_HoleRadii, Sheet_OuterContour, Sheet_TotalContour
-- ✓ Backwards compatible: graceful fallback bij failures, geen breaking changes in bestaande code
-- ✓ Validated op testfile 10040878_1.stp
-
-**Implementation:**
-- Nieuwe module: `manufacturing_pipeline/analysis/cut_features.py`
-- Hergebruikt bestaande detectiefuncties (detect_holes, detect_shaped_holes)
-- Conditionally activated alleen voor plaat/gezette_plaat classifications
-- Zie [CHANGELOG_FASE1_CUT_FEATURES.md](CHANGELOG_FASE1_CUT_FEATURES.md) voor details
-- Zie [docs/SHEET_XML_PIPELINE_AND_COMPARATOR.md](docs/SHEET_XML_PIPELINE_AND_COMPARATOR.md) voor de actuele sheet XML flow + comparator gebruik
-
-**Gebruik voor validatie:**
-```bash
-python test_bom_to_xml.py path/to/assembly.stp
-```
-
----
-
-**Laatste update:** 2 maart 2026  
-**Versie:** 2.1.1 ✓ COMMITTED (XML Naming Fix: Sheet_PartName from source STEP)
-
-### v2.1.1 Changelog (2 maart 2026)
-
-**Fixes:**
-- ✓ XML export: Sheet_PartName now uses source STEP filename (e.g., "10040878_1") instead of BOM part name
-- ✓ Consistency: aligns with SpaceClaim reference XMLs for ERP import
-- ✓ Backwards compatible: existing XML structure unchanged, only field value improved
-
----
-
-**Versie:** 2.1 ✓ COMMITTED (Standard Profile Detection met geometry fallback)
 
 ---
 
@@ -118,7 +56,12 @@ python test_bom_to_xml.py path/to/assembly.stp
 
 ### Belangrijkste features
 
-- **Onderdeelclassificatie (4 categorieën)** — 
+- **Profile Router (pre-classificatie)** — Bepaalt vóór analyse het type onderdeel via cross-sectie analyse:
+  1. **PLAAT** — Vlakke plaat / plaatwerk
+  2. **PROFIEL** — Stalen profiel (I/U/L/T/koker, ingekocht)
+  3. **ROND** — Rond staal / buis / draaistuk
+  4. **OVERIG** — Niet-geclassificeerd
+- **Onderdeelclassificatie (4 categorieën)** —
   1. **Vlakke plaat** (vlakke plaat, geen zettingen) → Box geometry export
   2. **Gezette plaat** (bent sheet met >0 bends) → Unfold via FreeCAD SheetMetal
   3. **Profiel** (draaideel, buis, hoekstaal) → Cross-section karakterisering
@@ -329,11 +272,13 @@ python run.py -f G:\ALES\Input --batch --excel --reference G:\ALES\spaceclaim.xm
 │    ┌─────────┐  ┌──────────┐  ┌───────────┐                     │
 │    │  core/  │  │ analysis/│  │ reporting/│                     │
 │    │         │  │          │  │           │                     │
-│    │ config  │  │ step_proc│  │ PDF       │                     │
-│    │ models  │  │ sheetmtl │  │ Excel     │                     │
-│    │ utils   │  │ analyzer │  │ XML       │                     │
-│    │         │  │ iso_std  │  │ CLI output│                     │
-│    └─────────┘  │ freecad  │  └───────────┘                     │
+│    │ config  │  │ router   │  │ PDF       │                     │
+│    │ models  │  │ prof_cls │  │ Excel     │                     │
+│    │ utils   │  │ step_proc│  │ XML       │                     │
+│    │         │  │ sheetmtl │  │ CLI output│                     │
+│    └─────────┘  │ analyzer │  └───────────┘                     │
+│                 │ iso_std  │                                     │
+│                 │ freecad  │                                     │
 │                 │ aag      │                                     │
 │                 └──────────┘                                     │
 │                                                                  │
@@ -353,9 +298,14 @@ python run.py -f G:\ALES\Input --batch --excel --reference G:\ALES\spaceclaim.xm
               └──────┬───────┘                      └────────┬─────────┘
                      │                                       │
               ┌──────▼───────┐                      ┌────────▼─────────┐
-              │ Classificeer │                      │  Detecteer gaten │
-              │ (type, dikte)│                      │  & zettingen     │
-              └──────┬───────┘                      └────────┬─────────┘
+              │Profile Router│                      │  Profile Router  │
+              │PLAAT/PROFIEL/│                      │  Pre-classificat.│
+              │ROND/OVERIG   │                      └────────┬─────────┘
+              └──────┬───────┘                               │
+                     │                              ┌────────▼─────────┐
+              ┌──────▼───────┐                      │  Detecteer gaten │
+              │ Classificeer │                      │  & zettingen     │
+              │ (type, dikte)│                      └────────┬─────────┘
                      │                                       │
               ┌──────▼───────┐                      ┌────────▼─────────┐
               │  Detecteer   │                      │  Geometrie &     │
@@ -509,6 +459,8 @@ v2_profile_sa_v_ratio_max = 1.2
 │   ├── cli.py                          # CLI-interface
 │   ├── core/                           # Config, modellen, utilities
 │   ├── analysis/
+│   │   ├── router.py                    # Pre-routing: PLAAT/PROFIEL/ROND/OVERIG
+│   │   ├── profile_classifier.py        # Cross-sectie profiel classifier
 │   │   ├── classification_variables.py  # ⭐ CENTRALIZE TUNING (zie boven)
 │   │   ├── cross_section_profile.py     # Holle profiel detectie
 │   │   ├── step_processing.py           # STEP-parsing, gat/zetdetectie
@@ -591,53 +543,7 @@ python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ 
 
 ---
 
-**Laatste update:** 3 maart 2026  
-**Versie:** 2.1.2 ✓ COMMITTED (Fase 1: Gaten + Snijdata plaat/gezette plaat)
+**Laatste update:** 15 maart 2026
+**Versie:** 3.0 (Profile Router Integration)
 
-### v2.1.2 Changelog (3 maart 2026)
-
-**Nieuwe features:**
-- ✓ **Fase 1: Cut Features Detection voor Plaat/Gezette Plaat**
-  - Gatdetectie: cylindrisch + vormgaten (slots/rectangles) met perimeters
-  - Gatcontours berekening per gat (inner wire perimeter)
-  - Buitencontour berekening (outer wire largest planar face)
-  - Totale snijlengte: sum(gatcontours) + buitencontour
-  - X/Y box dimensions extraction
-  - Flat pattern analyse strategie (na unfold) met 3D fallback
-- ✓ XML export integratie: Sheet_NrHoles, Sheet_HoleContours, Sheet_HoleRadii, Sheet_OuterContour, Sheet_TotalContour
-- ✓ Backwards compatible: graceful fallback bij failures, geen breaking changes
-- ✓ Validated op testfile 10040878_1.stp
-
-**Implementation:**
-- Nieuwe module: `manufacturing_pipeline/analysis/cut_features.py`
-- Hergebruikt bestaande detectiefuncties (detect_holes, detect_shaped_holes)
-- Conditionally activated alleen voor plaat/gezette_plaat
-- Zie [CHANGELOG_FASE1_CUT_FEATURES.md](CHANGELOG_FASE1_CUT_FEATURES.md)
-
-**Gebruik:**
-```bash
-python test_bom_to_xml.py path/to/assembly.stp  # Voor XML export met cut features
-```
-
----
-
-### v2.1.1 Changelog (2 maart 2026)
-
-**Fixes:**
-- ✓ XML export: Sheet_PartName uses source STEP filename
-- ✓ Consistency met SpaceClaim reference XMLs
-
----
-
-### v2.1 Changelog (2 maart 2026)
-
-**Nieuwe features:**
-- ✓ Hollow tube detection (EN 10210-2, etc.): cylindrical ≥60% + volume_ratio <0.7
-- ✓ Variable thickness profile detection (DIN 1026 UNP, I-beams): face area diff >20%
-- ✓ Bent sheet exclusion: voorkomt false positives op gezette platen
-- ✓ Generic geometry-based fallback: werkt ook als STEP parser names mist
-
-**Documentatie:**
-- [CLASSIFICATION_DECISION_TREE.md](docs/CLASSIFICATION_DECISION_TREE.md) - Complete 3-step beslisboom
-- [CLASSIFICATION_ARCHITECTURE.md](docs/CLASSIFICATION_ARCHITECTURE.md) - Naam vs geometrie strategie
-- [classification_variables.py](manufacturing_pipeline/analysis/classification_variables.py) - Alle v2.1 thresholds
+> Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis van v2.1 t/m v3.0.
