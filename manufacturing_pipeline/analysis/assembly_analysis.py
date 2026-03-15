@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field, asdict
 from collections import defaultdict
 
+from manufacturing_pipeline.core.models import RouteCategory
 from manufacturing_pipeline.analysis.classification_variables import (
     PLATE_FACE_TOP2_THRESHOLD_PCT,
     PLATE_FEATURE_HEAVY_TOP2_MIN_PCT,
@@ -1331,6 +1332,29 @@ def classify_solid(solid, return_trace: bool = False):
         trace["rules"].append("closed_constant_section")
         return ("profiel", trace) if return_trace else "profiel"
     
+    # ============================================================================
+    # STEP 0B: PROFILE ROUTER CHECK (v3.1)
+    # Use cross-section profile classifier to catch profiles before plate detection
+    # misclassifies them. Only override when confidence is high enough.
+    # ============================================================================
+    try:
+        from manufacturing_pipeline.analysis.router import route_solid
+        route_result = route_solid(solid)
+        trace["features"]["route_category"] = route_result.category.value
+        trace["features"]["route_label"] = route_result.profile_label
+        trace["features"]["route_confidence"] = round(route_result.confidence, 3)
+        trace["features"]["route_method"] = route_result.method
+
+        if route_result.confidence >= 0.7:
+            if route_result.category == RouteCategory.PROFIEL:
+                trace["rules"].append("router_profiel")
+                return ("profiel", trace) if return_trace else "profiel"
+            elif route_result.category == RouteCategory.ROND:
+                trace["rules"].append("router_rond")
+                return ("anders", trace) if return_trace else "anders"
+    except Exception as e:
+        trace["features"]["route_error"] = str(e)[:60]
+
     # ============================================================================
     # STEP 1: PLATE DETECTION (v3.0 - CHECK FIRST!)
     # 70-80% of production are sheet metal - check these first

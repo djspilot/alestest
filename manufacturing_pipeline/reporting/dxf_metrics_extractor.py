@@ -902,11 +902,15 @@ def _extract_obb_dimensions(shape_geometry) -> Optional[Tuple[float, float]]:
             p2 = coords[i + 1]
             edge_lengths.append(math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2))
 
-        edge_lengths = sorted(length for length in edge_lengths if length > 1e-9)
-        if len(edge_lengths) < 2:
+        # A rectangle's 4 edges alternate: long, short, long, short.
+        # Use the first two consecutive edges to get distinct side lengths.
+        valid = [e for e in edge_lengths if e > 1e-9]
+        if len(valid) < 2:
             return None
 
-        return edge_lengths[-1], edge_lengths[-2]
+        long_side = max(valid[0], valid[1])
+        short_side = min(valid[0], valid[1])
+        return long_side, short_side
     except Exception:
         return None
 
