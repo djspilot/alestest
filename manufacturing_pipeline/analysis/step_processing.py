@@ -1033,13 +1033,23 @@ def deduplicate_holes(circular_holes, shaped_holes):
         
         for shaped in shaped_holes:
             s_pos = shaped["center"]
-            
+
+            # Check of gat en shaped hole op zelfde vlak zitten (parallelle assen)
+            # Niet-parallelle assen → ander vlak → nooit duplicaat
+            shaped_normal = shaped.get("normal")
+            if shaped_normal and hasattr(circ, 'axis') and circ.axis:
+                dot = abs(circ.axis[0]*shaped_normal[0] +
+                          circ.axis[1]*shaped_normal[1] +
+                          circ.axis[2]*shaped_normal[2])
+                if dot < 0.7:
+                    continue
+
             # Calculate distance
             dx = c_pos[0] - s_pos[0]
             dy = c_pos[1] - s_pos[1]
             dz = c_pos[2] - s_pos[2]
             dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-            
+
             # Parse dimensions of shaped hole to get a "radius of influence"
             # dim string is like "20.2x19.5"
             try:

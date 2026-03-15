@@ -227,6 +227,12 @@ def extract_cut_features_for_sheet(
                 # often follow drill sizes and can deviate from ideal minor diameter.
                 thread_matches = iso_standards.identify_thread_from_diameter(hole.diameter, 0.20)
                 tapped_matches = [m for m in thread_matches if "tapped" in m.designation.lower()]
+                major_matches = [m for m in thread_matches if "tapped" not in m.designation.lower()]
+
+                # Disambiguatie: als diameter matcht op zowel major (=clearance)
+                # als tapped, is het waarschijnlijk een clearance gat.
+                if tapped_matches and major_matches:
+                    tapped_matches = []
 
                 # Plausibility check: for sheet/plate parts, very large nominal
                 # thread sizes relative to hole depth are typically clearance holes.
@@ -790,13 +796,32 @@ def extract_cut_features_for_profile(
         cq_object = cq.Workplane("XY").newObject([cq_solid])
 
         # STAP 1: Detect cylindrische gaten
-        # filter_bores=True filtert binnenboring van buis weg (diepte >> wanddikte)
+        # filter_bores=False: we doen een eigen post-filter op depth ratio
+        # zodat ronde buizen (is_turned_part=True) geen echte gaten verliezen
         logger.info("[CutFeatures] Profiel: detect cylindrische gaten...")
         cylindrical_holes = detect_holes(
             cq_object,
-            filter_bores=True,
+            filter_bores=False,
             is_flat_pattern=False
         )
+        logger.info(f"[CutFeatures] Profiel vóór bore-filter: {len(cylindrical_holes)} cylindrische gaten")
+
+        # Post-filter: verwijder binnenboring (depth > 30% langste dimensie)
+        # Buisboring: depth=lengte (ratio~1.0). Echte gaten: depth=wanddikte (ratio<0.05).
+        from OCP.Bnd import Bnd_Box
+        from OCP.BRepBndLib import BRepBndLib
+        bbox = Bnd_Box()
+        BRepBndLib.Add_s(solid, bbox)
+        xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
+        longest_dim = max(xmax - xmin, ymax - ymin, zmax - zmin)
+        if longest_dim > 0:
+            before_count = len(cylindrical_holes)
+            cylindrical_holes = [h for h in cylindrical_holes
+                                 if h.depth <= longest_dim * 0.3]
+            filtered_count = before_count - len(cylindrical_holes)
+            if filtered_count > 0:
+                logger.info(f"[CutFeatures] Profiel bore-filter: {filtered_count} gaten verwijderd (depth > {longest_dim * 0.3:.1f}mm)")
+
         logger.info(f"[CutFeatures] Profiel: {len(cylindrical_holes)} cylindrische gaten")
 
         # STAP 2: Detect vormgaten (sleuven, rectangles) op planaire vlakken
@@ -835,13 +860,18 @@ def extract_cut_features_for_profile(
                 countersunk_holes += 1
                 countersunk_angles.append(cs_angle)
             else:
-                # Tapgat detectie — geen diepte-plausibiliteitscheck voor profielen
-                # (profielgaten gaan door de wand, diepte = wanddikte < major diameter)
+                # Tapgat detectie met disambiguatie:
+                # Als diameter matcht op zowel major (=clearance) als tapped,
+                # is het waarschijnlijk een clearance gat, niet een tapgat.
                 thread_matches = iso_standards.identify_thread_from_diameter(hole.diameter, 0.20)
                 tapped_matches = [m for m in thread_matches if "tapped" in m.designation.lower()]
-                if tapped_matches:
+                major_matches = [m for m in thread_matches if "tapped" not in m.designation.lower()]
+
+                if tapped_matches and not major_matches:
+                    # Alleen tap-drill match → waarschijnlijk tapgat
                     hole_type = "thread"
                     threaded_holes += 1
+                # elif tapped_matches and major_matches: ambigue → default round
 
             hole_types.append(hole_type)
 

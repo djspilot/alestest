@@ -1,9 +1,21 @@
 # ALES Manufacturing Pipeline
 
 **Laatste update:** 15 maart 2026
-**Versie:** 3.1 (Profile Hole Detection)
+**Versie:** 3.2 (Robuustere Gatendetectie)
 
 > Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis.
+
+### v3.2 — Robuustere Gatendetectie (15 maart 2026)
+
+**Fase 2b: Drie structurele verbeteringen in gatendetectie**
+
+| Fix | Probleem | Oplossing |
+|-----|----------|-----------|
+| **Bore-filter** | Ronde buizen als draaideel geclassificeerd → echte gaten konden wegvallen | `filter_bores=False` + post-filter op depth ratio (>30% langste dimensie = boring) |
+| **Dedup vlak-check** | Cilindrisch gat op bovenkant koker kon als duplicaat van shaped opening op kopse kant verwijderd worden | As-paralleliteitscheck (`dot < 0.7` = ander vlak → nooit duplicaat) |
+| **Thread disambiguatie** | Ø4.00mm matcht op M4 major EN M5 tapped → onterecht als tapgat geclassificeerd | Als diameter matcht op zowel major als tapped → default naar `round` (clearance gat) |
+
+**Resultaat:** Ø3.24mm → thread (alleen M4 tapped match), Ø4.00mm → round (M4 major + M5 tapped → ambigue).
 
 ### v3.1 — Profile Hole Detection (15 maart 2026)
 
@@ -13,9 +25,9 @@ De pipeline detecteert nu ook gaten in profielen (koker, buis, hoekstaal):
 
 | Feature | Beschrijving |
 |---------|-------------|
-| **Ronde gaten** | Cylindrische gaten via `detect_holes()` met `filter_bores=True` |
+| **Ronde gaten** | Cylindrische gaten via `detect_holes()` met depth-ratio bore-filter |
 | **Vormgaten** | Sleuven/rectangles op planaire vlakken (koker-wanden, flenzen) |
-| **Tapgaten** | ISO 68-1 threadherkenning (M3–M68) zonder diepte-check |
+| **Tapgaten** | ISO 68-1 threadherkenning (M3–M68) met major/tapped disambiguatie |
 | **Verzonken gaten** | Countersink detectie met hoek |
 | **XML export** | Nieuwe `Tube_NrHoles`, `Tube_HoleTypes`, `Tube_ThreadedHoles` etc. velden |
 
@@ -562,6 +574,6 @@ python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ 
 ---
 
 **Laatste update:** 15 maart 2026
-**Versie:** 3.1 (Profile Hole Detection)
+**Versie:** 3.2 (Robuustere Gatendetectie)
 
 > Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis van v2.1 t/m v3.1.
