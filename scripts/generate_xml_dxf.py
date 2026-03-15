@@ -8,6 +8,7 @@ import argparse
 import sys
 from pathlib import Path
 import xml.etree.ElementTree as ET
+from typing import Optional
 
 # Setup paths
 sys.path.insert(0, str(Path.cwd()))
@@ -49,7 +50,7 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _resolve_paths(args: argparse.Namespace) -> tuple[Path, Path, Path]:
+def _resolve_paths(args: argparse.Namespace) -> tuple[Path, Path, Optional[Path]]:
     script_dir = Path(__file__).parent
     parent_dir = script_dir.parent
 
@@ -69,7 +70,7 @@ def _resolve_paths(args: argparse.Namespace) -> tuple[Path, Path, Path]:
         reference_xml = Path(args.reference).resolve()
     else:
         candidate = parent_dir / 'stepfiles' / f'Results{step_file.stem}.xml'
-        reference_xml = candidate.resolve() if candidate.exists() else Path('')
+        reference_xml = candidate.resolve() if candidate.exists() else None
 
     # Also try cwd-relative fallback for step/ref when needed
     if not step_file.exists():
@@ -81,6 +82,8 @@ def _resolve_paths(args: argparse.Namespace) -> tuple[Path, Path, Path]:
         alt_ref = Path.cwd() / 'stepfiles' / reference_xml.name
         if alt_ref.exists():
             reference_xml = alt_ref.resolve()
+        else:
+            reference_xml = None
 
     return step_file, output_xml, reference_xml
 
