@@ -16,11 +16,17 @@ Usage:
 import math
 from typing import Dict, List, Optional, Tuple, Any
 
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - fallback without NumPy
+    np = None
+
 # Try to import CAD libraries
 try:
     from OCP.TopExp import TopExp_Explorer
-    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopAbs import TopAbs_FACE, TopAbs_VERTEX, TopAbs_EDGE
     from OCP.TopoDS import TopoDS
+    from OCP.BRep import BRep_Tool
     from OCP.BRepAdaptor import BRepAdaptor_Surface
     from OCP.GeomAbs import GeomAbs_Cylinder, GeomAbs_Plane, GeomAbs_Torus
     from OCP.GProp import GProp_GProps
@@ -63,21 +69,63 @@ def extract_profile_features(solid, dims: Tuple[float, float, float], volume: fl
     """
     if not HAS_OCP:
         return _create_fallback_result(dims, volume)
-    
+
     try:
-        smallest, middle, largest = sorted(dims)
-        
+        # ---------------------------------------------------------------
+        # Primary: cut-based cross-section extraction.
+        # Uses a plane whose normal IS the PCA length axis, so cross-section
+        # dims are rotation-independent and always represent true outer size.
+        # ---------------------------------------------------------------
+        section_result = _extract_dims_from_cross_section(solid, dims)
+
+        if section_result:
+            shape_type = section_result['shape_type']
+            sec_w = section_result['width']
+            sec_h = section_result['height']
+
+            # Length = longest sorted AABB dim (dominant axis always correct
+            # even for tilted profiles because length >> cross-section).
+            length_dim = float(sorted(dims)[-1])
+
+            # Build corrected 3D dims: (smallest_cross, largest_cross, length).
+            # These give the right volume ratio for wall-thickness estimation.
+            cross_min = min(sec_w, sec_h)
+            cross_max = max(sec_w, sec_h)
+            corrected_dims = (cross_min, cross_max, length_dim)
+
+            tube_type_info = _detect_tube_type(solid, corrected_dims, volume)
+
+            if shape_type == 'C':
+                tube_type_info['is_circular'] = True
+                tube_type_info['is_rectangular'] = False
+                outer_d = section_result['outer_diam']
+                c_dims = (outer_d, outer_d, length_dim)
+                result = _extract_circular_tube_features(solid, c_dims, volume, tube_type_info)
+                result['method'] = 'cross_section_circular'
+                return result
+            else:  # 'R'
+                tube_type_info['is_circular'] = False
+                tube_type_info['is_rectangular'] = True
+                result = _extract_rectangular_tube_features(solid, corrected_dims, volume, tube_type_info)
+                result['method'] = 'cross_section_rectangular'
+                return result
+
+        # ---------------------------------------------------------------
+        # Fallback: sorted AABB dims (cross-section method failed).
+        # ---------------------------------------------------------------
+        sorted_dims = tuple(sorted(dims))
+
         # Detect tube type (circular vs rectangular)
-        tube_type_info = _detect_tube_type(solid, dims, volume)
-        
+        tube_type_info = _detect_tube_type(solid, sorted_dims, volume)
+
         if tube_type_info['is_circular']:
-            return _extract_circular_tube_features(solid, dims, volume, tube_type_info)
+            return _extract_circular_tube_features(solid, sorted_dims, volume, tube_type_info)
         elif tube_type_info['is_rectangular']:
-            return _extract_rectangular_tube_features(solid, dims, volume, tube_type_info)
+            return _extract_rectangular_tube_features(solid, sorted_dims, volume, tube_type_info)
         else:
             # Fallback: treat as solid profile
-            return _extract_solid_profile_features(solid, dims, volume)
-    
+            return _extract_solid_profile_features(solid, sorted_dims, volume)
+
     except Exception as e:
         # Fallback on error
         return _create_fallback_result(dims, volume, error=str(e))
@@ -387,6 +435,166 @@ def _extract_torus_radii(solid) -> List[float]:
             unique_radii.append(r)
     
     return unique_radii
+
+
+def _extract_dims_from_cross_section(
+    solid,
+    fallback_dims: Tuple[float, float, float],
+) -> Optional[Dict[str, Any]]:
+    """
+    Determine profile cross-section shape (R or C) and outer dimensions by
+    cutting the solid with a plane perpendicular to its PCA-derived length axis.
+
+    This is more reliable than both AABB and PCA-extent tricks because:
+    - The cutting plane normal IS the true length axis (from PCA eigenvector),
+      so the section is always truly perpendicular regardless of assembly rotation.
+    - Vertex bbox in the section plane gives actual outer cross-section dims.
+    - Edge curve types (GeomAbs_Line vs GeomAbs_Circle) directly identify R vs C.
+
+    Returns:
+        {'shape_type': 'R'|'C', 'width': float, 'height': float,
+         'outer_diam': float, 'method': 'cross_section'}
+        or None when extraction fails.
+    """
+    if np is None or not HAS_OCP:
+        return None
+
+    try:
+        from OCP.BRepAlgoAPI import BRepAlgoAPI_Section
+        from OCP.BRepAdaptor import BRepAdaptor_Curve
+        from OCP.GeomAbs import GeomAbs_Line, GeomAbs_Circle
+        from OCP.gp import gp_Dir, gp_Pln, gp_Pnt
+
+        # ------------------------------------------------------------------
+        # Step 1: Collect vertices and run PCA to find the length axis.
+        # ------------------------------------------------------------------
+        points: List[Tuple[float, float, float]] = []
+        vexp = TopExp_Explorer(solid, TopAbs_VERTEX)
+        while vexp.More():
+            p = BRep_Tool.Pnt_s(TopoDS.Vertex_s(vexp.Current()))
+            points.append((p.X(), p.Y(), p.Z()))
+            vexp.Next()
+
+        if len(points) < 6:
+            return None
+
+        pts = np.unique(np.round(np.array(points, dtype=float), 4), axis=0)
+        if len(pts) < 6:
+            return None
+
+        centroid = pts.mean(axis=0)
+        centered = pts - centroid
+        cov = np.cov(centered.T)
+        evals, evecs = np.linalg.eigh(cov)
+
+        # Dominant eigenvector (largest eigenvalue) = profile length direction.
+        # The two smaller eigenvectors span the cross-section plane.
+        length_idx = int(np.argmax(evals))
+        cross_idxs = [i for i in range(3) if i != length_idx]
+        length_axis = evecs[:, length_idx]
+        sec_u = evecs[:, cross_idxs[0]]
+        sec_v = evecs[:, cross_idxs[1]]
+
+        # ------------------------------------------------------------------
+        # Step 2: Cut solid at centroid with plane perpendicular to length axis.
+        # ------------------------------------------------------------------
+        nx, ny, nz = float(length_axis[0]), float(length_axis[1]), float(length_axis[2])
+        cx, cy, cz = float(centroid[0]), float(centroid[1]), float(centroid[2])
+        plane = gp_Pln(gp_Pnt(cx, cy, cz), gp_Dir(nx, ny, nz))
+
+        try:
+            sec_op = BRepAlgoAPI_Section(solid, plane, False)
+        except TypeError:
+            sec_op = BRepAlgoAPI_Section(solid, plane)
+
+        sec_op.Build()
+        if hasattr(sec_op, 'IsDone') and not sec_op.IsDone():
+            return None
+
+        section_shape = sec_op.Shape()
+
+        # ------------------------------------------------------------------
+        # Step 3: Project section vertices onto the section plane (sec_u, sec_v).
+        # ------------------------------------------------------------------
+        sec_2d: List[Tuple[float, float]] = []
+        svert_exp = TopExp_Explorer(section_shape, TopAbs_VERTEX)
+        while svert_exp.More():
+            p = BRep_Tool.Pnt_s(TopoDS.Vertex_s(svert_exp.Current()))
+            v = np.array([p.X(), p.Y(), p.Z()]) - centroid
+            sec_2d.append((float(v @ sec_u), float(v @ sec_v)))
+            svert_exp.Next()
+
+        if len(sec_2d) < 4:
+            return None
+
+        # ------------------------------------------------------------------
+        # Step 4: 2D bounding box = outer cross-section dimensions.
+        # Outer vertices always bound inner ones, so all-vertex bbox = outer box.
+        # ------------------------------------------------------------------
+        u_vals = [s[0] for s in sec_2d]
+        v_vals = [s[1] for s in sec_2d]
+        sec_width  = max(u_vals) - min(u_vals)
+        sec_height = max(v_vals) - min(v_vals)
+
+        if sec_width < 1.0 or sec_height < 1.0:
+            return None
+
+        # ------------------------------------------------------------------
+        # Step 5: Determine shape type from edge curve lengths.
+        # ------------------------------------------------------------------
+        line_len = 0.0
+        arc_len  = 0.0
+        circle_radii: List[float] = []
+
+        eexp = TopExp_Explorer(section_shape, TopAbs_EDGE)
+        while eexp.More():
+            edge = TopoDS.Edge_s(eexp.Current())
+            try:
+                props = GProp_GProps()
+                if hasattr(BRepGProp, 'LinearProperties_s'):
+                    BRepGProp.LinearProperties_s(edge, props)
+                else:
+                    BRepGProp.LinearProperties(edge, props)
+                elen = props.Mass()
+                if elen > 1e-3:
+                    adaptor = BRepAdaptor_Curve(edge)
+                    ct = adaptor.GetType()
+                    if ct == GeomAbs_Line:
+                        line_len += elen
+                    elif ct == GeomAbs_Circle:
+                        arc_len += elen
+                        circle_radii.append(adaptor.Circle().Radius())
+            except Exception:
+                pass
+            eexp.Next()
+
+        total_len = line_len + arc_len
+        is_circ = (total_len > 0) and (arc_len / total_len > 0.85)
+
+        if is_circ:
+            outer_d = (max(circle_radii) * 2.0) if circle_radii else max(sec_width, sec_height)
+            outer_d = round(outer_d, 1)
+            return {
+                'shape_type': 'C',
+                'width': outer_d,
+                'height': outer_d,
+                'outer_diam': outer_d,
+                'method': 'cross_section',
+            }
+
+        # Rectangular: width >= height
+        w = round(max(sec_width, sec_height), 1)
+        h = round(min(sec_width, sec_height), 1)
+        return {
+            'shape_type': 'R',
+            'width': w,
+            'height': h,
+            'outer_diam': 0.0,
+            'method': 'cross_section',
+        }
+
+    except Exception:
+        return None
 
 
 def _estimate_wall_thickness(smallest_dim: float, middle_dim: float,
