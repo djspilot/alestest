@@ -74,7 +74,7 @@ except ImportError:
     HAS_PROFILE_FEATURES = False
 
 try:
-    from manufacturing_pipeline.analysis.cut_features import extract_cut_features_for_sheet
+    from manufacturing_pipeline.analysis.cut_features import extract_cut_features_for_sheet, extract_cut_features_for_profile
     HAS_CUT_FEATURES = True
 except ImportError:
     HAS_CUT_FEATURES = False
@@ -139,7 +139,11 @@ CLASSIFICATION_FEATURE_SCHEMA: Dict[str, Dict[str, Any]] = {
             "Tube_Material", "Tube_InnerRadius", "Tube_OuterRadius",
             "Tube_Success", "Tube_FilePath", "Tube_Weight",
         ],
-        "optional": [],
+        "optional": [
+            "Tube_NrHoles", "Tube_HoleContours", "Tube_HoleRadii",
+            "Tube_HoleTypes", "Tube_ThreadedHoles",
+            "Tube_CountersunkHoles", "Tube_CountersunkAngles",
+        ],
     },
     "anders": {
         "part_class": "anders",
@@ -2488,7 +2492,35 @@ def _process_profiel_item(
     ET.SubElement(calc_result, 'Tube_Success').text = 'True' if success else 'False'
     ET.SubElement(calc_result, 'Tube_FilePath').text = ''  # Populated later if needed
     ET.SubElement(calc_result, 'Tube_Weight').text = _format_float(weight * quantity)  # Total weight
-    
+
+    # Fase 2: Hole detection for profiles
+    if HAS_CUT_FEATURES and part_solid is not None:
+        try:
+            cut_features = extract_cut_features_for_profile(part_solid, 'profiel')
+            if cut_features and cut_features.nr_holes > 0:
+                hole_contours = list(getattr(cut_features, 'hole_contours', []) or [])
+                hole_radii = list(getattr(cut_features, 'hole_radii', []) or [])
+                hole_types = [str(v).strip().lower() for v in list(getattr(cut_features, 'hole_types', []) or []) if str(v).strip()]
+                threaded_count = int(getattr(cut_features, 'threaded_holes', 0) or 0)
+                countersunk_count = int(getattr(cut_features, 'countersunk_holes', 0) or 0)
+                countersunk_angles_list = [
+                    float(v) for v in list(getattr(cut_features, 'countersunk_angles', []) or [])
+                    if float(v) > 0
+                ]
+
+                ET.SubElement(calc_result, 'Tube_NrHoles').text = str(cut_features.nr_holes)
+                ET.SubElement(calc_result, 'Tube_HoleContours').text = '_'.join(_format_float(v) for v in hole_contours) if hole_contours else ''
+                ET.SubElement(calc_result, 'Tube_HoleRadii').text = '_'.join(_format_float(v) for v in hole_radii) if hole_radii else ''
+                ET.SubElement(calc_result, 'Tube_HoleTypes').text = '_'.join(hole_types) if hole_types else ''
+                ET.SubElement(calc_result, 'Tube_ThreadedHoles').text = str(max(0, threaded_count))
+                ET.SubElement(calc_result, 'Tube_CountersunkHoles').text = str(max(0, countersunk_count))
+                ET.SubElement(calc_result, 'Tube_CountersunkAngles').text = '_'.join(_format_float(v) for v in countersunk_angles_list) if countersunk_angles_list else ''
+
+                print(f"    [OK] Profile holes detected: {cut_features.nr_holes} holes "
+                      f"({threaded_count} threaded, {countersunk_count} countersunk)")
+        except Exception as e:
+            print(f"    [WARN] Profile hole detection failed: {str(e)[:80]}")
+
     return calc_result
 
 

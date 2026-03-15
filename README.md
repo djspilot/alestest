@@ -1,13 +1,29 @@
 # ALES Manufacturing Pipeline
 
 **Laatste update:** 15 maart 2026
-**Versie:** 3.0 (Profile Router Integration)
+**Versie:** 3.1 (Profile Hole Detection)
 
 > Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis.
 
+### v3.1 — Profile Hole Detection (15 maart 2026)
+
+**Nieuw: Gatendetectie voor profielen (Fase 2)**
+
+De pipeline detecteert nu ook gaten in profielen (koker, buis, hoekstaal):
+
+| Feature | Beschrijving |
+|---------|-------------|
+| **Ronde gaten** | Cylindrische gaten via `detect_holes()` met `filter_bores=True` |
+| **Vormgaten** | Sleuven/rectangles op planaire vlakken (koker-wanden, flenzen) |
+| **Tapgaten** | ISO 68-1 threadherkenning (M3–M68) zonder diepte-check |
+| **Verzonken gaten** | Countersink detectie met hoek |
+| **XML export** | Nieuwe `Tube_NrHoles`, `Tube_HoleTypes`, `Tube_ThreadedHoles` etc. velden |
+
+Binnenboring van buizen en koker-wanden worden correct uitgefilterd (geen false positives).
+
 ### v3.0 — Profile Router Integration (15 maart 2026)
 
-**Nieuw: Pre-routing classificatie via cross-sectie analyse**
+**Pre-routing classificatie via cross-sectie analyse**
 
 De pipeline bepaalt nu vóór alle analyse welk type onderdeel het is:
 
@@ -66,11 +82,9 @@ De pipeline bepaalt nu vóór alle analyse welk type onderdeel het is:
   2. **Gezette plaat** (bent sheet met >0 bends) → Unfold via FreeCAD SheetMetal
   3. **Profiel** (draaideel, buis, hoekstaal) → Cross-section karakterisering
   4. **Anders** (samenstellingen, ingewikkelde vormen) → Geometrie-dump
-- **⭐ Gatdetectie + Snijdata (Fase 1: plaat/gezette plaat)** — 
-  - Cylindrische gaten + vormgaten (slots/rectangles) met perimeters
-  - Gatcontours, buitencontour, totale snijlengte
-10000503252_Rev_00  - X/Y box dimensions
-  - Flat pattern analyse (na unfold) of 3D fallback
+- **⭐ Gatdetectie + Snijdata** —
+  - **Fase 1 (plaat/gezette plaat):** Cylindrische gaten + vormgaten, contours, buitencontour, totale snijlengte, flat pattern of 3D
+  - **Fase 2 (profielen):** Gaten in koker/buis/hoekstaal, tapgaten, verzonken gaten, XML export (`Tube_NrHoles` etc.)
 - **Zetanalyse** — Telt productierelevante zettingen, sluit profielen en afrondingen uit
 - **Plaatwerk ontvouwen** — FreeCAD SheetMetal workbench met multi-poging strategie (gezette_plaat only)
 - **AAG Feature Recognition** — Attributed Adjacency Graph voor topologie-gebaseerde herkenning
@@ -548,6 +562,6 @@ python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ 
 ---
 
 **Laatste update:** 15 maart 2026
-**Versie:** 3.0 (Profile Router Integration)
+**Versie:** 3.1 (Profile Hole Detection)
 
-> Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis van v2.1 t/m v3.0.
+> Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis van v2.1 t/m v3.1.
