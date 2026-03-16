@@ -1,9 +1,85 @@
 # ALES Manufacturing Pipeline
 
 **Laatste update:** 16 maart 2026
-**Versie:** 3.4 (Performance Profiling + Optimalisaties)
+**Versie:** 3.5 (Segfault Fix + AAG Fallback)
 
 > Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis.
+
+### v3.5 — XCAF Segfault Fix + AAG als Fallback (16 maart 2026)
+
+**Twee architectuurwijzigingen die de stabiliteit en snelheid sterk verbeteren**
+
+#### Probleem 1: Segfault op complexe assemblies
+
+Bij het laden van complexe STEP-bestanden (bijv. 803139-0010.step, een bordes met 71 solids) crashte de XCAF reader in de OCP/OpenCascade C++ kernel met een segmentation fault (exit code 139). Dit is een onherstelbare crash — het hele Python-proces sterft.
+
+**Oplossing: XCAF subprocess probe**
+
+De XCAF reader wordt nu eerst in een apart subprocess getest. Als dat subprocess crasht (segfault), valt de pipeline automatisch terug op de CadQuery importer — zonder dat het hoofdproces ooit crasht.
+
+```
+XCAF probe (subprocess)
+├── OK → laad in-process via XCAF (sneller, namen behouden)
+├── CRASH (segfault) → automatisch CadQuery fallback
+└── TIMEOUT (>60s) → automatisch CadQuery fallback
+```
+
+**Waarom een subprocess?** Een segfault in C++ code (OCP/OpenCascade) kan niet worden gevangen met Python try/except. Het enige veilige mechanisme is het isoleren van de risicovolle code in een apart proces.
+
+| Bestand | Voor | Na |
+|---------|------|-----|
+| 803139-0010.step (4.5MB, 71 solids) | SEGFAULT (crash) | 57s OK |
+
+#### Probleem 2: AAG als bottleneck
+
+AAG (Attributed Adjacency Graph) analyse draaide altijd als stap 3, via een FreeCAD subprocess met 300s timeout. Voor de meeste bestanden was dit onnodig — de standaard geometrie-analyse (dikte-detectie, bend counting, profiel classificatie) levert al voldoende data.
+
+**Oplossing: AAG als fallback**
+
+AAG draait nu alleen wanneer:
+1. `--aag` flag is meegegeven (handmatig forceren), OF
+2. Standaard analyse heeft **geen dikte** EN **geen classificatie** gevonden (auto-fallback)
+
+**Waarom?** De standaard analyse (stap 3) detecteert dikte via parallel-face pairing en classificeert via surface ratio's, bend counting en profiel cross-secties. Voor >95% van de onderdelen is dit voldoende. AAG voegt alleen waarde toe bij zeer ongebruikelijke geometrie waar geen van deze methoden werkt.
+
+| Bestand | Voor (AAG primair) | Na (AAG fallback) | Verschil |
+|---------|-------------------|-------------------|----------|
+| 10001071891_Rev_00.step | 8m 10s | 3m 13s | **-60%** |
+| 803139-0010.step | SEGFAULT | 57s | **Werkt nu** |
+
+**Analyse flow (nieuw):**
+```
+[1/7] Load STEP                → XCAF probe + fallback
+[2/7] Profile Router           → PLAAT / PROFIEL / ROND / OVERIG
+[3/7] Classify geometry        → Dikte, bends, profiel, sheet metal
+      AAG Fallback             → Alleen als stap 3 onvoldoende data geeft
+[5/7] Unfold                   → FreeCAD SheetMetal (indien plaatwerk)
+[6/7] Detect holes             → Cilindrisch + vormgaten
+[7/7] Save results             → PDF, timing JSON
+```
+
+**Timing output (voorbeeld met AAG skip):**
+```
+╔════════════════════════════════════════════════════════════╗
+║ 10001071891_Rev_00.step (6.1 MB)                          ║
+╠════════════════════════════════════════════════════════════╣
+║ [1/7] Load STEP                  4.84s   OK               ║
+║ [2/7] Profile Router             0.73s   OK               ║
+║ [3/7] Classify geometry          0.35s   OK               ║
+║       AAG Fallback               SKIP                     ║
+║ [5/7] Unfold                  3m 00s     OK               ║
+║ [6/7] Detect holes               7.33s   OK               ║
+║       ├─ Cylindrical             0.25s  (8 found)         ║
+║       ├─ Shaped                  7.09s  (255 found)       ║
+║       └─ Dedup                   0.00s                    ║
+║ [7/7] Save results               0.00s   OK               ║
+╠════════════════════════════════════════════════════════════╣
+║ TOTAL                          3m 13s                     ║
+║ Faces: 2,441  Holes: 262  Solids: 7                       ║
+╚════════════════════════════════════════════════════════════╝
+```
+
+Timing JSON wordt opgeslagen in `data/output/<part>/<part>_timing.json` voor vergelijking tussen bestanden.
 
 ### v3.4 — Performance Profiling + Optimalisaties (16 maart 2026)
 
@@ -17,29 +93,6 @@
 | **Type/dim bucketing** in `detect_shaped_holes()` | O(n²) → O(n × bucket) voor deduplicatie |
 | **Squared distance** in inner loops | `math.sqrt()` vermeden waar niet nodig |
 | **Normal-direction grouping** in `part_analyzer.py` | Snellere dikte-detectie via anti-parallel lookup |
-
-**Timing output (voorbeeld):**
-```
-╔════════════════════════════════════════════════════════════╗
-║ 10015088_3.stp (3.2 MB)                                   ║
-╠════════════════════════════════════════════════════════════╣
-║ [1/7] Load STEP                  1.17s   OK               ║
-║ [2/7] Profile Router             0.65s   OK               ║
-║ [3/7] AAG Analysis              5m 00s   OK               ║
-║ [4/7] Classify geometry          0.30s   OK               ║
-║ [5/7] Unfold                    1m 16s   OK               ║
-║ [6/7] Detect holes               0.77s   OK               ║
-║       ├─ Cylindrical              0.00s  (0 found)        ║
-║       ├─ Shaped                   0.75s  (17 found)       ║
-║       └─ Dedup                    0.00s                   ║
-║ [7/7] Save results               0.00s   OK               ║
-╠════════════════════════════════════════════════════════════╣
-║ TOTAL                           6m 19s                    ║
-║ Faces: 2,204  Holes: 17  Solids: 19                       ║
-╚════════════════════════════════════════════════════════════╝
-```
-
-Timing JSON wordt opgeslagen in `data/output/<part>/<part>_timing.json` voor vergelijking tussen bestanden.
 
 ### v3.3 — Hybride Dwarsdoorsnede + FreeCAD Lip-detectie (16 maart 2026)
 
@@ -128,10 +181,10 @@ De pipeline bepaalt nu vóór alle analyse welk type onderdeel het is:
 
 **Analyse flow (quick mode):**
 ```
-[1/7] STEP laden
+[1/7] STEP laden (XCAF probe + CadQuery fallback)
 [2/7] Profile Router → PLAAT / PROFIEL / ROND / OVERIG
-[3/7] AAG Feature Recognition
-[4/7] Geometrie analyse
+[3/7] Geometrie analyse (dikte, bends, classificatie)
+      AAG Fallback (alleen als stap 3 onvoldoende data geeft)
 [5/7] Unfold (indien plaatwerk)
 [6/7] Gaten detectie
 [7/7] Resultaten opslaan
@@ -174,7 +227,7 @@ De pipeline bepaalt nu vóór alle analyse welk type onderdeel het is:
   - **Fase 2 (profielen):** Gaten in koker/buis/hoekstaal, tapgaten, verzonken gaten, XML export (`Tube_NrHoles` etc.)
 - **Zetanalyse** — Telt productierelevante zettingen, sluit profielen en afrondingen uit
 - **Plaatwerk ontvouwen** — FreeCAD SheetMetal workbench met multi-poging strategie (gezette_plaat only)
-- **AAG Feature Recognition** — Attributed Adjacency Graph voor topologie-gebaseerde herkenning
+- **AAG Feature Recognition (fallback)** — Attributed Adjacency Graph, draait alleen als standaard analyse onvoldoende data oplevert of met `--aag` flag
 - **ISO-normen** — ISO 2768, ISO 286, ISO 1302, ISO 68-1, ISO 13715, EN 10025/573
 - **ERP-integratie** — XML/Excel export in SpaceClaim-formaat, Windows file watcher service
 - **Batchverwerking** — Parallelle analyse van hele mappen met caching
@@ -649,6 +702,6 @@ python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ 
 ---
 
 **Laatste update:** 16 maart 2026
-**Versie:** 3.4 (Performance Profiling + Optimalisaties)
+**Versie:** 3.5 (Segfault Fix + AAG Fallback)
 
-> Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis van v2.1 t/m v3.3.
+> Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis van v2.1 t/m v3.4.
