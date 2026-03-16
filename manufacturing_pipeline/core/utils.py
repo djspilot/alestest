@@ -227,44 +227,50 @@ def run_analysis(step_file, output_dir, args):
     6. Analyze holes (on flat pattern if available)
     7. Generate report
     """
-    from manufacturing_pipeline.analysis.step_processing import load_step_file, detect_holes, detect_shaped_holes, deduplicate_holes
+    from manufacturing_pipeline.analysis.step_processing import load_step_file, detect_holes, detect_shaped_holes, deduplicate_holes, precompute_face_properties
     from manufacturing_pipeline.analysis.part_analyzer import analyze_part_geometry, format_analysis_report, PartType
-    
+    from manufacturing_pipeline.core.profiler import AnalysisProfiler
+
     # Import AAG Analyzer
     try:
         from manufacturing_pipeline.scripts.aag_analyzer import AAGAnalyzer
     except ImportError as e:
         print(f"Warning: Could not import AAGAnalyzer: {e}")
-        # Fallback dummy class if needed or just let it fail later
         AAGAnalyzer = None
 
     part_name = os.path.splitext(os.path.basename(step_file))[0]
 
+    # Initialize profiler
+    file_size_mb = os.path.getsize(step_file) / (1024 * 1024)
+    profiler = AnalysisProfiler(os.path.basename(step_file), file_size_mb)
+
     print("\n[1/7] Loading STEP file...")
-    shape = load_step_file(step_file)
+    with profiler.step("Load STEP", 1, 7):
+        shape = load_step_file(step_file)
 
     # ================================================================
     # STEP 1.5: Profile Router (Pre-classification)
     # ================================================================
     print("[2/7] Running profile router...")
-    try:
-        from manufacturing_pipeline.analysis.router import route_step_file as _route_step_file
-        route_result = _route_step_file(step_file)
-        print(f"  Route: {route_result.category.value.upper()} "
-              f"(profiel: {route_result.profile_label}, "
-              f"confidence: {route_result.confidence:.0%})")
-        print(f"  {route_result.reasoning}")
-    except Exception as e:
-        print(f"  Warning: Router failed ({e}), continuing without routing")
-        route_result = None
+    with profiler.step("Profile Router", 2, 7):
+        try:
+            from manufacturing_pipeline.analysis.router import route_step_file as _route_step_file
+            route_result = _route_step_file(step_file)
+            print(f"  Route: {route_result.category.value.upper()} "
+                  f"(profiel: {route_result.profile_label}, "
+                  f"confidence: {route_result.confidence:.0%})")
+            print(f"  {route_result.reasoning}")
+        except Exception as e:
+            print(f"  Warning: Router failed ({e}), continuing without routing")
+            route_result = None
 
     # ================================================================
     # STEP 3: AAG Feature Recognition (The "Brain")
     # ================================================================
     print("[3/7] Running AAG Feature Recognition...")
-    
-    # Run via subprocess to use FreeCAD's robust geometry engine
-    aag_data = run_aag_analysis(step_file)
+    with profiler.step("AAG Analysis", 3, 7):
+        # Run via subprocess to use FreeCAD's robust geometry engine
+        aag_data = run_aag_analysis(step_file)
     
     # Create a simple object to hold results for easier access
     class AAGResult:
@@ -287,7 +293,12 @@ def run_analysis(step_file, output_dir, args):
     # STEP 3: Standard Geometry Analysis
     # ================================================================
     print("[4/7] Analyzing dimensions & geometry...")
-    analysis = analyze_part_geometry(shape, part_name)
+    with profiler.step("Classify geometry", 4, 7):
+        analysis = analyze_part_geometry(shape, part_name)
+
+    # Precompute face properties once for hole detection (avoids redundant OCP calls)
+    face_data = precompute_face_properties(shape)
+    profiler.count("faces", len(face_data))
 
     # ================================================================
     # STEP 4: Classification (Logic Update)
@@ -372,126 +383,138 @@ def run_analysis(step_file, output_dir, args):
 
     if should_unfold:
         print("\n[5/7] Unfolding sheet metal...")
-        unfold_result = run_unfold_to_step(step_file, output_dir, part_name, analysis)
+        with profiler.step("Unfold", 5, 7):
+            unfold_result = run_unfold_to_step(step_file, output_dir, part_name, analysis)
 
-        if unfold_result and unfold_result.get('success'):
-            flat_step_path = unfold_result.get('flat_step_path')
-            print(f"  [OK] Unfold geslaagd: {unfold_result.get('flat_length', 0):.0f} x {unfold_result.get('flat_width', 0):.0f} mm")
-            print(f"  [OK] Fold lines: {unfold_result.get('fold_lines', 0)}")
-            
-            # Check thickness from unfold result
-            unfold_thickness = unfold_result.get('thickness', 0)
-            if unfold_thickness > 0:
-                print(f"  [OK] Detected thickness (unfold): {unfold_thickness:.2f} mm")
-                
-                # Sanity check: Sheet metal thickness is usually < 25mm
-                if unfold_thickness < 25.0:
-                    if analysis.thickness == 0 or abs(analysis.thickness - unfold_thickness) > 0.1:
-                        print(f"  -> Updating thickness to {unfold_thickness:.2f} mm (Unfold is authoritative)")
-                        analysis.thickness = unfold_thickness
-                else:
-                    print(f"  -> Ignoring unfold thickness (seems too large: {unfold_thickness:.2f} mm)")
+            if unfold_result and unfold_result.get('success'):
+                flat_step_path = unfold_result.get('flat_step_path')
+                print(f"  [OK] Unfold geslaagd: {unfold_result.get('flat_length', 0):.0f} x {unfold_result.get('flat_width', 0):.0f} mm")
+                print(f"  [OK] Fold lines: {unfold_result.get('fold_lines', 0)}")
 
-            # Load the flat shape for hole analysis
-            if flat_step_path and os.path.exists(flat_step_path):
-                flat_shape = load_step_file(flat_step_path)
-                print(f"  [OK] Flat STEP: {flat_step_path}")
-        else:
-            print(f"  ⚠ Unfold niet gelukt: {unfold_result.get('error', 'onbekend') if unfold_result else 'geen resultaat'}")
+                unfold_thickness = unfold_result.get('thickness', 0)
+                if unfold_thickness > 0:
+                    print(f"  [OK] Detected thickness (unfold): {unfold_thickness:.2f} mm")
+
+                    if unfold_thickness < 25.0:
+                        if analysis.thickness == 0 or abs(analysis.thickness - unfold_thickness) > 0.1:
+                            print(f"  -> Updating thickness to {unfold_thickness:.2f} mm (Unfold is authoritative)")
+                            analysis.thickness = unfold_thickness
+                    else:
+                        print(f"  -> Ignoring unfold thickness (seems too large: {unfold_thickness:.2f} mm)")
+
+                if flat_step_path and os.path.exists(flat_step_path):
+                    flat_shape = load_step_file(flat_step_path)
+                    print(f"  [OK] Flat STEP: {flat_step_path}")
+            else:
+                print(f"  ⚠ Unfold niet gelukt: {unfold_result.get('error', 'onbekend') if unfold_result else 'geen resultaat'}")
     else:
         print(f"\n[5/7] Unfold: Niet nodig ({part_category})")
+        with profiler.step("Unfold", 5, 7) as s:
+            s["status"] = "SKIP"
 
     # ================================================================
     # STEP 6: Detect holes - on FLAT pattern if available
     # ================================================================
     print("\n[6/7] Detecting holes...")
+    with profiler.step("Detect holes", 6, 7):
+        if flat_shape is not None:
+            print(f"  Analyseren op: UITSLAG (flat pattern)")
+            analysis_shape = flat_shape
+            is_flat = True
+            # Precompute face data for flat pattern (different shape)
+            hole_face_data = precompute_face_properties(flat_shape)
+        else:
+            print(f"  Analyseren op: 3D model")
+            analysis_shape = shape
+            is_flat = False
+            hole_face_data = face_data  # Reuse already-computed data
 
-    if flat_shape is not None:
-        print(f"  Analyseren op: UITSLAG (flat pattern)")
-        analysis_shape = flat_shape
-        is_flat = True
-    else:
-        print(f"  Analyseren op: 3D model")
-        analysis_shape = shape
-        is_flat = False
+        with profiler.sub_step("Cylindrical"):
+            circular_holes = detect_holes(
+                analysis_shape, is_flat_pattern=is_flat,
+                is_turned=analysis.is_turned, face_data=hole_face_data
+            )
+        profiler.set_sub_count("Cylindrical", len(circular_holes))
 
-    circular_holes = detect_holes(analysis_shape, is_flat_pattern=is_flat)
-    shaped_holes = detect_shaped_holes(analysis_shape)
-    
-    # Deduplicate holes (remove circular holes that are part of shaped holes)
-    circular_holes = deduplicate_holes(circular_holes, shaped_holes)
-    
-    total_holes = len(circular_holes) + len(shaped_holes)
+        with profiler.sub_step("Shaped"):
+            shaped_holes = detect_shaped_holes(analysis_shape, face_data=hole_face_data)
+        profiler.set_sub_count("Shaped", len(shaped_holes))
+
+        with profiler.sub_step("Dedup"):
+            circular_holes = deduplicate_holes(circular_holes, shaped_holes)
+
+        total_holes = len(circular_holes) + len(shaped_holes)
+        profiler.count("holes", total_holes)
 
     print(f"  Cilindrische gaten: {len(circular_holes)}")
     for i, h in enumerate(circular_holes):
         print(f"    {i+1}. Ø{h.diameter:.2f}mm at {h.position}")
-        
+
     print(f"  Shaped holes (slots/rect): {len(shaped_holes)}")
     for i, h in enumerate(shaped_holes):
         print(f"    {i+1}. {h['type']} {h['dim']} at {h['center']}")
-        
+
     print(f"  Totaal: {total_holes}")
 
     # ================================================================
     # STEP 7: Save results
     # ================================================================
     print("\n[7/7] Saving results...")
-
-    # Update analysis with flat dimensions if available
-    if unfold_result and unfold_result.get('success'):
-        analysis.unfold_result = unfold_result  # Attach for PDF generation
-        analysis.flat_length = unfold_result.get('flat_length', 0)
-        analysis.flat_width = unfold_result.get('flat_width', 0)
-        
-        # Update main dimensions to reflect the flat pattern (as requested)
-        # We keep the thickness as the 3rd dimension
-        analysis.length = analysis.flat_length
-        analysis.width = analysis.flat_width
-        analysis.height = analysis.thickness # Height becomes thickness in flat view
-        
-        # Update bend count to match the verified unfold count
-        # AAG can sometimes overcount (e.g. segmented bends), Unfold is authoritative
-        if unfold_result.get('fold_lines', 0) > 0:
-            analysis.bend_count_erp = unfold_result.get('fold_lines')
-
-    # Save analysis report
-    report_path = os.path.join(output_dir, f"{part_name}_analysis.txt")
-    with open(report_path, 'w', encoding='utf-8') as f:
-        f.write(format_analysis_report(analysis))
-        f.write(f"\n\nCategorie: {part_category}\n")
-        f.write(f"Gaten (flat): {total_holes}\n")
-        if aag_result.success:
-            f.write(f"AAG Analysis (Raw): {aag_result.bend_count} bends detected\n")
+    with profiler.step("Save results", 7, 7):
+        # Update analysis with flat dimensions if available
         if unfold_result and unfold_result.get('success'):
-            f.write(f"Unfold Analysis: {unfold_result.get('fold_lines')} fold lines (Verified)\n")
-            
-            # Report Zettingen vs Tegenzettingen
-            bends = unfold_result.get('bends_logical', [])
-            if bends:
-                up_count = sum(1 for b in bends if b['type'] == 'up')
-                down_count = sum(1 for b in bends if b['type'] == 'down')
-                f.write(f"  Zettingen (Up): {up_count}\n")
-                f.write(f"  Tegenzettingen (Down): {down_count}\n")
-                f.write("  Bend Sequence:\n")
-                for i, b in enumerate(bends):
-                    f.write(f"    {i+1}. {b['type'].upper()} {b['angle']:.1f}° (R={b['radius']:.1f}mm)\n")
+            analysis.unfold_result = unfold_result  # Attach for PDF generation
+            analysis.flat_length = unfold_result.get('flat_length', 0)
+            analysis.flat_width = unfold_result.get('flat_width', 0)
 
-            if unfold_result.get('fold_details'):
-                f.write("  Fold Lines (Center X, Y, Z | Length):\n")
-                for fold in unfold_result.get('fold_details'):
-                    c = fold['center']
-                    f.write(f"  - Fold {fold['id']}: ({c[0]:.1f}, {c[1]:.1f}, {c[2]:.1f}) L={fold['length']:.1f}mm\n")
-            f.write(f"Flat dimensions: {analysis.flat_length:.0f} x {analysis.flat_width:.0f} mm\n")
-    print(f"  Rapport: {report_path}")
+            analysis.length = analysis.flat_length
+            analysis.width = analysis.flat_width
+            analysis.height = analysis.thickness
 
-    # Store extra info for PDF generation
-    analysis.part_category = part_category
-    analysis.unfold_result = unfold_result
-    analysis.flat_step_path = flat_step_path
-    analysis.route_result = route_result  # Profile router result
-    if aag_result.success:
-        analysis.aag_result = aag_result.data # Store AAG result for PDF
+            if unfold_result.get('fold_lines', 0) > 0:
+                analysis.bend_count_erp = unfold_result.get('fold_lines')
+
+        # Save analysis report
+        report_path = os.path.join(output_dir, f"{part_name}_analysis.txt")
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(format_analysis_report(analysis))
+            f.write(f"\n\nCategorie: {part_category}\n")
+            f.write(f"Gaten (flat): {total_holes}\n")
+            if aag_result.success:
+                f.write(f"AAG Analysis (Raw): {aag_result.bend_count} bends detected\n")
+            if unfold_result and unfold_result.get('success'):
+                f.write(f"Unfold Analysis: {unfold_result.get('fold_lines')} fold lines (Verified)\n")
+
+                bends = unfold_result.get('bends_logical', [])
+                if bends:
+                    up_count = sum(1 for b in bends if b['type'] == 'up')
+                    down_count = sum(1 for b in bends if b['type'] == 'down')
+                    f.write(f"  Zettingen (Up): {up_count}\n")
+                    f.write(f"  Tegenzettingen (Down): {down_count}\n")
+                    f.write("  Bend Sequence:\n")
+                    for i, b in enumerate(bends):
+                        f.write(f"    {i+1}. {b['type'].upper()} {b['angle']:.1f}° (R={b['radius']:.1f}mm)\n")
+
+                if unfold_result.get('fold_details'):
+                    f.write("  Fold Lines (Center X, Y, Z | Length):\n")
+                    for fold in unfold_result.get('fold_details'):
+                        c = fold['center']
+                        f.write(f"  - Fold {fold['id']}: ({c[0]:.1f}, {c[1]:.1f}, {c[2]:.1f}) L={fold['length']:.1f}mm\n")
+                f.write(f"Flat dimensions: {analysis.flat_length:.0f} x {analysis.flat_width:.0f} mm\n")
+        print(f"  Rapport: {report_path}")
+
+        # Store extra info for PDF generation
+        analysis.part_category = part_category
+        analysis.unfold_result = unfold_result
+        analysis.flat_step_path = flat_step_path
+        analysis.route_result = route_result  # Profile router result
+        if aag_result.success:
+            analysis.aag_result = aag_result.data
+
+    # Print profiling summary and save timing data
+    profiler.count("solids", len(shape.solids().vals()) if hasattr(shape, 'solids') else 1)
+    profiler.print_summary()
+    profiler.save_json(output_dir)
 
     return analysis, total_holes
 

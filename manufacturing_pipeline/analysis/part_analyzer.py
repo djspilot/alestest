@@ -235,34 +235,47 @@ def analyze_part_geometry(shape, name: str = "Part") -> PartAnalysis:
 
     if not is_turned:
         # Methode 1: Zoek tegenoverliggende vlakke faces
-        from OCP.gp import gp_Vec
+        # Pre-extract plane properties once, then group by normal direction
+        # to avoid O(n²) BRepAdaptor calls in the inner loop
+        plane_props = []
+        for f, area in planar_faces:
+            surf = BRepAdaptor_Surface(f, True)
+            pln = surf.Plane()
+            n = pln.Axis().Direction()
+            loc = pln.Location()
+            nx, ny, nz = n.X(), n.Y(), n.Z()
+            d = -(nx*loc.X() + ny*loc.Y() + nz*loc.Z())
+            plane_props.append((nx, ny, nz, d, area))
+
+        # Group by quantized normal direction for fast anti-parallel lookup
+        from collections import defaultdict
+        normal_groups = defaultdict(list)
+        for idx, (nx, ny, nz, d, area) in enumerate(plane_props):
+            # Normalize: pick canonical direction (first non-zero component positive)
+            if nx < -0.01 or (abs(nx) < 0.01 and ny < -0.01) or (abs(nx) < 0.01 and abs(ny) < 0.01 and nz < -0.01):
+                key = (round(-nx, 1), round(-ny, 1), round(-nz, 1))
+                normal_groups[key].append((idx, nx, ny, nz, d, area, True))  # True = flipped
+            else:
+                key = (round(nx, 1), round(ny, 1), round(nz, 1))
+                normal_groups[key].append((idx, nx, ny, nz, d, area, False))
 
         thickness_candidates = {}
-        for i, (f1, area1) in enumerate(planar_faces):
-            surf1 = BRepAdaptor_Surface(f1, True)
-            pln1 = surf1.Plane()
-            n1 = pln1.Axis().Direction()
-            loc1 = pln1.Location()
-            d1 = -(n1.X()*loc1.X() + n1.Y()*loc1.Y() + n1.Z()*loc1.Z())
+        for key, group in normal_groups.items():
+            # Split into positive and negative (flipped) normal directions
+            pos_faces = [(idx, nx, ny, nz, d, area) for idx, nx, ny, nz, d, area, flipped in group if not flipped]
+            neg_faces = [(idx, nx, ny, nz, d, area) for idx, nx, ny, nz, d, area, flipped in group if flipped]
 
-            for j, (f2, area2) in enumerate(planar_faces):
-                if i >= j:
-                    continue
-                surf2 = BRepAdaptor_Surface(f2, True)
-                pln2 = surf2.Plane()
-                n2 = pln2.Axis().Direction()
-                loc2 = pln2.Location()
-
-                # Tegenoverliggende normalen?
-                dot = n1.X()*n2.X() + n1.Y()*n2.Y() + n1.Z()*n2.Z()
-                if abs(dot + 1.0) < 0.01:  # Anti-parallel
-                    d2 = -(n2.X()*loc2.X() + n2.Y()*loc2.Y() + n2.Z()*loc2.Z())
-                    thickness = abs(d1 + d2)
-                    if thickness > 0.1 and thickness < 25:
-                        t_round = round(thickness, 1)
-                        if t_round not in thickness_candidates:
-                            thickness_candidates[t_round] = 0
-                        thickness_candidates[t_round] += min(area1, area2)
+            # Only anti-parallel pairs can form thickness
+            for _, n1x, n1y, n1z, d1, area1 in pos_faces:
+                for _, n2x, n2y, n2z, d2, area2 in neg_faces:
+                    dot = n1x*n2x + n1y*n2y + n1z*n2z
+                    if abs(dot + 1.0) < 0.01:  # Anti-parallel
+                        thickness = abs(d1 + d2)
+                        if 0.1 < thickness < 25:
+                            t_round = round(thickness, 1)
+                            if t_round not in thickness_candidates:
+                                thickness_candidates[t_round] = 0
+                            thickness_candidates[t_round] += min(area1, area2)
 
         # Methode 2: Schat dikte uit cilindrische faces (buigradii)
         # Binnen-buigradius is typisch gelijk aan plaatdikte

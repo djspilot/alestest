@@ -118,6 +118,7 @@ python -m pytest tests/
 │   │   ├── config.py               # Pipeline configuration, module settings
 │   │   ├── models.py               # Data models and types
 │   │   ├── pipeline_init.py        # Pipeline initialization helpers
+│   │   ├── profiler.py             # Performance profiling & timing (AnalysisProfiler)
 │   │   └── utils.py                # Shared utilities, constants, path definitions
 │   │
 │   ├── analysis/                   # Analysis modules (business logic)
@@ -220,8 +221,15 @@ Generate report → Store in database
 
 ### Key Module Responsibilities
 
+**Profiler** (`core/profiler.py`):
+- `AnalysisProfiler` class with `step()` and `sub_step()` context managers
+- Produces box-drawing timing table in terminal after each analysis run
+- Saves `{part_name}_timing.json` to output dir for cross-file comparison
+- Uses `time.perf_counter()` for accurate measurements
+
 **STEP Processing** (`analysis/step_processing.py`):
 - Load STEP files using CadQuery/OCP
+- `precompute_face_properties()`: single-pass face property extraction (avoids redundant OCP calls)
 - Detect holes: cylindrical (via cylindrical faces) and shaped (via inner wires)
 - Detect bends: identify cylindrical bend faces with radius/angle
 - Classify face types (planar, cylindrical, conical, etc.)
@@ -298,6 +306,20 @@ The pipeline uses **two complementary methods**:
    - Essential for laser-cut parts with non-circular holes
 
 **Best practice**: Use both methods and combine results. For sheet metal, run inner wire detection on the unfolded flat pattern.
+
+### Performance Optimizations
+
+The pipeline uses several strategies to handle large STEP files efficiently:
+
+1. **`precompute_face_properties()`**: Single pass extracts all face types, areas, centers, and geometry-specific data (cylinder radius/axis, plane normal/d) as primitive Python values. Avoids redundant `BRepAdaptor_Surface` calls in detection loops.
+
+2. **Diameter bucketing** in `detect_holes()`: Candidates are grouped by `round(diameter, 2)` into a `defaultdict`. Only candidates in the same bucket (±0.01) are compared, reducing O(n²) to O(n × bucket_size).
+
+3. **Type/dim bucketing** in `detect_shaped_holes()` dedup: Shaped holes are grouped by `(type, dim)` tuple before distance comparison.
+
+4. **Squared distance comparisons**: Inner loops use `dist_sq < threshold²` instead of `math.sqrt()`, only computing sqrt when needed for normalization.
+
+5. **Profiling**: Each `run_analysis()` call produces a `_timing.json` file with per-step and sub-step timings. Use these to identify bottlenecks across different STEP files.
 
 ### Sheet Metal Unfold Strategy
 

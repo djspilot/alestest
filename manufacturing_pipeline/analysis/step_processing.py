@@ -661,7 +661,80 @@ def debug_hole_detection(cq_object):
     return debug_info
 
 
-def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False):
+def precompute_face_properties(cq_object):
+    """
+    Pre-compute face properties in a single pass over all faces.
+    Extracts primitive values (floats/tuples) to avoid OCP object lifetime issues.
+
+    Returns:
+        list of dicts, each with:
+        - face: the OCP face object (for operations that need it)
+        - type: str ('cylinder', 'plane', 'cone', 'sphere', 'torus', 'other')
+        - area: float
+        - center: (x, y, z) tuple
+        - orientation: TopAbs orientation enum value
+        For cylinders:
+        - radius: float
+        - axis: (dx, dy, dz) tuple
+        - axis_origin: (x, y, z) tuple
+        - u_min, u_max: float (parameter range)
+        For planes:
+        - normal: (nx, ny, nz) tuple
+        - plane_d: float (plane equation constant)
+        - plane_location: (x, y, z) tuple
+    """
+    all_faces = cq_object.faces().vals()
+    face_data = []
+
+    type_map = {
+        GeomAbs_Cylinder: 'cylinder',
+        GeomAbs_Plane: 'plane',
+        GeomAbs_Cone: 'cone',
+        GeomAbs_Sphere: 'sphere',
+        GeomAbs_Torus: 'torus',
+    }
+
+    for face in all_faces:
+        surf = BRepAdaptor_Surface(face.wrapped, True)
+        stype = surf.GetType()
+
+        props = GProp_GProps()
+        BRepGProp.SurfaceProperties_s(face.wrapped, props)
+        area = props.Mass()
+        center = props.CentreOfMass()
+
+        entry = {
+            'face': face,
+            'type': type_map.get(stype, 'other'),
+            'area': area,
+            'center': (center.X(), center.Y(), center.Z()),
+            'orientation': face.wrapped.Orientation(),
+        }
+
+        if stype == GeomAbs_Cylinder:
+            cyl = surf.Cylinder()
+            loc = cyl.Location()
+            axis = cyl.Axis().Direction()
+            entry['radius'] = cyl.Radius()
+            entry['axis'] = (axis.X(), axis.Y(), axis.Z())
+            entry['axis_origin'] = (loc.X(), loc.Y(), loc.Z())
+            entry['u_min'] = surf.FirstUParameter()
+            entry['u_max'] = surf.LastUParameter()
+
+        elif stype == GeomAbs_Plane:
+            pln = surf.Plane()
+            axis = pln.Axis().Direction()
+            loc = pln.Location()
+            entry['normal'] = (axis.X(), axis.Y(), axis.Z())
+            entry['plane_location'] = (loc.X(), loc.Y(), loc.Z())
+            entry['plane_d'] = -(axis.X()*loc.X() + axis.Y()*loc.Y() + axis.Z()*loc.Z())
+
+        face_data.append(entry)
+
+    return face_data
+
+
+def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=None, face_data=None):
     """
     Extract all holes from geometry using CadQuery selectors.
     Filters out external features (bosses) and groups split faces.
@@ -673,6 +746,9 @@ def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False):
                      not laser-cut holes)
         is_flat_pattern: If True, relaxes orientation checks for flat patterns
                         where hole orientation may be inconsistent after unfolding
+        is_turned: If provided, skip redundant is_turned_part() call
+        face_data: If provided, use precomputed face properties instead of
+                  calling BRepAdaptor_Surface per face
     """
     candidates = []
 
@@ -689,109 +765,139 @@ def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False):
             part_dims = None
 
     # Check if this is a turned part (axisymmetric)
-    is_turned = is_turned_part(cq_object) if filter_bores else False
+    if is_turned is None:
+        is_turned = is_turned_part(cq_object) if filter_bores else False
 
-    # Iterate over all faces in the object
-    all_faces = cq_object.faces().vals()
-
-    for face in all_faces:
-        surf = BRepAdaptor_Surface(face.wrapped, True)
-        if surf.GetType() == GeomAbs_Cylinder:
-            # Check orientation: Must be REVERSED (internal hole)
-            # For flat patterns, accept both orientations as unfold can flip them
-            if not is_flat_pattern and face.wrapped.Orientation() != TopAbs_REVERSED:
+    # Iterate over all faces - use precomputed data if available
+    if face_data is not None:
+        for fd in face_data:
+            if fd['type'] != 'cylinder':
+                continue
+            if not is_flat_pattern and fd['orientation'] != TopAbs_REVERSED:
                 continue
 
-            cylinder = surf.Cylinder()
-            radius = cylinder.Radius()
-
-            # Filter out large cylinders (bend faces, not holes)
-            # Max hole diameter typically < 100mm for sheet metal
+            radius = fd['radius']
             if is_flat_pattern and radius * 2 > 100:
                 continue
 
-            location = cylinder.Location() # gp_Pnt
-            axis = cylinder.Axis().Direction() # gp_Dir
-            
-            # Calculate angular span
-            u_min = surf.FirstUParameter()
-            u_max = surf.LastUParameter()
+            u_min = fd['u_min']
+            u_max = fd['u_max']
             angle_deg = math.degrees(abs(u_max - u_min))
 
-            # Calculate depth and center of mass
-            props = GProp_GProps()
-            BRepGProp.SurfaceProperties_s(face.wrapped, props)
-            area = props.Mass()
-            center = props.CentreOfMass()
-            
-            # Arc length = r * angle_rad
             arc_length = radius * abs(u_max - u_min)
-            depth = area / arc_length if arc_length > 0 else 0
-            
+            depth = fd['area'] / arc_length if arc_length > 0 else 0
+
             candidates.append({
                 "diameter": radius * 2,
                 "depth": depth,
-                "position": (center.X(), center.Y(), center.Z()), # Face center
-                "axis_origin": (location.X(), location.Y(), location.Z()), # Point on axis
-                "axis": (axis.X(), axis.Y(), axis.Z()), # Axis direction
+                "position": fd['center'],
+                "axis_origin": fd['axis_origin'],
+                "axis": fd['axis'],
                 "angle": angle_deg
             })
+    else:
+        all_faces = cq_object.faces().vals()
+
+        for face in all_faces:
+            surf = BRepAdaptor_Surface(face.wrapped, True)
+            if surf.GetType() == GeomAbs_Cylinder:
+                # Check orientation: Must be REVERSED (internal hole)
+                # For flat patterns, accept both orientations as unfold can flip them
+                if not is_flat_pattern and face.wrapped.Orientation() != TopAbs_REVERSED:
+                    continue
+
+                cylinder = surf.Cylinder()
+                radius = cylinder.Radius()
+
+                # Filter out large cylinders (bend faces, not holes)
+                if is_flat_pattern and radius * 2 > 100:
+                    continue
+
+                location = cylinder.Location()
+                axis = cylinder.Axis().Direction()
+
+                u_min = surf.FirstUParameter()
+                u_max = surf.LastUParameter()
+                angle_deg = math.degrees(abs(u_max - u_min))
+
+                props = GProp_GProps()
+                BRepGProp.SurfaceProperties_s(face.wrapped, props)
+                area = props.Mass()
+                center = props.CentreOfMass()
+
+                arc_length = radius * abs(u_max - u_min)
+                depth = area / arc_length if arc_length > 0 else 0
+
+                candidates.append({
+                    "diameter": radius * 2,
+                    "depth": depth,
+                    "position": (center.X(), center.Y(), center.Z()),
+                    "axis_origin": (location.X(), location.Y(), location.Z()),
+                    "axis": (axis.X(), axis.Y(), axis.Z()),
+                    "angle": angle_deg
+                })
             
     # Group candidates by Axis and Diameter
+    # Pre-bucket by diameter to avoid O(n²) comparisons
+    from collections import defaultdict
+    diameter_buckets = defaultdict(list)
+    for idx, c in enumerate(candidates):
+        bucket_key = round(c["diameter"], 2)
+        diameter_buckets[bucket_key].append((idx, c))
+
     grouped_holes = []
     processed_indices = set()
 
-    for i, c1 in enumerate(candidates):
-        if i in processed_indices:
-            continue
-            
-        current_group = [c1]
-        processed_indices.add(i)
-        
-        # Find matches
-        for j, c2 in enumerate(candidates):
-            if j in processed_indices:
+    for bucket_key in diameter_buckets:
+        # Check this bucket + adjacent buckets (±0.01) for edge cases
+        nearby = []
+        for adj_key in [bucket_key - 0.01, bucket_key, bucket_key + 0.01]:
+            if adj_key in diameter_buckets:
+                nearby.extend(diameter_buckets[adj_key])
+
+        for i, c1 in nearby:
+            if i in processed_indices:
                 continue
-                
-            # Check diameter match
-            if abs(c1["diameter"] - c2["diameter"]) > 0.01:
-                continue
-                
-            # Check axis direction match (parallel)
-            dot = (c1["axis"][0]*c2["axis"][0] + 
-                   c1["axis"][1]*c2["axis"][1] + 
-                   c1["axis"][2]*c2["axis"][2])
-            if abs(abs(dot) - 1.0) > 0.01:
-                continue
-                
-            # Check if axes are collinear (distance between lines)
-            # Use axis_origin to check if they share the same infinite line
-            # Vector from origin1 to origin2
-            dx = c2["axis_origin"][0] - c1["axis_origin"][0]
-            dy = c2["axis_origin"][1] - c1["axis_origin"][1]
-            dz = c2["axis_origin"][2] - c1["axis_origin"][2]
-            
-            # Cross product of (origin2-origin1) and axis direction
-            cx = dy*c1["axis"][2] - dz*c1["axis"][1]
-            cy = dz*c1["axis"][0] - dx*c1["axis"][2]
-            cz = dx*c1["axis"][1] - dy*c1["axis"][0]
-            dist = math.sqrt(cx*cx + cy*cy + cz*cz)
-            
-            if dist < 0.1: # Collinear axes
-                # Check axial separation of the faces
-                # Project face centers onto the axis
-                t1 = c1["position"][0]*c1["axis"][0] + c1["position"][1]*c1["axis"][1] + c1["position"][2]*c1["axis"][2]
-                t2 = c2["position"][0]*c1["axis"][0] + c2["position"][1]*c1["axis"][1] + c2["position"][2]*c1["axis"][2]
-                
-                axial_dist = abs(t1 - t2)
-                
-                # If axial distance is small (e.g. < 5mm), assume same hole feature
-                # Note: For split faces (180+180), axial_dist should be ~0
-                if axial_dist < 5.0: 
-                    current_group.append(c2)
-                    processed_indices.add(j)
-        
-        grouped_holes.append(current_group)
+
+            current_group = [c1]
+            processed_indices.add(i)
+
+            for j, c2 in nearby:
+                if j in processed_indices:
+                    continue
+
+                # Check diameter match
+                if abs(c1["diameter"] - c2["diameter"]) > 0.01:
+                    continue
+
+                # Check axis direction match (parallel)
+                dot = (c1["axis"][0]*c2["axis"][0] +
+                       c1["axis"][1]*c2["axis"][1] +
+                       c1["axis"][2]*c2["axis"][2])
+                if abs(abs(dot) - 1.0) > 0.01:
+                    continue
+
+                # Check if axes are collinear (distance between lines)
+                dx = c2["axis_origin"][0] - c1["axis_origin"][0]
+                dy = c2["axis_origin"][1] - c1["axis_origin"][1]
+                dz = c2["axis_origin"][2] - c1["axis_origin"][2]
+
+                cx = dy*c1["axis"][2] - dz*c1["axis"][1]
+                cy = dz*c1["axis"][0] - dx*c1["axis"][2]
+                cz = dx*c1["axis"][1] - dy*c1["axis"][0]
+                dist_sq = cx*cx + cy*cy + cz*cz
+
+                if dist_sq < 0.01:  # Collinear axes (0.1² = 0.01)
+                    t1 = (c1["position"][0]*c1["axis"][0] + c1["position"][1]*c1["axis"][1] +
+                          c1["position"][2]*c1["axis"][2])
+                    t2 = (c2["position"][0]*c1["axis"][0] + c2["position"][1]*c1["axis"][1] +
+                          c2["position"][2]*c1["axis"][2])
+
+                    if abs(t1 - t2) < 5.0:
+                        current_group.append(c2)
+                        processed_indices.add(j)
+
+            grouped_holes.append(current_group)
 
 
     # Convert groups to HoleFeatures
@@ -847,30 +953,34 @@ def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False):
     return holes
 
 
-def detect_shaped_holes(shape):
+def detect_shaped_holes(shape, face_data=None):
     """
     Detect non-circular holes (slots, rectangles) by analyzing planar face contours.
     Returns a list of dicts describing the holes.
+
+    Args:
+        shape: CadQuery object to analyze
+        face_data: If provided, use precomputed face properties for planar face filtering
     """
     all_shaped_holes = []
-    
-    # Find planar faces
-    faces = shape.faces().vals()
-    planar_faces = []
-    for face in faces:
-        surf = BRepAdaptor_Surface(face.wrapped, True)
-        if surf.GetType() == GeomAbs_Plane:
-            planar_faces.append(face)
-            
+
+    # Find planar faces - use precomputed data if available
+    if face_data is not None:
+        planar_faces = [(fd['face'], fd['normal']) for fd in face_data if fd['type'] == 'plane']
+    else:
+        faces = shape.faces().vals()
+        planar_faces = []
+        for face in faces:
+            surf = BRepAdaptor_Surface(face.wrapped, True)
+            if surf.GetType() == GeomAbs_Plane:
+                pln = surf.Plane()
+                axis = pln.Axis().Direction()
+                planar_faces.append((face, (axis.X(), axis.Y(), axis.Z())))
+
     if not planar_faces:
         return []
-        
-    for face in planar_faces:
-        # Get face normal
-        surf = BRepAdaptor_Surface(face.wrapped, True)
-        pln = surf.Plane()
-        axis = pln.Axis().Direction()
-        normal = (axis.X(), axis.Y(), axis.Z())
+
+    for face, normal in planar_faces:
         
         wires = face.Wires()
         
@@ -980,41 +1090,43 @@ def detect_shaped_holes(shape):
                         "normal": normal
                     })
                     
-    # Deduplicate
+    # Deduplicate - pre-group by (type, dim) to avoid O(n²)
+    from collections import defaultdict
+    type_dim_buckets = defaultdict(list)
+    for idx, h in enumerate(all_shaped_holes):
+        type_dim_buckets[(h["type"], h["dim"])].append((idx, h))
+
     unique_holes = []
     processed_indices = set()
-    
-    for i, h1 in enumerate(all_shaped_holes):
-        if i in processed_indices: continue
-        
-        # Look for match
-        match_found = False
-        for j, h2 in enumerate(all_shaped_holes):
-            if i == j or j in processed_indices: continue
-            
-            if h1["type"] == h2["type"] and h1["dim"] == h2["dim"]:
-                # Check alignment
+
+    for bucket in type_dim_buckets.values():
+        for i, h1 in bucket:
+            if i in processed_indices:
+                continue
+
+            for j, h2 in bucket:
+                if i == j or j in processed_indices:
+                    continue
+
                 dx = h2["center"][0] - h1["center"][0]
                 dy = h2["center"][1] - h1["center"][1]
                 dz = h2["center"][2] - h1["center"][2]
-                dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-                
-                if dist < 0.1: 
+                dist_sq = dx*dx + dy*dy + dz*dz
+
+                if dist_sq < 0.01:  # 0.1² = 0.01
                     processed_indices.add(j)
-                    match_found = True
                 else:
-                    # Check if vector is parallel to normal
+                    dist = math.sqrt(dist_sq)
                     if dist > 0:
                         vx, vy, vz = dx/dist, dy/dist, dz/dist
                         nx, ny, nz = h1["normal"]
                         dot = abs(vx*nx + vy*ny + vz*nz)
-                        if dot > 0.9: # Parallel
+                        if dot > 0.9:  # Parallel
                             processed_indices.add(j)
-                            match_found = True
-        
-        unique_holes.append(h1)
-        processed_indices.add(i)
-                
+
+            unique_holes.append(h1)
+            processed_indices.add(i)
+
     return unique_holes
 
 def deduplicate_holes(circular_holes, shaped_holes):
