@@ -1,9 +1,48 @@
 # ALES Manufacturing Pipeline
 
-**Laatste update:** 15 maart 2026
-**Versie:** 3.2 (Robuustere Gatendetectie)
+**Laatste update:** 16 maart 2026
+**Versie:** 3.3 (Hybride Dwarsdoorsnede + FreeCAD Lip-detectie)
 
 > Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis.
+
+### v3.3 — Hybride Dwarsdoorsnede + FreeCAD Lip-detectie (16 maart 2026)
+
+**Gezette platen: twee complementaire methodes gecombineerd**
+
+| Methode | Sterk in | Zwakke plek |
+|---------|----------|-------------|
+| **Dwarsdoorsnede (PCA)** | Lang uniform geperst profiel (U/C/Z) — exact 2 bends @ 90°, t=5mm | Lip < 20% van lengte → valt buiten sample-zone |
+| **FreeCAD SheetMetal** | Korte lip met extra zetting bij uiteinde | Complex oppervlak (error 13/17) → faalt |
+
+**Nieuwe beslisboom (hybride):**
+
+```
+Dwarsdoorsnede succesvol?
+├── JA → gebruik dwarsdoorsnede resultaten
+│   └── End-complexity vlag? (meer edges aan uiteinden dan midden)
+│       ├── JA → FreeCAD unfold als lip-check
+│       │         FreeCAD meer bends? → upgrade naar FreeCAD data
+│       │         FreeCAD faalt?      → dwarsdoorsnede + log "possible lip"
+│       └── NEE → dwarsdoorsnede volledig, stop
+└── NEE → FreeCAD unfold
+          Succesvol? → gebruik FreeCAD resultaten
+          Faalt ook? → bbox-methode
+```
+
+**Technische details:**
+- `profile_features.py`: `extract_bent_plate_cross_section()` retourneert nu `has_end_complexity` (bool)
+  - Vergelijkt edge-count van end-secties (frac 0.2/0.8) met mediaan van middle-secties (frac 0.4/0.5/0.6)
+  - `True` wanneer een uiteinde meer edges heeft → potentiële lip aanwezig
+- `xml_exporter.py`: Nieuw HYBRID LIP CHECK blok na de cross-sectie stap
+  - Triggert FreeCAD unfold alleen wanneer `has_end_complexity=True`
+  - FreeCAD unfold vindt meer bends → upgrade; zelfde bends → cross-sectie behoudt
+  - Proactieve unfold overgeslagen als lip-check al gelopen heeft (geen dubbel werk)
+- FreeCAD unfold faalt op 10001073529 met codes 13 (plaatdikte ongeldig) + 17 (oppervlak niet ondersteund)
+  → dwarsdoorsnede is daar de primaire methode
+
+**Resultaat voor 10001073529_Rev_00:**
+- Dwarsdoorsnede: 2 bends @ 90°, t=5 mm, L=1903 mm ✅
+- FreeCAD: faalt (codes 13 + 17) → cross-sectie behouden ✅
 
 ### v3.2 — Robuustere Gatendetectie (15 maart 2026)
 
@@ -573,7 +612,7 @@ python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ 
 
 ---
 
-**Laatste update:** 15 maart 2026
-**Versie:** 3.2 (Robuustere Gatendetectie)
+**Laatste update:** 16 maart 2026
+**Versie:** 3.3 (Hybride Dwarsdoorsnede + FreeCAD Lip-detectie)
 
 > Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis van v2.1 t/m v3.1.

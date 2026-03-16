@@ -673,3 +673,386 @@ def _create_fallback_result(dims: Tuple[float, float, float],
         'method': 'fallback',
         'error': error
     }
+
+
+# =============================================================================
+# BENT PLATE CROSS-SECTION ANALYSIS
+# =============================================================================
+
+def extract_bent_plate_cross_section(solid) -> Optional[Dict[str, Any]]:
+    """
+    Extract bent-plate geometry via cross-section analysis.
+
+    Designed for sheet-metal parts that are prismatic (near-constant cross-section
+    along an extrusion axis), such as C-channels, U-profiles, Z-sections, etc.
+
+    Algorithm:
+        1. PCA on solid vertices → dominant axis = extrusion direction.
+        2. Sample sections at 5 fractions along the extrusion axis to verify
+           topology is consistent (prismatic guard).
+        3. Analyse the middle section (centroid):
+           - Arc edges  → bends (cylindrical faces whose axis is parallel to the
+                          extrusion direction appear as circles/arcs in the section).
+           - Line edges → flat plate segments.
+        4. Group concentric arc pairs (inner + outer face of same bend) by centre
+           proximity.  From each pair: inner_radius, thickness, bend_angle.
+        5. Compute flat developed width = sum of straight segments + neutral-line
+           arc lengths for each bend.
+
+    Guard conditions (returns None if):
+        - Fewer than 8 unique vertices (too simple / degenerate)
+        - Extrusion length < 50 mm (too short; bbox methods are sufficient)
+        - Section edge-count CV > 0.40 (non-prismatic geometry)
+        - No arc segments found in middle section (flat plate, no bends)
+        - No concentric arc pairs or single arcs with angle > 350° (hollow tube)
+        - Thickness estimate < 0.3 mm or > 40 mm (implausible)
+
+    Returns:
+        Dict with keys:
+            thickness        (mm, float)
+            nr_bends         (int)
+            bend_angles      (list[float], degrees, unsigned magnitude)
+            inner_radii      (list[float], mm)
+            bend_line_length (mm, float — extrusion length)
+            flat_width       (mm, float — neutral-line developed width)
+            method           ('cross_section_bent_plate')
+        or None when the solid is not a valid bent prismatic plate.
+    """
+    if np is None or not HAS_OCP:
+        return None
+
+    try:
+        from OCP.BRepAlgoAPI import BRepAlgoAPI_Section
+        from OCP.BRepAdaptor import BRepAdaptor_Curve
+        from OCP.GeomAbs import GeomAbs_Line, GeomAbs_Circle
+        from OCP.gp import gp_Dir, gp_Pln, gp_Pnt
+        from OCP.GProp import GProp_GProps
+        from OCP.BRepGProp import BRepGProp
+
+        # ------------------------------------------------------------------
+        # Step 1: PCA to find the extrusion (length) axis.
+        # ------------------------------------------------------------------
+        points: List[Tuple[float, float, float]] = []
+        vexp = TopExp_Explorer(solid, TopAbs_VERTEX)
+        while vexp.More():
+            p = BRep_Tool.Pnt_s(TopoDS.Vertex_s(vexp.Current()))
+            points.append((p.X(), p.Y(), p.Z()))
+            vexp.Next()
+
+        if len(points) < 8:
+            return None
+
+        pts = np.unique(np.round(np.array(points, dtype=float), 4), axis=0)
+        if len(pts) < 8:
+            return None
+
+        centroid = pts.mean(axis=0)
+        centered = pts - centroid
+        cov = np.cov(centered.T)
+        evals, evecs = np.linalg.eigh(cov)
+
+        # Dominant eigenvector (largest eigenvalue) = extrusion direction.
+        length_idx = int(np.argmax(evals))
+        cross_idxs = [i for i in range(3) if i != length_idx]
+        length_axis = evecs[:, length_idx]
+        sec_u = evecs[:, cross_idxs[0]]
+        sec_v = evecs[:, cross_idxs[1]]
+
+        # Snap to the nearest cardinal axis when nearly axis-aligned (|dot| > 0.97).
+        # This is critical: a cylinder with axis exactly along Y cut by a plane
+        # whose normal is *slightly* tilted from Y produces an ELLIPSE, not a circle.
+        # Snapping ensures a true perpendicular cut → clean circular arcs.
+        _CARDINALS = [
+            (np.array([1., 0., 0.]), np.array([0., 1., 0.]), np.array([0., 0., 1.])),
+            (np.array([0., 1., 0.]), np.array([1., 0., 0.]), np.array([0., 0., 1.])),
+            (np.array([0., 0., 1.]), np.array([1., 0., 0.]), np.array([0., 1., 0.])),
+        ]
+        _SNAP_THRESHOLD = 0.97
+        for _lax, _su, _sv in _CARDINALS:
+            if abs(float(length_axis @ _lax)) > _SNAP_THRESHOLD:
+                _sign = 1.0 if float(length_axis @ _lax) > 0 else -1.0
+                length_axis = _lax * _sign
+                sec_u = _su
+                sec_v = _sv
+                break
+
+        # Extrusion extent from vertex projections.
+        projections = centered @ length_axis
+        extrusion_length = float(projections.max() - projections.min())
+
+        if extrusion_length < 50.0:
+            return None
+
+        nx = float(length_axis[0])
+        ny = float(length_axis[1])
+        nz = float(length_axis[2])
+
+        # ------------------------------------------------------------------
+        # Step 2: Consistency sampling — 5 cross-sections along the extrusion.
+        # Fracs [0.2, 0.8] are "end" sections  (~20% from each tip).
+        # Fracs [0.4, 0.5, 0.6] are "middle" sections.
+        # We track which fracs succeed so we can later compare end vs middle
+        # edge counts to detect a lip or extra bend only at the extremities.
+        # ------------------------------------------------------------------
+        sample_fracs = [0.2, 0.4, 0.5, 0.6, 0.8]
+        _END_FRACS   = {0.2, 0.8}
+        section_edge_counts: List[int] = []
+        section_perimeters: List[float] = []
+        # Per-zone edge counts for lip detection.
+        _end_ec:    List[int] = []
+        _middle_ec: List[int] = []
+
+        for frac in sample_fracs:
+            offset = (frac - 0.5) * extrusion_length
+            cx = float(centroid[0]) + nx * offset
+            cy = float(centroid[1]) + ny * offset
+            cz = float(centroid[2]) + nz * offset
+            plane = gp_Pln(gp_Pnt(cx, cy, cz), gp_Dir(nx, ny, nz))
+
+            try:
+                sec_op = BRepAlgoAPI_Section(solid, plane, False)
+            except TypeError:
+                sec_op = BRepAlgoAPI_Section(solid, plane)
+
+            sec_op.Build()
+            if hasattr(sec_op, 'IsDone') and not sec_op.IsDone():
+                continue
+
+            shape = sec_op.Shape()
+            edge_exp = TopExp_Explorer(shape, TopAbs_EDGE)
+            ec = 0
+            perim = 0.0
+            while edge_exp.More():
+                edge = TopoDS.Edge_s(edge_exp.Current())
+                props = GProp_GProps()
+                if hasattr(BRepGProp, 'LinearProperties_s'):
+                    BRepGProp.LinearProperties_s(edge, props)
+                else:
+                    BRepGProp.LinearProperties(edge, props)
+                elen = props.Mass()
+                if elen > 0.5:
+                    ec += 1
+                    perim += elen
+                edge_exp.Next()
+
+            if ec > 0:
+                section_edge_counts.append(ec)
+                section_perimeters.append(perim)
+                if frac in _END_FRACS:
+                    _end_ec.append(ec)
+                else:
+                    _middle_ec.append(ec)
+
+        if len(section_edge_counts) < 3:
+            return None  # Not enough valid sections
+
+        # ------------------------------------------------------------------
+        # Step 3: Topology consistency check.
+        # ------------------------------------------------------------------
+        ec_arr = np.array(section_edge_counts, dtype=float)
+        ec_mean = float(ec_arr.mean())
+        ec_cv = float(ec_arr.std() / ec_mean) if ec_mean > 0 else 1.0
+
+        if ec_cv > 0.40:
+            return None  # Non-prismatic geometry
+
+        # Lip detection: if any end section has MORE edges than the median of
+        # the middle sections, a lip or extra bend is localised at an extremity
+        # and will be invisible to this cross-section method.
+        _middle_median = float(np.median(_middle_ec)) if _middle_ec else ec_mean
+        has_end_complexity = bool(_end_ec and max(_end_ec) > _middle_median)
+
+        # ------------------------------------------------------------------
+        # Step 4: Detailed analysis of the middle cross-section (at centroid).
+        # ------------------------------------------------------------------
+        cx = float(centroid[0])
+        cy = float(centroid[1])
+        cz = float(centroid[2])
+        plane = gp_Pln(gp_Pnt(cx, cy, cz), gp_Dir(nx, ny, nz))
+
+        try:
+            sec_op = BRepAlgoAPI_Section(solid, plane, False)
+        except TypeError:
+            sec_op = BRepAlgoAPI_Section(solid, plane)
+
+        sec_op.Build()
+        if hasattr(sec_op, 'IsDone') and not sec_op.IsDone():
+            return None
+
+        mid_shape = sec_op.Shape()
+
+        # ------------------------------------------------------------------
+        # Step 5: Extract arc and line edges from the middle section.
+        # Arc edges correspond to bends (cylindrical faces whose axis is
+        # parallel to the extrusion direction).
+        # Line edges correspond to flat plate portions.
+        # ------------------------------------------------------------------
+        arcs: List[Dict[str, Any]] = []
+        lines: List[Dict[str, float]] = []
+
+        edge_exp = TopExp_Explorer(mid_shape, TopAbs_EDGE)
+        while edge_exp.More():
+            edge = TopoDS.Edge_s(edge_exp.Current())
+            try:
+                props = GProp_GProps()
+                if hasattr(BRepGProp, 'LinearProperties_s'):
+                    BRepGProp.LinearProperties_s(edge, props)
+                else:
+                    BRepGProp.LinearProperties(edge, props)
+                elen = props.Mass()
+
+                if elen < 0.3:
+                    edge_exp.Next()
+                    continue
+
+                adaptor = BRepAdaptor_Curve(edge)
+                ct = adaptor.GetType()
+
+                if ct == GeomAbs_Circle:
+                    circ = adaptor.Circle()
+                    center = circ.Location()
+                    radius = circ.Radius()
+
+                    # Project centre onto section-plane (2D) coordinates.
+                    v = np.array([center.X(), center.Y(), center.Z()]) - centroid
+                    center_u = float(v @ sec_u)
+                    center_v = float(v @ sec_v)
+
+                    # Arc angle from parameter range.
+                    t1 = adaptor.FirstParameter()
+                    t2 = adaptor.LastParameter()
+                    angle_rad = abs(t2 - t1)
+                    angle_deg = math.degrees(angle_rad)
+
+                    arcs.append({
+                        'center_u': center_u,
+                        'center_v': center_v,
+                        'radius': radius,
+                        'angle_deg': angle_deg,
+                        'arc_length': elen,
+                    })
+
+                elif ct == GeomAbs_Line:
+                    lines.append({'length': elen})
+
+            except Exception:
+                pass
+            edge_exp.Next()
+
+        if not arcs:
+            return None  # No bends detected
+
+        # ------------------------------------------------------------------
+        # Step 6: Group concentric arcs by centre proximity.
+        # Same bend → inner face (r_small) + outer face (r_large) are concentric.
+        # Grouping tolerance: 3 mm (much less than typical bend locations).
+        # ------------------------------------------------------------------
+        center_tol = 3.0
+        groups: List[List[Dict[str, Any]]] = []
+
+        for arc in arcs:
+            placed = False
+            for group in groups:
+                gc_u = float(np.mean([a['center_u'] for a in group]))
+                gc_v = float(np.mean([a['center_v'] for a in group]))
+                dist = math.sqrt((arc['center_u'] - gc_u) ** 2 + (arc['center_v'] - gc_v) ** 2)
+                if dist < center_tol:
+                    group.append(arc)
+                    placed = True
+                    break
+            if not placed:
+                groups.append([arc])
+
+        # Keep only real bends:
+        # - Paired concentric arcs (inner + outer) with angle > 20°, < 350°
+        # - Full circles (angle ≈ 360°) are hollow-tube cross-sections → exclude.
+        bend_groups: List[List[Dict[str, Any]]] = []
+        for group in groups:
+            max_angle = max(a['angle_deg'] for a in group)
+            if max_angle > 350.0:
+                # Full circle(s) → hollow tube, not bent plate → reject entire solid
+                return None
+            if max_angle > 20.0:
+                if len(group) >= 2:
+                    bend_groups.append(group)
+
+        if not bend_groups:
+            return None  # No real bends found with concentric pairs
+
+        # ------------------------------------------------------------------
+        # Step 7: Extract per-bend parameters.
+        # ------------------------------------------------------------------
+        bend_angles_deg: List[float] = []
+        inner_radii_mm: List[float] = []
+        thickness_estimates: List[float] = []
+
+        # Sort bend groups by position along the section (left-to-right in 2D).
+        bend_groups.sort(key=lambda g: float(np.mean([a['center_u'] for a in g])))
+
+        for group in bend_groups:
+            radii = sorted(a['radius'] for a in group)
+            r_inner = radii[0]
+            r_outer = radii[-1]
+            t_est = r_outer - r_inner
+
+            if t_est < 0.3 or t_est > 40.0:
+                continue
+
+            thickness_estimates.append(t_est)
+            inner_radii_mm.append(round(r_inner, 2))
+
+            # Bend angle = subtended angle of the inner arc.
+            inner_arc = min(group, key=lambda a: abs(a['radius'] - r_inner))
+            bend_angles_deg.append(round(inner_arc['angle_deg'], 1))
+
+        if not bend_angles_deg:
+            return None
+
+        # ------------------------------------------------------------------
+        # Step 8: Compute plate thickness (median of per-bend estimates).
+        # ------------------------------------------------------------------
+        t_arr = np.array(thickness_estimates, dtype=float)
+        if len(t_arr) == 0:
+            return None
+
+        if len(t_arr) > 1:
+            t_cv = float(t_arr.std() / t_arr.mean()) if t_arr.mean() > 0 else 1.0
+            if t_cv > 0.40:
+                return None  # Inconsistent thickness estimates
+
+        plate_thickness = float(np.median(t_arr))
+
+        if plate_thickness < 0.3 or plate_thickness > 40.0:
+            return None
+
+        # ------------------------------------------------------------------
+        # Step 9: Flat developed width = straight segments + neutral arcs.
+        # ------------------------------------------------------------------
+        flat_width = sum(l['length'] for l in lines)
+        for i, group in enumerate(bend_groups):
+            if i >= len(inner_radii_mm):
+                continue
+            r_inner = inner_radii_mm[i]
+            angle_rad = math.radians(bend_angles_deg[i])
+            neutral_r = r_inner + plate_thickness / 2.0
+            flat_width += neutral_r * abs(angle_rad)
+
+        flat_width = round(flat_width, 1)
+
+        return {
+            'thickness': round(plate_thickness, 2),
+            'nr_bends': len(bend_angles_deg),
+            'bend_angles': bend_angles_deg,
+            'inner_radii': inner_radii_mm,
+            'bend_line_length': round(extrusion_length, 1),
+            'flat_width': flat_width,
+            'method': 'cross_section_bent_plate',
+            # True when an end section (first/last 20%) has more edges than the
+            # middle sections → a lip or extra bend at the extremity is possible,
+            # which this cross-section method cannot see.  The caller may trigger
+            # FreeCAD unfold as a complementary check.
+            'has_end_complexity': has_end_complexity,
+        }
+
+    except Exception:
+        return None

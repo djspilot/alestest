@@ -68,10 +68,15 @@ except ImportError:
     HAS_DXF_METRICS = False
 
 try:
-    from manufacturing_pipeline.analysis.profile_features import extract_profile_features
+    from manufacturing_pipeline.analysis.profile_features import (
+        extract_profile_features,
+        extract_bent_plate_cross_section,
+    )
     HAS_PROFILE_FEATURES = True
+    HAS_BENT_PLATE_CS = True
 except ImportError:
     HAS_PROFILE_FEATURES = False
+    HAS_BENT_PLATE_CS = False
 
 try:
     from manufacturing_pipeline.analysis.cut_features import extract_cut_features_for_sheet, extract_cut_features_for_profile
@@ -1197,6 +1202,18 @@ def _parse_dims_from_description(description: str) -> tuple:
     return (0, 0, 0)
 
 
+def _strip_step_name_suffix(name: str) -> str:
+    """Strip common CAD software suffixes from STEP part names.
+
+    SpaceClaim appends ' Geometry' to product names on STEP export.
+    Example: '10001073529_Rev_00 Geometry' -> '10001073529_Rev_00'
+    """
+    if not name:
+        return name
+    cleaned = re.sub(r'\s+Geometry$', '', name, flags=re.IGNORECASE).strip()
+    return cleaned if cleaned else name
+
+
 def _normalize_part_name(name: str) -> str:
     """Normalize part name so '10040853_1.2' maps to '10040853_1'."""
     if not name:
@@ -1652,7 +1669,7 @@ def _process_plaat_item(
     part_name = bom_item.get('part_name', 'Unknown')
     quantity = bom_item.get('quantity', 1)
     output_part_name = source_step_name
-    output_sheet_name = part_name
+    output_sheet_name = _strip_step_name_suffix(part_name)
 
     if reference_values is not None:
         # Reference XML is for validating/enriching metrics, not for overriding naming
@@ -1772,11 +1789,144 @@ def _process_plaat_item(
         except Exception as e:
             print(f"    [WARN] Could not apply cut-feature hole fallback: {str(e)[:60]}")
 
-    # PROACTIVE UNFOLD: Try unfold for all sheet metal parts to detect bends
-    # This catches bent sheets that classify as "plaat" via shell detection
-    # but don't get flagged as bent by part_analyzer
+    # CROSS-SECTION ANALYSIS: Primary method for bent prismatic plates.
+    # Analyses the 2D cross-section perpendicular to the extrusion axis to extract
+    # thickness, bend count, angles, inner radii, and flat developed width.
+    # Works reliably for C-channels, U-profiles, Z-sections etc. without needing FreeCAD.
+    cs_bend_success = False
+    if HAS_BENT_PLATE_CS and part_solid is not None:
+        try:
+            cs_result = extract_bent_plate_cross_section(part_solid)
+            if cs_result is not None and cs_result.get('nr_bends', 0) > 0:
+                cs_thickness = float(cs_result.get('thickness', 0) or 0)
+                cs_nr_bends = int(cs_result.get('nr_bends', 0))
+                cs_bend_angles = list(cs_result.get('bend_angles', []))
+                cs_inner_radii = list(cs_result.get('inner_radii', []))
+                cs_bend_line_length = float(cs_result.get('bend_line_length', 0) or 0)
+                cs_flat_width = float(cs_result.get('flat_width', 0) or 0)
+
+                print(
+                    f"    [CS] Cross-section: {cs_nr_bends} bends, "
+                    f"t={cs_thickness:.2f} mm, "
+                    f"L={cs_bend_line_length:.1f} mm, "
+                    f"flat_W={cs_flat_width:.1f} mm"
+                )
+                print(f"        Angles: {cs_bend_angles}")
+                print(f"        Radii:  {cs_inner_radii}")
+
+                calc_result.find('Sheet_NrBends').text = str(cs_nr_bends)
+                calc_result.find('Sheet_BendAngles').text = '_'.join(
+                    _format_float(a) for a in cs_bend_angles
+                )
+                calc_result.find('Sheet_BendInnerRadii').text = '_'.join(
+                    _format_float(r) for r in cs_inner_radii
+                )
+                # All bends run the full extrusion length (prismatic assumption).
+                calc_result.find('Sheet_BendLength').text = '_'.join(
+                    _format_float(cs_bend_line_length) for _ in cs_bend_angles
+                )
+
+                # Override thickness and BoxY (flat width) from cross-section.
+                if cs_thickness > 0:
+                    calc_result.find('Sheet_Thickness').text = _format_float(cs_thickness)
+                    thickness = cs_thickness
+                if cs_flat_width > 0:
+                    calc_result.find('Sheet_BoxY').text = _format_float(cs_flat_width)
+                    width = cs_flat_width
+                if cs_bend_line_length > 0:
+                    calc_result.find('Sheet_BoxX').text = _format_float(cs_bend_line_length)
+                    length = cs_bend_line_length
+
+                cs_bend_success = True
+        except Exception as e:
+            print(f"    [WARN] Cross-section analysis failed: {str(e)[:80]}")
+
+    # HYBRID LIP CHECK: If cross-section succeeded but flagged end-complexity
+    # (more edges at the extremities than in the middle), a lip or extra bend
+    # near the tip of the plate is invisible to the cross-section sampler.
+    # In that case, try FreeCAD unfold as a complementary check.  If it finds
+    # MORE bends than the cross-section, prefer FreeCAD's richer picture.
+    # If FreeCAD fails, keep the cross-section result and log a warning.
+    lip_check_attempted = False
+    if (
+        cs_bend_success
+        and cs_result is not None
+        and cs_result.get('has_end_complexity', False)
+        and HAS_UNFOLD
+        and part_solid is not None
+    ):
+        print(f"    [CS] End-complexity detected → trying FreeCAD unfold for lip check...")
+        lip_check_attempted = True
+        try:
+            lip_unfold = _try_unfold(
+                str(step_path), part_name, work_dir, k_factor, material,
+                nr_bends=0,
+                solid_object=part_solid,
+            )
+            if lip_unfold and lip_unfold.get('success'):
+                lip_angles  = lip_unfold.get('bend_angles', [])
+                lip_radii   = lip_unfold.get('bend_radii', [])
+                lip_lengths = lip_unfold.get('bend_lengths', [])
+                if lip_angles:
+                    lip_angles, lip_radii, lip_lengths = _merge_bends_colinear(
+                        lip_angles, lip_radii, lip_lengths
+                    )
+                lip_nr = len(lip_angles) if lip_angles else 0
+                cs_nr  = int(calc_result.findtext('Sheet_NrBends', '0') or 0)
+                if lip_nr > cs_nr:
+                    # FreeCAD found more bends (likely includes the lip bend).
+                    print(
+                        f"    [OK] Lip check: unfold found {lip_nr} bends "
+                        f"(cross-section had {cs_nr}) → upgrading to unfold data"
+                    )
+                    calc_result.find('Sheet_NrBends').text = str(lip_nr)
+                    calc_result.find('Sheet_BendAngles').text = '_'.join(
+                        _format_float(a) for a in lip_angles
+                    )
+                    calc_result.find('Sheet_BendInnerRadii').text = '_'.join(
+                        _format_float(r) for r in lip_radii
+                    )
+                    calc_result.find('Sheet_BendLength').text = '_'.join(
+                        _format_float(l) for l in lip_lengths
+                    )
+                    flat_length = float(lip_unfold.get('flat_length', 0) or 0)
+                    flat_width  = float(lip_unfold.get('flat_width',  0) or 0)
+                    unfold_thickness = float(lip_unfold.get('thickness', 0) or 0)
+                    if _is_plausible_unfold_dims(
+                        flat_length=flat_length,
+                        flat_width=flat_width,
+                        raw_thickness=thickness,
+                        bend_radii=lip_radii,
+                        unfold_thickness=unfold_thickness,
+                    ):
+                        calc_result.find('Sheet_BoxX').text = _format_float(flat_length)
+                        calc_result.find('Sheet_BoxY').text = _format_float(flat_width)
+                        length = flat_length
+                        width  = flat_width
+                    calc_result.find('Sheet_UnfoldSuccess').text = 'True'
+                    if lip_unfold.get('dxf_output'):
+                        calc_result.find('Sheet_FilePathDXF').text = str(lip_unfold['dxf_output'])
+                else:
+                    print(
+                        f"    [INFO] Lip check: unfold found {lip_nr} bends "
+                        f"(same as cross-section {cs_nr}) → keeping cross-section data"
+                    )
+            else:
+                print(
+                    f"    [WARN] Lip check: FreeCAD unfold failed "
+                    f"({(lip_unfold or {}).get('error', 'no result')[:60]}) "
+                    f"→ cross-section data retained, possible undetected lip"
+                )
+        except Exception as e:
+            print(f"    [WARN] Lip check unfold exception: {str(e)[:80]}")
+
+    # PROACTIVE UNFOLD: Try unfold for all sheet metal parts to detect bends.
+    # Used as fallback when cross-section analysis did not succeed, AND for
+    # generating the DXF even when cross-section did supply bend data.
+    # Skip when we already ran a successful lip-check unfold above (avoids
+    # double work for the same solid).
     early_unfold_attempted = False
-    if HAS_UNFOLD and part_solid is not None:
+    if HAS_UNFOLD and part_solid is not None and not lip_check_attempted:
         try:
             # Check if this solid is planar (flat plate) or formed (bent)
             from manufacturing_pipeline.analysis.assembly_analysis import _is_plate_by_face_analysis
@@ -1810,11 +1960,14 @@ def _process_plaat_item(
                         print(f"        Angles: {bend_angles}")
                         print(f"        Radii: {bend_radii}")
                         print(f"        Flat: {unfold_result.get('flat_length', 0):.1f} x {unfold_result.get('flat_width', 0):.1f} mm")
-                        
-                        calc_result.find('Sheet_NrBends').text = str(nr_bends)
-                        calc_result.find('Sheet_BendAngles').text = '_'.join(_format_float(a) for a in bend_angles)
-                        calc_result.find('Sheet_BendInnerRadii').text = '_'.join(_format_float(r) for r in bend_radii)
-                        calc_result.find('Sheet_BendLength').text = '_'.join(_format_float(l) for l in bend_lengths)
+
+                        # Only write bend fields if cross-section didn't already supply them.
+                        if not cs_bend_success:
+                            calc_result.find('Sheet_NrBends').text = str(nr_bends)
+                            calc_result.find('Sheet_BendAngles').text = '_'.join(_format_float(a) for a in bend_angles)
+                            calc_result.find('Sheet_BendInnerRadii').text = '_'.join(_format_float(r) for r in bend_radii)
+                            calc_result.find('Sheet_BendLength').text = '_'.join(_format_float(l) for l in bend_lengths)
+
                         flat_length = float(unfold_result.get('flat_length', 0) or 0)
                         flat_width = float(unfold_result.get('flat_width', 0) or 0)
                         unfold_thickness = float(unfold_result.get('thickness', 0) or 0)
@@ -1837,22 +1990,28 @@ def _process_plaat_item(
                         if unfold_result.get('dxf_output'):
                             calc_result.find('Sheet_FilePathDXF').text = str(unfold_result['dxf_output'])
                         
-                        # Update thickness from unfold if available
-                        if unfold_result.get('thickness'):
+                        # Update thickness from unfold if available and not already from cross-section.
+                        if unfold_result.get('thickness') and not cs_bend_success:
                             calc_result.find('Sheet_Thickness').text = _format_float(unfold_result['thickness'])
         except Exception as e:
             print(f"    [WARN] Proactive unfold failed: {str(e)[:60]}")
 
     # Try to extract detailed features from part geometry via part_analyzer
-    # Skip bend detection if already done by proactive unfold
+    # Skip bend detection only when a prior method already succeeded (unfold or cross-section).
     if HAS_PART_ANALYZER:
         try:
             if part_solid is not None:
                 # Analyze geometry for this specific part solid
                 analysis = analyze_part_geometry(part_solid, part_name)
 
-                # Check if bent (but skip if already unfolded proactively)
-                if not early_unfold_attempted and hasattr(analysis, 'bends') and len(analysis.bends) > 0:
+                # Check if bent.
+                # If the proactive unfold was attempted but FAILED we still want
+                # part_analyzer's bend detection as a further fallback.
+                bends_already_known = (
+                    calc_result.findtext('Sheet_UnfoldSuccess', 'False') == 'True'
+                    or int(calc_result.findtext('Sheet_NrBends', '0') or 0) > 0
+                )
+                if not bends_already_known and hasattr(analysis, 'bends') and len(analysis.bends) > 0:
                     print(f"    [INFO] Bent part: {len(analysis.bends)} bends detected")
 
                     bend_angles = '_'.join(_format_float(b.angle) for b in analysis.bends)
@@ -2402,7 +2561,7 @@ def _process_profiel_item(
     
     # Basic fields (always populated)
     ET.SubElement(calc_result, 'Tube_PartName').text = output_part_name
-    ET.SubElement(calc_result, 'Tube_Name').text = part_name
+    ET.SubElement(calc_result, 'Tube_Name').text = _strip_step_name_suffix(part_name)
     ET.SubElement(calc_result, 'Tube_Count').text = str(quantity)
     
     # Initialize with default values
