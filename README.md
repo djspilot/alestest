@@ -1,9 +1,45 @@
 # ALES Manufacturing Pipeline
 
 **Laatste update:** 16 maart 2026
-**Versie:** 3.3 (Hybride Dwarsdoorsnede + FreeCAD Lip-detectie)
+**Versie:** 3.4 (Performance Profiling + Optimalisaties)
 
 > Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis.
+
+### v3.4 — Performance Profiling + Optimalisaties (16 maart 2026)
+
+**Profiling infrastructuur + algoritmische optimalisaties voor grote STEP-bestanden**
+
+| Wijziging | Impact |
+|-----------|--------|
+| **AnalysisProfiler** (`core/profiler.py`) | Terminal timing-tabel + `_timing.json` per analyse-run |
+| **`precompute_face_properties()`** | Eenmalige OCP face-extractie, voorkomt herhaalde `BRepAdaptor` calls |
+| **Diameter bucketing** in `detect_holes()` | O(n²) → O(n × bucket) voor hole grouping |
+| **Type/dim bucketing** in `detect_shaped_holes()` | O(n²) → O(n × bucket) voor deduplicatie |
+| **Squared distance** in inner loops | `math.sqrt()` vermeden waar niet nodig |
+| **Normal-direction grouping** in `part_analyzer.py` | Snellere dikte-detectie via anti-parallel lookup |
+
+**Timing output (voorbeeld):**
+```
+╔════════════════════════════════════════════════════════════╗
+║ 10015088_3.stp (3.2 MB)                                   ║
+╠════════════════════════════════════════════════════════════╣
+║ [1/7] Load STEP                  1.17s   OK               ║
+║ [2/7] Profile Router             0.65s   OK               ║
+║ [3/7] AAG Analysis              5m 00s   OK               ║
+║ [4/7] Classify geometry          0.30s   OK               ║
+║ [5/7] Unfold                    1m 16s   OK               ║
+║ [6/7] Detect holes               0.77s   OK               ║
+║       ├─ Cylindrical              0.00s  (0 found)        ║
+║       ├─ Shaped                   0.75s  (17 found)       ║
+║       └─ Dedup                    0.00s                   ║
+║ [7/7] Save results               0.00s   OK               ║
+╠════════════════════════════════════════════════════════════╣
+║ TOTAL                           6m 19s                    ║
+║ Faces: 2,204  Holes: 17  Solids: 19                       ║
+╚════════════════════════════════════════════════════════════╝
+```
+
+Timing JSON wordt opgeslagen in `data/output/<part>/<part>_timing.json` voor vergelijking tussen bestanden.
 
 ### v3.3 — Hybride Dwarsdoorsnede + FreeCAD Lip-detectie (16 maart 2026)
 
@@ -522,7 +558,7 @@ v2_profile_sa_v_ratio_max = 1.2
 │
 ├── manufacturing_pipeline/             # Kernpakket
 │   ├── cli.py                          # CLI-interface
-│   ├── core/                           # Config, modellen, utilities
+│   ├── core/                           # Config, modellen, utilities, profiler
 │   ├── analysis/
 │   │   ├── router.py                    # Pre-routing: PLAAT/PROFIEL/ROND/OVERIG
 │   │   ├── profile_classifier.py        # Cross-sectie profiel classifier
@@ -613,6 +649,6 @@ python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ 
 ---
 
 **Laatste update:** 16 maart 2026
-**Versie:** 3.3 (Hybride Dwarsdoorsnede + FreeCAD Lip-detectie)
+**Versie:** 3.4 (Performance Profiling + Optimalisaties)
 
-> Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis van v2.1 t/m v3.1.
+> Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis van v2.1 t/m v3.3.
