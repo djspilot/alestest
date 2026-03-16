@@ -265,14 +265,19 @@ def run_analysis(step_file, output_dir, args):
             route_result = None
 
     # ================================================================
-    # STEP 3: AAG Feature Recognition (The "Brain")
+    # STEP 3: Standard Geometry Analysis (primary — always runs)
     # ================================================================
-    print("[3/7] Running AAG Feature Recognition...")
-    with profiler.step("AAG Analysis", 3, 7):
-        # Run via subprocess to use FreeCAD's robust geometry engine
-        aag_data = run_aag_analysis(step_file)
-    
-    # Create a simple object to hold results for easier access
+    print("[3/7] Analyzing dimensions & geometry...")
+    with profiler.step("Classify geometry", 3, 7):
+        analysis = analyze_part_geometry(shape, part_name)
+
+    # Precompute face properties once for hole detection (avoids redundant OCP calls)
+    face_data = precompute_face_properties(shape)
+    profiler.count("faces", len(face_data))
+
+    # ================================================================
+    # STEP 3b: Classification from standard analysis
+    # ================================================================
     class AAGResult:
         def __init__(self, data):
             self.success = data.get('success', False)
@@ -282,94 +287,70 @@ def run_analysis(step_file, output_dir, args):
             self.slot_count = data.get('slot_count', 0)
             self.data = data
 
-    aag_result = AAGResult(aag_data)
-    
-    if not aag_result.success:
-        print(f"  ⚠ AAG Analysis failed, falling back to standard analysis")
+    # Determine if standard analysis has enough data
+    standard_has_thickness = analysis.thickness > 0
+    standard_has_classification = (
+        analysis.is_profile or analysis.is_turned or
+        analysis.bend_count_erp > 0 or analysis.is_sheet_metal
+    )
+
+    # AAG as fallback: only run if standard analysis lacks thickness or classification
+    use_aag = args.aag  # Force AAG if --aag flag
+    if not standard_has_thickness and not standard_has_classification:
+        use_aag = True  # Auto-fallback
+
+    aag_result = AAGResult({"success": False})  # Default: no AAG
+
+    if use_aag:
+        print("[3b/7] AAG Fallback: standard analysis incomplete, running AAG...")
+        with profiler.step("AAG Fallback", None, None):
+            aag_data = run_aag_analysis(step_file)
+        aag_result = AAGResult(aag_data)
+
+        if not aag_result.success:
+            print(f"  AAG also failed, using standard analysis only")
+        else:
+            print(f"  [OK] AAG: {aag_result.bend_count} bends, t={aag_result.thickness:.2f}mm")
     else:
-        print(f"  [OK] AAG Success: {aag_result.bend_count} bends, t={aag_result.thickness:.2f}mm")
+        print("[3b/7] AAG: Overgeslagen (standard analyse voldoende)")
+        with profiler.step("AAG Fallback", None, None) as s:
+            s["status"] = "SKIP"
 
     # ================================================================
-    # STEP 3: Standard Geometry Analysis
+    # STEP 4: Merge classification
     # ================================================================
-    print("[4/7] Analyzing dimensions & geometry...")
-    with profiler.step("Classify geometry", 4, 7):
-        analysis = analyze_part_geometry(shape, part_name)
-
-    # Precompute face properties once for hole detection (avoids redundant OCP calls)
-    face_data = precompute_face_properties(shape)
-    profiler.count("faces", len(face_data))
-
-    # ================================================================
-    # STEP 4: Classification (Logic Update)
-    # ================================================================
-    # Use AAG results to override/refine classification
-    # This makes it robust for files WITHOUT ERP data
-    
     if aag_result.success:
-        # Update analysis with AAG data
-        if aag_result.thickness > 0:
-            # Only overwrite if current thickness is 0 or if AAG thickness is plausible
-            if analysis.thickness == 0:
-                analysis.thickness = aag_result.thickness
-            elif abs(analysis.thickness - aag_result.thickness) > 0.1:
-                print(f"  ⚠ Thickness mismatch: AAG={aag_result.thickness:.2f}mm, Standard={analysis.thickness:.2f}mm")
-                # Heuristic: If AAG is very thin (<1mm) and Standard is thicker (>2mm), trust Standard
-                if aag_result.thickness < 1.0 and analysis.thickness > 2.0:
-                    print("  -> Keeping Standard thickness (AAG result seems too thin)")
-                else:
-                    analysis.thickness = aag_result.thickness
-        
-        # Determine category based on GEOMETRY (AAG), not ERP
-        part_category = "ONBEKEND"
-        
-        # Profile detection (AAG can detect closed loops of bends, but for now we use simple heuristics)
-        # If it has bends but looks like a standard profile (e.g. 4 bends 90 deg in a loop)
-        # For now, we trust the standard analyzer for profile detection (it checks cross sections)
-        
-        if analysis.is_profile:
-            part_category = "PROFIEL (ingekocht)"
-            # Keep existing profile type (e.g. BUIS, KOKER) if set, otherwise default to KOKER_PROFIEL
-            # PartType is already imported at function start
+        # AAG ran and succeeded — use it to fill gaps
+        if aag_result.thickness > 0 and analysis.thickness == 0:
+            analysis.thickness = aag_result.thickness
+        if aag_result.bend_count > 0 and analysis.bend_count_erp == 0:
+            analysis.bend_count_erp = aag_result.bend_count
+            analysis.is_sheet_metal = True
 
-            if analysis.part_type not in [PartType.BUIS, PartType.KOKER, PartType.KOKER_PROFIEL]:
-                analysis.part_type = PartType.KOKER_PROFIEL 
-        elif aag_result.bend_count > 0:
-            part_category = "GEBOGEN PLAATWERK"
-            analysis.part_type = PartType.COMPLEX # Default to complex/bent
-            analysis.is_sheet_metal = True
-            # Update ERP count to match geometric count if ERP is missing
-            if analysis.bend_count_erp == 0:
-                analysis.bend_count_erp = aag_result.bend_count
-        elif aag_result.thickness > 0 and aag_result.bend_count == 0:
-            part_category = "PLAAT (vlak)"
-            analysis.part_type = PartType.PLAAT
-            analysis.is_sheet_metal = True
-        elif analysis.is_turned:
-            part_category = "DRAAISTUK"
-            
-        print(f"\n--- Classificatie (AAG Powered) ---")
-        print(f"Categorie:   {part_category}")
-        print(f"Type:        {analysis.part_type.value.upper()}")
-        print(f"Afmetingen:  {analysis.length:.0f} x {analysis.width:.0f} x {analysis.height:.0f} mm")
-        print(f"Dikte:       {analysis.thickness:.2f} mm (AAG detected)")
-        print(f"Zettingen:   {aag_result.bend_count} (AAG detected)")
-    else:
-        # Fallback to original logic if AAG failed
-        part_category = "ONBEKEND"
-        if analysis.is_profile:
-            part_category = "PROFIEL (ingekocht)"
-        elif analysis.bend_count_erp == 0:
-            part_category = "PLAAT (vlak)"
-        elif analysis.bend_count_erp > 0:
-            part_category = "GEBOGEN PLAATWERK"
-            
-        print(f"\n--- Classificatie (Standard) ---")
-        print(f"Categorie:   {part_category}")
-        print(f"Type:        {analysis.part_type.value.upper()}")
-        print(f"Afmetingen:  {analysis.length:.0f} x {analysis.width:.0f} x {analysis.height:.0f} mm")
-        print(f"Dikte:       {analysis.thickness:.1f} mm")
-        print(f"Zettingen:   {analysis.bend_count_erp}")
+    # Classify based on (possibly AAG-augmented) standard analysis
+    part_category = "ONBEKEND"
+    if analysis.is_profile:
+        part_category = "PROFIEL (ingekocht)"
+        if analysis.part_type not in [PartType.BUIS, PartType.KOKER, PartType.KOKER_PROFIEL]:
+            analysis.part_type = PartType.KOKER_PROFIEL
+    elif analysis.bend_count_erp > 0:
+        part_category = "GEBOGEN PLAATWERK"
+        analysis.part_type = PartType.COMPLEX
+        analysis.is_sheet_metal = True
+    elif analysis.thickness > 0 and analysis.bend_count_erp == 0:
+        part_category = "PLAAT (vlak)"
+        analysis.part_type = PartType.PLAAT
+        analysis.is_sheet_metal = True
+    elif analysis.is_turned:
+        part_category = "DRAAISTUK"
+
+    source = "AAG+Standard" if aag_result.success else "Standard"
+    print(f"\n--- Classificatie ({source}) ---")
+    print(f"Categorie:   {part_category}")
+    print(f"Type:        {analysis.part_type.value.upper()}")
+    print(f"Afmetingen:  {analysis.length:.0f} x {analysis.width:.0f} x {analysis.height:.0f} mm")
+    print(f"Dikte:       {analysis.thickness:.1f} mm")
+    print(f"Zettingen:   {analysis.bend_count_erp}")
 
     # ================================================================
     # STEP 5: Unfold if gebogen plaatwerk

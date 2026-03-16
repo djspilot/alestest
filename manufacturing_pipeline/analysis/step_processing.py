@@ -23,7 +23,49 @@ from collections import Counter
 
 
 def _load_step_via_xcaf(filepath):
-    """Try to build a CadQuery object from XCAF solids; return None on failure."""
+    """Try to build a CadQuery object from XCAF solids; return None on failure.
+
+    Runs the XCAF reader in a subprocess to guard against segfaults in the
+    OCP C++ layer on complex/corrupt STEP files. The subprocess writes solid
+    count to stdout; if it crashes we fall back to CadQuery import.
+    """
+    import subprocess
+    import sys
+
+    # Quick pre-check: run XCAF in a subprocess to see if it crashes
+    probe_script = f'''
+import sys
+try:
+    sys.path.insert(0, "{os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}")
+    from manufacturing_pipeline.core.xcaf_reader import xcaf_match_solids_to_names
+    result = xcaf_match_solids_to_names("{filepath}")
+    if result is None:
+        print("0")
+    else:
+        solids, names = result
+        print(str(len(solids)))
+except Exception as e:
+    print("0")
+'''
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", probe_script],
+            capture_output=True, text=True, timeout=60
+        )
+        if proc.returncode != 0:
+            # Subprocess crashed (segfault = 139, etc.)
+            print(f"  XCAF probe crashed (exit {proc.returncode}), using CadQuery fallback")
+            return None
+        solid_count = int(proc.stdout.strip() or "0")
+        if solid_count == 0:
+            return None
+    except subprocess.TimeoutExpired:
+        print("  XCAF probe timeout (>60s), using CadQuery fallback")
+        return None
+    except Exception:
+        return None
+
+    # Probe succeeded — safe to load in-process
     try:
         from manufacturing_pipeline.core.xcaf_reader import xcaf_match_solids_to_names
 
@@ -45,7 +87,6 @@ def _load_step_via_xcaf(filepath):
             compound = cq.Compound.makeCompound(cq_solids)
             wp = cq.Workplane(obj=compound)
 
-        # Optional metadata for downstream consumers that want deterministic naming.
         try:
             setattr(wp, "_xcaf_solid_names", list(solid_names))
             setattr(wp, "_xcaf_source_step", str(filepath))
@@ -62,7 +103,7 @@ def load_step_file(filepath):
     Load and parse a STEP file and return a CadQuery Workplane/Shape.
 
     Priority:
-    1) XCAF reader (direct product tree parsing)
+    1) XCAF reader (with subprocess probe to catch segfaults)
     2) CadQuery importer fallback
     """
     if not filepath:
