@@ -823,30 +823,61 @@ def classify_step0(solid) -> Step0Result:
     dims = _get_bbox_sorted(solid)
     volume = _get_volume(solid)
 
+    dependency_errors: list[str] = []
+
     # 0.1 Slice-validatie (poort)
-    gate = _step_0_1_slice_validation(solid)
-    if gate is not None:
-        return gate
+    try:
+        gate = _step_0_1_slice_validation(solid)
+        if gate is not None:
+            return gate
+    except Exception as e:
+        dependency_errors.append(f"0.1: {e}")
 
     # 0.2 Gesloten-hol → stop bij match
-    result = _step_0_2_hollow_closed(solid)
-    if result is not None:
-        return result
+    try:
+        result = _step_0_2_hollow_closed(solid)
+        if result is not None:
+            return result
+    except Exception as e:
+        dependency_errors.append(f"0.2: {e}")
 
     # 0.3 Open profiel → stop bij match
-    result = _step_0_3_open_profile(solid, dims)
-    if result is not None:
-        return result
+    try:
+        result = _step_0_3_open_profile(solid, dims)
+        if result is not None:
+            return result
+    except Exception as e:
+        dependency_errors.append(f"0.3: {e}")
 
     # 0.4a Vlakke plaat (stop bij high confidence; fallthrough bij lage confidence)
-    result = _step_0_4a_flat_plate(solid)
-    if result is not None:
-        return result
+    try:
+        result = _step_0_4a_flat_plate(solid)
+        if result is not None:
+            return result
+    except Exception as e:
+        dependency_errors.append(f"0.4a: {e}")
 
     # 0.4b Constant-dikte open sectie → GEZETTE_PLAAT of PROFIEL
-    result = _step_0_4b_constant_thickness_open(solid, dims)
-    if result is not None:
-        return result
+    try:
+        result = _step_0_4b_constant_thickness_open(solid, dims)
+        if result is not None:
+            return result
+    except Exception as e:
+        dependency_errors.append(f"0.4b: {e}")
+
+    # Als kernafhankelijkheden ontbreken (bv. pythonocc-core), val expliciet
+    # door naar Step 1 in de legacy-classifier in plaats van hard te falen.
+    if dependency_errors:
+        joined = " | ".join(dependency_errors)
+        return _result(
+            label="ANDERS",
+            step="0.x",
+            method="fallback",
+            confidence=0.0,
+            fallthrough=True,
+            reason=f"STEP0 afhankelijkheden niet beschikbaar: {joined[:220]}",
+            features={"step0_dependency_errors": dependency_errors[:5]},
+        )
 
     # 0.5 Massief profiel fallback
     return _step_0_5_solid_profile_fallback(solid, dims, volume)
