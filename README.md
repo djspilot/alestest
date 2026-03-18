@@ -7,6 +7,8 @@
 
 ### v3.6-dev — Stappenplan StepFile ontwerp (18 maart 2026)
 
+🔵 **STATUS: Test Phase** — Zie [HANDOVER_STEP0_CLASSIFICATION.md](HANDOVER_STEP0_CLASSIFICATION.md) voor testplan en volgende stappen.
+
 **Nieuwe ontwikkelstroom naast de bestaande pipeline**
 
 Er wordt een alternatieve StepFile-flow opgezet binnen dezelfde repository. Deze nieuwe route gebruikt bestaande code uit `alestest`, maar wordt bewust als aparte ontwikkelstroom opgezet zodat de huidige productieflow intact blijft.
