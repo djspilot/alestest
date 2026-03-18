@@ -96,6 +96,7 @@ STANDARD_PROFILE_FACE_AREA_TOLERANCE = 0.20      # Top2 faces differ >20% → va
 BENT_SHEET_THICKNESS_MAX_MM = 100.0       # Relaxed: allows hollow sections with opening
 
 # Edge count - bent sheets have many edges due to bends/folds  
+BENT_SHEET_LARGE_RADIUS_MIN_MM = 1.0      # Boogstraal bochten >= 1mm (R4 fix)
 BENT_SHEET_MIN_EDGE_COUNT = 8             # >=8 edges indicates folded geometry
                                           # Flat plate: ~4 edges
                                           # U-profile: ~12-16 edges
