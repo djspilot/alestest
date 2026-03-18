@@ -1,9 +1,36 @@
 # ALES Manufacturing Pipeline
 
-**Laatste update:** 16 maart 2026
-**Versie:** 3.5 (Segfault Fix + AAG Fallback)
+**Laatste update:** 18 maart 2026
+**Versie:** 3.6-dev (Stappenplan StepFile ontwerp)
 
 > Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis.
+
+### v3.6-dev — Stappenplan StepFile ontwerp (18 maart 2026)
+
+**Nieuwe ontwikkelstroom naast de bestaande pipeline**
+
+Er wordt een alternatieve StepFile-flow opgezet binnen dezelfde repository. Deze nieuwe route gebruikt bestaande code uit `alestest`, maar wordt bewust als aparte ontwikkelstroom opgezet zodat de huidige productieflow intact blijft.
+
+**Kernkeuzes:**
+
+1. De huidige HTML-ingang voor STEP-bestanden blijft behouden.
+2. De classificatie wordt expliciet uitgewerkt in een aparte `classification.py` op basis van `classification_step_review.md`.
+3. Pas na classificatie volgt de verdiepende geometrie-analyse per categorie.
+4. De UI voor classificatie-overzicht en handmatige wijziging komt later.
+5. XML/DXF-opbouw wordt als aparte vervolgstap gemoduleerd.
+
+**Advies voor implementatie:**
+
+- Blijf in dezelfde repository werken.
+- Gebruik een aparte branch, bijvoorbeeld `feature/stappenplan-stepfile`.
+- Push eerst de ontwerpdocumenten, daarna pas de implementatie.
+- Bouw de nieuwe flow parallel aan de bestaande pipeline.
+
+**Documenten voor deze ontwikkelstroom:**
+
+- [STAPPENPLAN_STEPFILE.md](STAPPENPLAN_STEPFILE.md) — nieuw architectuur- en branchplan.
+- [classification_step_review.md](classification_step_review.md) — specificatie voor de nieuwe classificatielaag.
+- [CLASSIFICATION_THRESHOLDS_MATRIX.md](CLASSIFICATION_THRESHOLDS_MATRIX.md) — overzicht van de huidige thresholds en beslismomenten.
 
 ### v3.5 — XCAF Segfault Fix + AAG als Fallback (16 maart 2026)
 
@@ -679,6 +706,9 @@ python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ 
 
 | Document | Onderwerp | Gebruik Voor |
 |----------|-----------|-------------|
+| **[STAPPENPLAN_STEPFILE.md](STAPPENPLAN_STEPFILE.md)** | Alternatieve StepFile-flow | Nieuwe ontwikkelstroom, branch-aanpak, modulaire opbouw |
+| **[classification_step_review.md](classification_step_review.md)** | STEP 0 classificatiespecificatie | Basis voor nieuwe `classification.py` |
+| **[CLASSIFICATION_THRESHOLDS_MATRIX.md](CLASSIFICATION_THRESHOLDS_MATRIX.md)** | Huidige thresholds-matrix | Referentie voor bestaande beslisboom |
 | **[docs/ENGINE.md](docs/ENGINE.md)** | Technische engine beschrijving | Engine architectuur, vergelijking met SpaceClaim |
 | **[docs/CLASSIFICATION_SCHEMA.md](docs/CLASSIFICATION_SCHEMA.md)** | 4 classificatie categorieën | ⭐ START HIER: Plaat/Profiel/Anders overzicht |
 | **[docs/CLASSIFICATION_DECISION_TREE.md](docs/CLASSIFICATION_DECISION_TREE.md)** | Complete beslisboom met thresholds | 🌳 Welke criteria worden WANNEER toegepast? |
@@ -701,7 +731,7 @@ python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ 
 
 ---
 
-**Laatste update:** 16 maart 2026
-**Versie:** 3.5 (Segfault Fix + AAG Fallback)
+**Laatste update:** 18 maart 2026
+**Versie:** 3.6-dev (Stappenplan StepFile ontwerp)
 
-> Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis van v2.1 t/m v3.4.
+> Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis t/m v3.5.
