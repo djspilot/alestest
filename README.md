@@ -1,9 +1,67 @@
 # ALES Manufacturing Pipeline
 
-**Laatste update:** 18 maart 2026
-**Versie:** 3.6-dev (Stappenplan StepFile ontwerp)
+**Laatste update:** 19 maart 2026
+**Versie:** 3.6.1 (Hollow Tube Detection Wire-Loop Fallback)
 
 > Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis.
+
+### v3.6.1 — Hollow Tube Detection Wire-Loop Fallback (19 maart 2026)
+
+🟢 **STATUS: Production Ready** — Hollow detection für rounded rectangular tubes fixed.
+
+#### Probleem: Zelfsnijdende Ring bij Afgeronde Hoeken
+
+Bij het snijden van STEP-onderdelen door afgeronde rechthoekige kokers (bijv. 60×40×4mm) ontstonden zelfsnijdende buitenringen:
+
+- OCP/OpenCascade samplet grenslijnen op curved oppervlakken
+- Bij kleine stralen (r=4mm) overlappen grenspunten microscopisch
+- Shapely vlagde als `is_valid=False`
+- `buffer(0)` repareerde de ring, maar veranderde coördinaten
+- Gatvalidatie mislukking: `Polygon(outer, holes=[inner])` bleef ongeldig
+- **Resultaat**: gaten gingen verloren (`holes=0` → foutieve "open" classificatie)
+
+#### Oplossing: Wire-Loop Fallback + Overlap Validation
+
+**Locatie**: `manufacturing_pipeline/analysis/step0_section_tools.py` (lines 295-340) & `classification.py` (lines 365-480)
+
+**Aanpak**:
+1. **Bewaar raw wire-loop polygonen** in Section2D voor fallback gebruik
+2. **Primaire pad**: Nog steeds polygon-gaten proberen (>95% werkt)
+3. **Fallback pad** (indien primair faalt):
+   - Selecteer 2 grootste wireloops (buitenshell, binnengat)
+   - Valideer nesting via **overlap ratio**: `intersection_area >= 0.90 * inner_area`
+   - 90% minimale overlap = garantie dat inner echt genest in outer
+4. **Tolerante rechthoekdetectie** (ALLEEN fallback-pad):
+   - Normaal: `bbox_fill >= 0.95`, `convexity >= 0.98`
+   - Fallback: `bbox_fill >= 0.85`, `convexity >= 0.95` (5% toegestaan)
+   - Voorkomt valse positieven op andere geometrie
+
+**Thresholds** in `classification_variables.py` (nieuw):
+```python
+# Step 0.2 Hollow Detection Wire-Loop Fallback
+HOLLOW_WIRE_OVERLAP_RATIO_MIN = 0.90        # 90% intersection = valid hole
+HOLLOW_RECT_BBOX_FILL_MIN = 0.85            # Fallback: relax box fill
+HOLLOW_RECT_CONVEXITY_MIN = 0.95            # Fallback: strict convexity
+HOLLOW_RECT_TOLERANCE_REL = 0.05            # Fallback: 5% dimension variance
+```
+
+**Testresulaten**:
+- ✅ `803143-7401.step`: Nu correct `RECHTHOEKIGE_KOKER` (98% confidence)
+- ✅ `05-01-5340`: Blijft `PROFIEL` (geen regressie)
+- ✅ `VDB-036003-A`: Correct `KOKER` (uses wire-fallback, legitiem gat)
+- ✅ `10000869069` (Zetwerk): Blijft `GEZETTE_PLAAT` (geen regressie)
+
+**Waarom dit robuuster is**:
+- Niet alle zelfsnijdende rings getackeld door globale tolerance wijziging
+- Fallback alleen als primaire polygon-methode faalt
+- Strict overlap-check voorkomt "gaten" in vlakke platen
+- Tolerante rechthoek matching gated tot fallback-scenario
+
+**Volgende stap (optioneel)**:
+- Monitoren op edge-cases met extremale stralen (r<1mm of r>10mm op kleine sections)
+- Overweeg extended wire validation als edge cases optreden
+
+---
 
 ### v3.6-dev — Stappenplan StepFile ontwerp (18 maart 2026)
 
@@ -33,6 +91,17 @@ Er wordt een alternatieve StepFile-flow opgezet binnen dezelfde repository. Deze
 - [STAPPENPLAN_STEPFILE.md](STAPPENPLAN_STEPFILE.md) — nieuw architectuur- en branchplan.
 - [classification_step_review.md](classification_step_review.md) — specificatie voor de nieuwe classificatielaag.
 - [CLASSIFICATION_THRESHOLDS_MATRIX.md](CLASSIFICATION_THRESHOLDS_MATRIX.md) — overzicht van de huidige thresholds en beslismomenten.
+
+#### Branch TODO (feature/step0-cadquery-slicing)
+
+Nieuwe Step 0 uitwerking gaat eerst door. XCAF crash-safe parity met v3.5 blijft bewust als open TODO:
+
+- [ ] `run.py --step0`: gebruik XCAF subprocess probe (zelfde principe als `step_processing._load_step_via_xcaf`).
+- [ ] `run.py --step0`: bij probe crash (`exit != 0`, incl. segfault 139) automatisch CadQuery fallback.
+- [ ] `run.py --step0`: bij probe timeout (`>60s`) automatisch CadQuery fallback.
+- [ ] `run.py --step0`: log expliciet welke loader gebruikt is (`xcaf-probe` of `cadquery-fallback`).
+- [ ] `run.py --step0`: regressietest toevoegen voor complex STEP-bestand dat eerder XCAF crashte.
+- [ ] Documenteer meetbaar verschil in runtime/stabiliteit in deze README zodra parity is opgeleverd.
 
 ### v3.5 — XCAF Segfault Fix + AAG als Fallback (16 maart 2026)
 

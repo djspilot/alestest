@@ -10,7 +10,7 @@ Beslisboom volgorde (met exit-gedrag):
   0.2  Gesloten-hol (buis/koker)      → direct stop bij match
   0.3  Open profiel (L/U/I/T)         → direct stop bij match
   0.4a Vlakke plaat (high confidence) → stop of doorval naar Step 1
-  0.4b Constant-dikte open sectie     → GEZETTE_PLAAT of PROFIEL en stop
+    0.4b Constant-dikte open sectie     → GEZETTE_PLAAT en stop
   0.5  Massief profiel fallback       → PROFIEL of ANDERS
 
 Uitvoer van classify_step0():
@@ -18,7 +18,7 @@ Uitvoer van classify_step0():
         "label":      str,      # RONDE_BUIS|RECHTHOEKIGE_KOKER|PROFIEL|
                                 #  PLAAT|GEZETTE_PLAAT|ANDERS
         "step":       str,      # "0.1"|"0.2"|"0.3"|"0.4a"|"0.4b"|"0.5"
-        "method":     str,      # "rule"|"template"|"bent_sheet"|"fallback"
+        "method":     str,      # "rule"|"template"|"fallback"
         "confidence": float,    # 0.0–1.0
         "fallthrough":bool,     # True = door naar Step 1 nodig
         "reason":     str,      # vrije tekst, debuginfo
@@ -68,6 +68,7 @@ from manufacturing_pipeline.analysis.classification_variables import (
     PROFILE_CROSS_RATIO_MIN,
     PROFILE_CROSS_RATIO_MAX,
     STANDARD_TUBE_VOLUME_RATIO_MAX,
+    STEP0_CLUSTER_RATIO_MIN,
 )
 
 # ---------------------------------------------------------------------------
@@ -85,8 +86,10 @@ def _get_volume(solid) -> float:
     if not _HAS_OCP:
         return 0.0
     try:
+        # Convert CadQuery solid to OCP shape if needed
+        ocp_solid = solid.wrapped if hasattr(solid, 'wrapped') else solid
         props = GProp_GProps()
-        BRepGProp.VolumeProperties_s(solid, props)
+        BRepGProp.VolumeProperties_s(ocp_solid, props)
         return float(props.Mass())
     except Exception:
         return 0.0
@@ -100,8 +103,11 @@ def _get_bbox_sorted(solid) -> Tuple[float, float, float]:
         from OCP.BRep import BRep_Builder
         from OCP.Bnd import Bnd_Box
         from OCP.BRepBndLib import BRepBndLib
+        
+        # Convert CadQuery solid to OCP shape if needed
+        ocp_solid = solid.wrapped if hasattr(solid, 'wrapped') else solid
         box = Bnd_Box()
-        BRepBndLib.Add_s(solid, box)
+        BRepBndLib.Add_s(ocp_solid, box)
         xmin, ymin, zmin, xmax, ymax, zmax = box.Get()
         dims = sorted([abs(xmax - xmin), abs(ymax - ymin), abs(zmax - zmin)])
         return (dims[0], dims[1], dims[2])
@@ -115,7 +121,9 @@ def _get_face_areas(solid) -> list[float]:
     if not _HAS_OCP:
         return areas
     try:
-        exp = TopExp_Explorer(solid, TopAbs_FACE)
+        # Convert CadQuery solid to OCP shape if needed
+        ocp_solid = solid.wrapped if hasattr(solid, 'wrapped') else solid
+        exp = TopExp_Explorer(ocp_solid, TopAbs_FACE)
         while exp.More():
             face = TopoDS.Face_s(exp.Current())
             props = GProp_GProps()
@@ -150,9 +158,12 @@ def _count_edges_and_large_radius(solid) -> Tuple[int, int]:
     try:
         from OCP.BRepAdaptor import BRepAdaptor_Curve
         from OCP.GeomAbs import GeomAbs_Circle
+        
+        # Convert CadQuery solid to OCP shape if needed
+        ocp_solid = solid.wrapped if hasattr(solid, 'wrapped') else solid
         edge_count = 0
         large_radius_count = 0
-        exp = TopExp_Explorer(solid, TopAbs_EDGE)
+        exp = TopExp_Explorer(ocp_solid, TopAbs_EDGE)
         while exp.More():
             edge_count += 1
             edge = TopoDS.Edge_s(exp.Current())
@@ -165,6 +176,23 @@ def _count_edges_and_large_radius(solid) -> Tuple[int, int]:
         return edge_count, large_radius_count
     except Exception:
         return (0, 0)
+
+
+def _count_edges(solid) -> int:
+    """Tel alleen het aantal edges in het solid."""
+    if not _HAS_OCP:
+        return 0
+    try:
+        # Convert CadQuery solid to OCP shape if needed
+        ocp_solid = solid.wrapped if hasattr(solid, 'wrapped') else solid
+        edge_count = 0
+        exp = TopExp_Explorer(ocp_solid, TopAbs_EDGE)
+        while exp.More():
+            edge_count += 1
+            exp.Next()
+        return edge_count
+    except Exception:
+        return 0
 
 
 # ===========================================================================
@@ -259,7 +287,7 @@ def _step_0_1_slice_validation(solid) -> Optional[Step0Result]:
     Returns None als OK (doorloopt), Step0Result(ANDERS) als poort faalt.
     """
     try:
-        from manufacturing_pipeline.analysis.profile_classifier import (
+        from manufacturing_pipeline.analysis.step0_section_tools import (
             find_extrusion_axis,
             solid_vertices_np,
             section_plane_positions_from_vertices,
@@ -284,7 +312,7 @@ def _step_0_1_slice_validation(solid) -> Optional[Step0Result]:
     try:
         vertices = solid_vertices_np(solid)
         positions = section_plane_positions_from_vertices(
-            vertices, axis.direction, (0.20, 0.40, 0.60, 0.80)
+            vertices, axis.direction, (0.20, 0.35, 0.50, 0.65, 0.80)
         )
         sections = []
         for s in positions:
@@ -312,7 +340,7 @@ def _step_0_1_slice_validation(solid) -> Optional[Step0Result]:
 
     cluster = dominant_section_cluster(sections)
     cluster_ratio = len(cluster) / max(len(sections), 1)
-    if cluster_ratio < 0.60:
+    if cluster_ratio < STEP0_CLUSTER_RATIO_MIN:
         return _result(
             label="ANDERS",
             step="0.1",
@@ -334,7 +362,7 @@ def _step_0_1_slice_validation(solid) -> Optional[Step0Result]:
 def _step_0_2_hollow_closed(solid) -> Optional[Step0Result]:
     """Detecteer ronde buis of rechthoekige koker via section holes==1."""
     try:
-        from manufacturing_pipeline.analysis.profile_classifier import (
+        from manufacturing_pipeline.analysis.step0_section_tools import (
             find_extrusion_axis,
             solid_vertices_np,
             section_plane_positions_from_vertices,
@@ -344,6 +372,7 @@ def _step_0_2_hollow_closed(solid) -> Optional[Step0Result]:
             extract_section_features,
             _is_nearly_circle,
             _is_nearly_rectangle,
+            section_distance,
         )
         from shapely.geometry import Polygon as ShapelyPolygon
     except ImportError:
@@ -356,7 +385,7 @@ def _step_0_2_hollow_closed(solid) -> Optional[Step0Result]:
     try:
         vertices = solid_vertices_np(solid)
         positions = section_plane_positions_from_vertices(
-            vertices, axis.direction, (0.20, 0.40, 0.60, 0.80)
+            vertices, axis.direction, (0.20, 0.35, 0.50, 0.65, 0.80)
         )
         sections = []
         for s in positions:
@@ -379,19 +408,44 @@ def _step_0_2_hollow_closed(solid) -> Optional[Step0Result]:
         return None
 
     # Gebruik mediatoon van het cluster als representatieve doorsnede
-    from manufacturing_pipeline.analysis.profile_classifier import section_distance
     import numpy as np
     normalized = [normalize_section_polygon(sec.polygon) for sec in cluster]
-    dsum = [sum(section_distance(a, b) for j, b in enumerate(normalized) if j != i)
-            for i, a in enumerate(normalized)]
-    core_poly = cluster[int(np.argmin(dsum))].polygon
+    dsum = [
+        sum(section_distance(a, b) for j, b in enumerate(normalized) if j != i)
+        for i, a in enumerate(normalized)
+    ]
+    core_sec = cluster[int(np.argmin(dsum))]
+    core_poly = core_sec.polygon
 
-    features = extract_section_features(cluster[int(np.argmin(dsum))])
-    if features.holes != 1:
+    features = extract_section_features(core_sec)
+    effective_holes = features.holes
+    outer = None
+    inner = None
+    used_wire_fallback = False
+
+    # Primaire pad: hole zit correct in de samengestelde polygon.
+    if core_poly is not None and len(core_poly.interiors) >= 1:
+        outer = ShapelyPolygon(core_poly.exterior.coords)
+        inner = ShapelyPolygon(list(core_poly.interiors[0].coords))
+    else:
+        # Fallback: gebruik de ruwe wire-loops wanneer polygon-hole reconstructie
+        # faalt op afgeronde kokers (self-intersecting shell artefacten).
+        wire_polys = [
+            poly
+            for poly in getattr(core_sec, "wire_polygons", ())
+            if poly is not None and not poly.is_empty and poly.area > 0
+        ]
+        if len(wire_polys) >= 2:
+            wire_polys.sort(key=lambda poly: poly.area, reverse=True)
+            outer = wire_polys[0]
+            inner = wire_polys[1]
+            overlap_ratio = outer.intersection(inner).area / max(inner.area, 1e-9)
+            if overlap_ratio >= 0.90:
+                effective_holes = max(effective_holes, 1)
+                used_wire_fallback = True
+
+    if effective_holes != 1 or outer is None or inner is None:
         return None
-
-    outer = ShapelyPolygon(core_poly.exterior.coords)
-    inner = ShapelyPolygon(list(core_poly.interiors[0].coords))
 
     if _is_nearly_circle(outer, 0.90, 0.94) and _is_nearly_circle(inner, 0.90, 0.94):
         return _result(
@@ -401,18 +455,29 @@ def _step_0_2_hollow_closed(solid) -> Optional[Step0Result]:
             confidence=0.99,
             fallthrough=False,
             reason="holes==1 + outer/inner near-circle",
-            features={"holes": 1},
+            features={"holes": effective_holes},
         )
 
-    if _is_nearly_rectangle(outer) and _is_nearly_rectangle(inner):
+    is_rect_strict = _is_nearly_rectangle(outer) and _is_nearly_rectangle(inner)
+    is_rect_rounded = False
+    if used_wire_fallback:
+        is_rect_rounded = (
+            _is_nearly_rectangle(outer, bbox_fill_min=0.85, convexity_min=0.95, rel_tol=0.05)
+            and _is_nearly_rectangle(inner, bbox_fill_min=0.85, convexity_min=0.95, rel_tol=0.05)
+        )
+
+    if is_rect_strict or is_rect_rounded:
+        rect_reason = "holes==1 + outer/inner near-rectangle"
+        if not is_rect_strict and is_rect_rounded:
+            rect_reason = "holes==1 + outer/inner near-rectangle (rounded tolerance)"
         return _result(
             label="RECHTHOEKIGE_KOKER",
             step="0.2",
             method="rule",
             confidence=0.98,
             fallthrough=False,
-            reason="holes==1 + outer/inner near-rectangle",
-            features={"holes": 1},
+            reason=rect_reason,
+            features={"holes": effective_holes},
         )
 
     return None
@@ -428,7 +493,7 @@ def _step_0_3_open_profile(solid, dims: Tuple[float, float, float]) -> Optional[
     Veto: _is_bent_sheet_geometry sluit gezette plaat uit.
     """
     try:
-        from manufacturing_pipeline.analysis.profile_classifier import (
+        from manufacturing_pipeline.analysis.step0_section_tools import (
             find_extrusion_axis,
             solid_vertices_np,
             section_plane_positions_from_vertices,
@@ -451,7 +516,7 @@ def _step_0_3_open_profile(solid, dims: Tuple[float, float, float]) -> Optional[
     try:
         vertices = solid_vertices_np(solid)
         positions = section_plane_positions_from_vertices(
-            vertices, axis.direction, (0.20, 0.40, 0.60, 0.80)
+            vertices, axis.direction, (0.20, 0.35, 0.50, 0.65, 0.80)
         )
         sections = []
         for s in positions:
@@ -525,7 +590,7 @@ def _step_0_4a_flat_plate(solid) -> Optional[Step0Result]:
     Lage confidence: geeft fallthrough=True zodat Step 1 verder kan.
     """
     try:
-        from manufacturing_pipeline.analysis.profile_classifier import (
+        from manufacturing_pipeline.analysis.step0_section_tools import (
             find_extrusion_axis,
             solid_vertices_np,
             section_plane_positions_from_vertices,
@@ -546,7 +611,7 @@ def _step_0_4a_flat_plate(solid) -> Optional[Step0Result]:
     try:
         vertices = solid_vertices_np(solid)
         positions = section_plane_positions_from_vertices(
-            vertices, axis.direction, (0.20, 0.40, 0.60, 0.80)
+            vertices, axis.direction, (0.20, 0.35, 0.50, 0.65, 0.80)
         )
         sections = []
         for s in positions:
@@ -613,17 +678,15 @@ def _step_0_4a_flat_plate(solid) -> Optional[Step0Result]:
 def _step_0_4b_constant_thickness_open(
     solid, dims: Tuple[float, float, float]
 ) -> Optional[Step0Result]:
-    """Scheidt constant-dikte open secties in GEZETTE_PLAAT of PROFIEL.
+    """Classificeert constant-dikte open secties als GEZETTE_PLAAT.
 
     Criteria:
       holes == 0, reentrant_corners > 0, dikteConstant == True
-
-    Beslissing: _is_bent_sheet_geometry
-      True  → GEZETTE_PLAAT
-      False → PROFIEL
+    
+    Note: gebruikt OCP-native section tools, niet profile_classifier.py.
     """
     try:
-        from manufacturing_pipeline.analysis.profile_classifier import (
+        from manufacturing_pipeline.analysis.step0_section_tools import (
             find_extrusion_axis,
             solid_vertices_np,
             section_plane_positions_from_vertices,
@@ -643,7 +706,7 @@ def _step_0_4b_constant_thickness_open(
     try:
         vertices = solid_vertices_np(solid)
         positions = section_plane_positions_from_vertices(
-            vertices, axis.direction, (0.20, 0.40, 0.60, 0.80)
+            vertices, axis.direction, (0.20, 0.35, 0.50, 0.65, 0.80)
         )
         sections = []
         for s in positions:
@@ -666,39 +729,35 @@ def _step_0_4b_constant_thickness_open(
         return None
 
     import numpy as np
+
     normalized = [normalize_section_polygon(sec.polygon) for sec in cluster]
     dsum = [sum(section_distance(a, b) for j, b in enumerate(normalized) if j != i)
             for i, a in enumerate(normalized)]
     core_sec = cluster[int(np.argmin(dsum))]
     features = extract_section_features(core_sec)
 
-    # Selectie-criteria voor 0.4b
     if features.holes != 0 or features.reentrant_corners == 0:
         return None
+
     if not _is_constant_thickness(solid):
         return None
 
-    volume = _get_volume(solid)
-    if _is_bent_sheet_geometry(solid, volume, dims):
-        return _result(
-            label="GEZETTE_PLAAT",
-            step="0.4b",
-            method="bent_sheet",
-            confidence=0.88,
-            fallthrough=False,
-            reason="constant-dikte open sectie + bent_sheet positief → GEZETTE_PLAAT",
-            features={"reentrant_corners": features.reentrant_corners},
-        )
-    else:
-        return _result(
-            label="PROFIEL",
-            step="0.4b",
-            method="rule",
-            confidence=0.82,
-            fallthrough=False,
-            reason="constant-dikte open sectie + bent_sheet negatief → PROFIEL",
-            features={"reentrant_corners": features.reentrant_corners},
-        )
+    smallest, middle, longest = dims
+    return _result(
+        label="GEZETTE_PLAAT",
+        step="0.4b",
+        method="rule",
+        confidence=0.88,
+        fallthrough=False,
+        reason="holes==0 + reentrant_corners>0 + dikteConstant",
+        features={
+            "holes": features.holes,
+            "reentrant_corners": features.reentrant_corners,
+            "smallest": smallest,
+            "middle": middle,
+            "longest": longest,
+        },
+    )
 
 
 # ===========================================================================
@@ -741,7 +800,7 @@ def _step_0_5_solid_profile_fallback(
                 confidence=0.78,
                 fallthrough=False,
                 reason=f"massief profiel fallback (vol_ratio={volume_ratio:.3f} sterk)",
-                features={"volume_ratio": volume_ratio, "length_ratio": length_ratio},
+        # section tools niet beschikbaar; poort overslaan
             )
 
         # Zwakke match: bevestig met SA/V tiebreaker
@@ -857,7 +916,7 @@ def classify_step0(solid) -> Step0Result:
     except Exception as e:
         dependency_errors.append(f"0.4a: {e}")
 
-    # 0.4b Constant-dikte open sectie → GEZETTE_PLAAT of PROFIEL
+    # 0.4b Constant-dikte open sectie → GEZETTE_PLAAT
     try:
         result = _step_0_4b_constant_thickness_open(solid, dims)
         if result is not None:
@@ -881,3 +940,667 @@ def classify_step0(solid) -> Step0Result:
 
     # 0.5 Massief profiel fallback
     return _step_0_5_solid_profile_fallback(solid, dims, volume)
+
+
+# ===========================================================================
+# GEDETAILLEERDE TRACE — alle stappen met hun criteria
+# ===========================================================================
+
+def classify_step0_detailed_trace(solid) -> Dict[str, Any]:
+    """Bouw een volledige trace van alle stappen 0.1 t/m 0.5.
+
+    De trace volgt dezelfde beslisvolgorde als classify_step0() en rapporteert
+    per stap de individuele criteria met hun actuele meetwaarden.
+    """
+    dims = _get_bbox_sorted(solid)
+    volume = _get_volume(solid)
+    smallest, middle, longest = dims
+    bbox_volume = smallest * middle * longest
+    volume_ratio = volume / bbox_volume if bbox_volume > 0 else 0.0
+
+    steps_trace: list[Dict[str, Any]] = []
+
+    has_section_tools = False
+    section_tools_error = ""
+    section_context: Optional[Dict[str, Any]] = None
+
+    try:
+        from manufacturing_pipeline.analysis.step0_section_tools import (
+            find_extrusion_axis,
+            solid_vertices_np,
+            section_plane_positions_from_vertices,
+            slice_solid_to_section,
+            dominant_section_cluster,
+            normalize_section_polygon,
+            extract_section_features,
+            section_distance,
+            _is_nearly_circle,
+            _is_nearly_rectangle,
+            match_templates,
+            ProfileRegistry,
+        )
+        import numpy as np
+        from shapely.geometry import Polygon as ShapelyPolygon
+
+        has_section_tools = True
+    except Exception as exc:
+        section_tools_error = str(exc)
+
+    def _build_section_context() -> Dict[str, Any]:
+        """Compute axis, sections, dominant cluster and core section once."""
+        if not has_section_tools:
+            return {"ok": False, "reason": "section tools niet beschikbaar"}
+
+        try:
+            axis = find_extrusion_axis(solid)
+            if axis is None:
+                return {
+                    "ok": False,
+                    "axis": None,
+                    "sections": [],
+                    "cluster": [],
+                    "cluster_ratio": 0.0,
+                    "reason": "geen stabiele extrusieas gevonden",
+                }
+
+            vertices = solid_vertices_np(solid)
+            positions = section_plane_positions_from_vertices(
+                vertices, axis.direction, (0.20, 0.35, 0.50, 0.65, 0.80)
+            )
+
+            sections = []
+            for pos in positions:
+                sec = slice_solid_to_section(
+                    solid,
+                    plane_origin=axis.direction * pos,
+                    plane_normal=axis.direction,
+                    section_position=pos,
+                )
+                if sec is not None and sec.polygon.area > 0:
+                    sections.append(sec)
+
+            if len(sections) < 1:
+                return {
+                    "ok": False,
+                    "axis": axis,
+                    "sections": sections,
+                    "cluster": [],
+                    "cluster_ratio": 0.0,
+                    "reason": "geen geldige doorsneden",
+                }
+
+            cluster = dominant_section_cluster(sections)
+            cluster_ratio = len(cluster) / max(len(sections), 1)
+            if not cluster:
+                return {
+                    "ok": False,
+                    "axis": axis,
+                    "sections": sections,
+                    "cluster": cluster,
+                    "cluster_ratio": cluster_ratio,
+                    "reason": "geen dominant section cluster",
+                }
+
+            normalized = [normalize_section_polygon(sec.polygon) for sec in cluster]
+            dsum = [
+                sum(section_distance(a, b) for j, b in enumerate(normalized) if j != i)
+                for i, a in enumerate(normalized)
+            ]
+            core_sec = cluster[int(np.argmin(dsum))]
+            core_features = extract_section_features(core_sec)
+
+            return {
+                "ok": True,
+                "axis": axis,
+                "sections": sections,
+                "cluster": cluster,
+                "cluster_ratio": cluster_ratio,
+                "core_section": core_sec,
+                "core_features": core_features,
+                "core_polygon": core_sec.polygon,
+                "reason": "ok",
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "axis": None,
+                "sections": [],
+                "cluster": [],
+                "cluster_ratio": 0.0,
+                "reason": f"section extractie fout: {str(exc)[:120]}",
+            }
+
+    # =======================================================================
+    # STAP 0.1: Slice-validatie (poort)
+    # =======================================================================
+    step_01_info = {"step": "0.1", "name": "Slice-validatie", "criteria": []}
+
+    if not has_section_tools:
+        step_01_info["criteria"].append(
+            {
+                "name": "section tools beschikbaar",
+                "value": False,
+                "expected": True,
+                "pass": None,
+            }
+        )
+        step_01_info["verdict"] = "SKIP"
+        step_01_info["next"] = "0.2"
+        step_01_info["note"] = f"trace zonder section tools: {section_tools_error[:120]}"
+        steps_trace.append(step_01_info)
+    else:
+        section_context = _build_section_context()
+
+        axis_ok = section_context.get("axis") is not None
+        sections_count = len(section_context.get("sections", []))
+        cluster_ratio = float(section_context.get("cluster_ratio", 0.0))
+
+        step_01_info["criteria"].append(
+            {
+                "name": "stabiele extrusieas gedetecteerd",
+                "value": axis_ok,
+                "expected": True,
+                "pass": axis_ok,
+            }
+        )
+        step_01_info["criteria"].append(
+            {
+                "name": "minimaal 3 geldige doorsneden",
+                "value": sections_count,
+                "expected": ">=3",
+                "pass": sections_count >= 3,
+            }
+        )
+        step_01_info["criteria"].append(
+            {
+                "name": f"dominant cluster >= {int(STEP0_CLUSTER_RATIO_MIN*100)}%",
+                "value": f"{cluster_ratio:.1%}",
+                "expected": f">={STEP0_CLUSTER_RATIO_MIN}",
+                "pass": cluster_ratio >= STEP0_CLUSTER_RATIO_MIN,
+            }
+        )
+
+        if not axis_ok:
+            step_01_info["verdict"] = "FAIL"
+            step_01_info["result"] = "ANDERS"
+            steps_trace.append(step_01_info)
+            return {
+                "final_result": _result(
+                    label="ANDERS",
+                    step="0.1",
+                    method="rule",
+                    confidence=0.40,
+                    fallthrough=False,
+                    reason="geen stabiele extrusieas gevonden",
+                    features=step_01_info,
+                ),
+                "steps": steps_trace,
+            }
+
+        if sections_count < 3:
+            step_01_info["verdict"] = "FAIL"
+            step_01_info["result"] = "ANDERS"
+            steps_trace.append(step_01_info)
+            return {
+                "final_result": _result(
+                    label="ANDERS",
+                    step="0.1",
+                    method="rule",
+                    confidence=0.45,
+                    fallthrough=False,
+                    reason="te weinig geldige doorsneden",
+                    features=step_01_info,
+                ),
+                "steps": steps_trace,
+            }
+
+        if cluster_ratio < STEP0_CLUSTER_RATIO_MIN:
+            step_01_info["verdict"] = "FAIL"
+            step_01_info["result"] = "ANDERS"
+            steps_trace.append(step_01_info)
+            return {
+                "final_result": _result(
+                    label="ANDERS",
+                    step="0.1",
+                    method="rule",
+                    confidence=0.50,
+                    fallthrough=False,
+                    reason=f"doorsneden niet stabiel langs lengte (cluster {cluster_ratio:.2f})",
+                    features=step_01_info,
+                ),
+                "steps": steps_trace,
+            }
+
+        step_01_info["verdict"] = "PASS"
+        step_01_info["next"] = "0.2"
+        steps_trace.append(step_01_info)
+
+    # =======================================================================
+    # STAP 0.2: Gesloten-hol (koker/buis)
+    # =======================================================================
+    step_02_info = {"step": "0.2", "name": "Gesloten-hol (koker/buis)", "criteria": []}
+
+    if not has_section_tools:
+        step_02_info["criteria"].append(
+            {
+                "name": "section tools beschikbaar",
+                "value": False,
+                "expected": True,
+                "pass": None,
+            }
+        )
+        step_02_info["verdict"] = "SKIP"
+        step_02_info["next"] = "0.3"
+        steps_trace.append(step_02_info)
+    else:
+        if section_context is None:
+            section_context = _build_section_context()
+
+        core_features = section_context.get("core_features")
+        core_poly = section_context.get("core_polygon")
+
+        holes = core_features.holes if core_features is not None else None
+        effective_holes = holes
+        core_sec = section_context.get("core_section")
+        outer = None
+        inner = None
+        used_wire_fallback = False
+
+        if core_poly is not None and len(core_poly.interiors) >= 1:
+            outer = ShapelyPolygon(core_poly.exterior.coords)
+            inner = ShapelyPolygon(list(core_poly.interiors[0].coords))
+        elif core_sec is not None:
+            wire_polys = [
+                poly
+                for poly in getattr(core_sec, "wire_polygons", ())
+                if poly is not None and not poly.is_empty and poly.area > 0
+            ]
+            if len(wire_polys) >= 2:
+                wire_polys.sort(key=lambda poly: poly.area, reverse=True)
+                outer = wire_polys[0]
+                inner = wire_polys[1]
+                overlap_ratio = outer.intersection(inner).area / max(inner.area, 1e-9)
+                if overlap_ratio >= 0.90:
+                    if effective_holes is None:
+                        effective_holes = 1
+                    else:
+                        effective_holes = max(int(effective_holes), 1)
+                    used_wire_fallback = True
+
+        step_02_info["criteria"].append(
+            {
+                "name": "holes == 1",
+                "value": effective_holes,
+                "expected": 1,
+                "pass": (effective_holes == 1) if effective_holes is not None else None,
+            }
+        )
+
+        is_round = False
+        is_rect = False
+        is_rect_strict = False
+        is_rect_rounded = False
+        if effective_holes == 1 and outer is not None and inner is not None:
+            is_round = _is_nearly_circle(outer, 0.90, 0.94) and _is_nearly_circle(inner, 0.90, 0.94)
+            is_rect_strict = _is_nearly_rectangle(outer) and _is_nearly_rectangle(inner)
+            if used_wire_fallback:
+                is_rect_rounded = (
+                    _is_nearly_rectangle(outer, bbox_fill_min=0.85, convexity_min=0.95, rel_tol=0.05)
+                    and _is_nearly_rectangle(inner, bbox_fill_min=0.85, convexity_min=0.95, rel_tol=0.05)
+                )
+            is_rect = is_rect_strict or is_rect_rounded
+
+        step_02_info["criteria"].append(
+            {
+                "name": "outer+inner near-circle",
+                "value": is_round,
+                "expected": True,
+                "pass": is_round,
+            }
+        )
+        step_02_info["criteria"].append(
+            {
+                "name": "outer+inner near-rectangle",
+                "value": is_rect,
+                "expected": True,
+                "pass": is_rect,
+            }
+        )
+        if used_wire_fallback:
+            step_02_info["note"] = "wire-loop fallback gebruikt voor hole-detectie"
+
+        if is_round:
+            step_02_info["verdict"] = "MATCH"
+            step_02_info["result"] = "RONDE_BUIS"
+            steps_trace.append(step_02_info)
+            return {
+                "final_result": _result(
+                    label="RONDE_BUIS",
+                    step="0.2",
+                    method="rule",
+                    confidence=0.99,
+                    fallthrough=False,
+                    reason="holes==1 + outer/inner near-circle",
+                    features={"holes": effective_holes},
+                ),
+                "steps": steps_trace,
+            }
+
+        if is_rect:
+            step_02_info["verdict"] = "MATCH"
+            step_02_info["result"] = "RECHTHOEKIGE_KOKER"
+            steps_trace.append(step_02_info)
+            rect_reason = "holes==1 + outer/inner near-rectangle"
+            if not is_rect_strict and is_rect_rounded:
+                rect_reason = "holes==1 + outer/inner near-rectangle (rounded tolerance)"
+            return {
+                "final_result": _result(
+                    label="RECHTHOEKIGE_KOKER",
+                    step="0.2",
+                    method="rule",
+                    confidence=0.98,
+                    fallthrough=False,
+                    reason=rect_reason,
+                    features={"holes": effective_holes},
+                ),
+                "steps": steps_trace,
+            }
+
+        step_02_info["verdict"] = "FAIL"
+        step_02_info["next"] = "0.3"
+        steps_trace.append(step_02_info)
+
+    # =======================================================================
+    # STAP 0.3: Open profiel (L/U/I/T)
+    # =======================================================================
+    step_03_info = {"step": "0.3", "name": "Open profiel (L/U/I/T)", "criteria": []}
+
+    if not has_section_tools:
+        step_03_info["criteria"].append(
+            {
+                "name": "section tools beschikbaar",
+                "value": False,
+                "expected": True,
+                "pass": None,
+            }
+        )
+        step_03_info["verdict"] = "SKIP"
+        step_03_info["next"] = "0.4a"
+        steps_trace.append(step_03_info)
+    else:
+        if section_context is None:
+            section_context = _build_section_context()
+
+        core_features = section_context.get("core_features")
+        core_poly = section_context.get("core_polygon")
+
+        holes = core_features.holes if core_features is not None else None
+        reentrant = core_features.reentrant_corners if core_features is not None else None
+        bent_sheet = _is_bent_sheet_geometry(solid, volume, dims)
+
+        step_03_info["criteria"].append(
+            {
+                "name": "holes == 0",
+                "value": holes,
+                "expected": 0,
+                "pass": (holes == 0) if holes is not None else None,
+            }
+        )
+        step_03_info["criteria"].append(
+            {
+                "name": "reentrant_corners > 0",
+                "value": reentrant,
+                "expected": ">0",
+                "pass": (reentrant > 0) if reentrant is not None else None,
+            }
+        )
+        step_03_info["criteria"].append(
+            {
+                "name": "bent-sheet veto (must be False)",
+                "value": bent_sheet,
+                "expected": False,
+                "pass": not bent_sheet,
+            }
+        )
+
+        best_family = None
+        best_score = None
+        template_pass = False
+        if core_poly is not None:
+            registry = ProfileRegistry().extend_generic_defaults()
+            matches = match_templates(core_poly, registry, top_k=5)
+            best = matches[0] if matches else None
+            if best is not None:
+                best_family = best.family
+                best_score = best.score
+                open_families = {"I_FAMILY", "U_FAMILY", "L_FAMILY", "T_FAMILY"}
+                template_pass = best.score <= 0.12 and best.family in open_families
+
+        template_value = (
+            f"family={best_family}, score={best_score:.3f}" if best_score is not None else "geen match"
+        )
+        step_03_info["criteria"].append(
+            {
+                "name": "template score <= 0.12 in I/U/L/T families",
+                "value": template_value,
+                "expected": True,
+                "pass": template_pass,
+            }
+        )
+
+        real_03 = _step_0_3_open_profile(solid, dims)
+        if real_03 is not None:
+            step_03_info["verdict"] = "MATCH"
+            step_03_info["result"] = real_03.get("label")
+            steps_trace.append(step_03_info)
+            return {"final_result": real_03, "steps": steps_trace}
+
+        step_03_info["verdict"] = "FAIL"
+        step_03_info["next"] = "0.4a"
+        steps_trace.append(step_03_info)
+
+    # =======================================================================
+    # STAP 0.4a: Vlakke plaat (high confidence)
+    # =======================================================================
+    step_04a_info = {"step": "0.4a", "name": "Vlakke plaat (high confidence)", "criteria": []}
+
+    if not has_section_tools:
+        step_04a_info["criteria"].append(
+            {
+                "name": "section tools beschikbaar",
+                "value": False,
+                "expected": True,
+                "pass": None,
+            }
+        )
+        step_04a_info["verdict"] = "SKIP"
+        step_04a_info["next"] = "0.4b"
+        steps_trace.append(step_04a_info)
+    else:
+        if section_context is None:
+            section_context = _build_section_context()
+
+        core_features = section_context.get("core_features")
+        core_poly = section_context.get("core_polygon")
+
+        holes = core_features.holes if core_features is not None else None
+        bbox_ratio = core_features.bbox_ratio if core_features is not None else None
+        near_rectangle = _is_nearly_rectangle(core_poly) if core_poly is not None else False
+
+        step_04a_info["criteria"].append(
+            {
+                "name": "holes == 0",
+                "value": holes,
+                "expected": 0,
+                "pass": (holes == 0) if holes is not None else None,
+            }
+        )
+        step_04a_info["criteria"].append(
+            {
+                "name": "near-rectangle",
+                "value": near_rectangle,
+                "expected": True,
+                "pass": near_rectangle,
+            }
+        )
+        step_04a_info["criteria"].append(
+            {
+                "name": "bbox_ratio <= 0.30 (high confidence)",
+                "value": f"{bbox_ratio:.3f}" if bbox_ratio is not None else None,
+                "expected": "<=0.30",
+                "pass": (bbox_ratio <= 0.30) if bbox_ratio is not None else None,
+            }
+        )
+
+        real_04a = _step_0_4a_flat_plate(solid)
+        if real_04a is not None:
+            step_04a_info["verdict"] = "MATCH"
+            step_04a_info["result"] = real_04a.get("label")
+            if real_04a.get("fallthrough"):
+                step_04a_info["note"] = "lage confidence plaat; classify_step0 markeert fallthrough=True"
+            steps_trace.append(step_04a_info)
+            return {"final_result": real_04a, "steps": steps_trace}
+
+        step_04a_info["verdict"] = "FAIL"
+        step_04a_info["next"] = "0.4b"
+        steps_trace.append(step_04a_info)
+
+    # =======================================================================
+    # STAP 0.4b: Gezette plaat (constant-dikte open sectie)
+    # =======================================================================
+    step_04b_info = {"step": "0.4b", "name": "Gezette plaat (constant-dikte open sectie)", "criteria": []}
+
+    holes_04b = None
+    reentrant_04b = None
+    if has_section_tools:
+        if section_context is None:
+            section_context = _build_section_context()
+        core_features = section_context.get("core_features")
+        if core_features is not None:
+            holes_04b = core_features.holes
+            reentrant_04b = core_features.reentrant_corners
+
+    dikte_constant = _is_constant_thickness(solid)
+
+    step_04b_info["criteria"].append(
+        {
+            "name": "holes == 0 (geen gaten in doorsnede)",
+            "value": holes_04b,
+            "expected": 0,
+            "pass": (holes_04b == 0) if holes_04b is not None else None,
+        }
+    )
+    step_04b_info["criteria"].append(
+        {
+            "name": "reentrant_corners > 0 (concave hoeken)",
+            "value": reentrant_04b,
+            "expected": ">0",
+            "pass": (reentrant_04b > 0) if reentrant_04b is not None else None,
+        }
+    )
+    step_04b_info["criteria"].append(
+        {
+            "name": "dikteConstant == true",
+            "value": dikte_constant,
+            "expected": True,
+            "pass": dikte_constant,
+        }
+    )
+
+    real_04b = _step_0_4b_constant_thickness_open(solid, dims)
+    if real_04b is not None:
+        step_04b_info["verdict"] = "MATCH"
+        step_04b_info["result"] = real_04b.get("label")
+        steps_trace.append(step_04b_info)
+        return {"final_result": real_04b, "steps": steps_trace}
+
+    step_04b_info["verdict"] = "FAIL"
+    step_04b_info["next"] = "0.5"
+    steps_trace.append(step_04b_info)
+
+    # =======================================================================
+    # STAP 0.5: Massief profiel fallback
+    # =======================================================================
+    from manufacturing_pipeline.analysis.classification_variables import (
+        PROFILE_SMALLEST_MIN_MM,
+        PROFILE_LENGTH_RATIO_MIN,
+        PROFILE_CROSS_RATIO_MIN,
+        PROFILE_CROSS_RATIO_MAX,
+        PROFILE_VOLUME_RATIO_STRONG_MIN,
+        PROFILE_VOLUME_RATIO_WEAK_MIN,
+        PROFILE_SA_V_RATIO_MAX,
+    )
+
+    step_05_info = {"step": "0.5", "name": "Massief profiel fallback", "criteria": []}
+    length_ratio = longest / middle if middle > 0 else 0.0
+    cross_ratio = middle / smallest if smallest > 0 else 0.0
+
+    step_05_info["criteria"].append(
+        {
+            "name": "smallest >= PROFILE_SMALLEST_MIN_MM",
+            "value": f"{smallest:.2f}",
+            "expected": f">={PROFILE_SMALLEST_MIN_MM}",
+            "pass": smallest >= PROFILE_SMALLEST_MIN_MM,
+        }
+    )
+    step_05_info["criteria"].append(
+        {
+            "name": "length_ratio >= PROFILE_LENGTH_RATIO_MIN",
+            "value": f"{length_ratio:.3f}",
+            "expected": f">={PROFILE_LENGTH_RATIO_MIN}",
+            "pass": length_ratio >= PROFILE_LENGTH_RATIO_MIN,
+        }
+    )
+    step_05_info["criteria"].append(
+        {
+            "name": "PROFILE_CROSS_RATIO_MIN <= cross_ratio <= PROFILE_CROSS_RATIO_MAX",
+            "value": f"{cross_ratio:.3f}",
+            "expected": f"[{PROFILE_CROSS_RATIO_MIN}, {PROFILE_CROSS_RATIO_MAX}]",
+            "pass": PROFILE_CROSS_RATIO_MIN <= cross_ratio <= PROFILE_CROSS_RATIO_MAX,
+        }
+    )
+    step_05_info["criteria"].append(
+        {
+            "name": "volume_ratio > PROFILE_VOLUME_RATIO_STRONG_MIN",
+            "value": f"{volume_ratio:.3f}",
+            "expected": f">{PROFILE_VOLUME_RATIO_STRONG_MIN}",
+            "pass": volume_ratio > PROFILE_VOLUME_RATIO_STRONG_MIN,
+        }
+    )
+    step_05_info["criteria"].append(
+        {
+            "name": "volume_ratio >= PROFILE_VOLUME_RATIO_WEAK_MIN",
+            "value": f"{volume_ratio:.3f}",
+            "expected": f">={PROFILE_VOLUME_RATIO_WEAK_MIN}",
+            "pass": volume_ratio >= PROFILE_VOLUME_RATIO_WEAK_MIN,
+        }
+    )
+
+    sa_v_ratio = None
+    if _HAS_OCP and volume > 0:
+        try:
+            ocp_solid = solid.wrapped if hasattr(solid, "wrapped") else solid
+            props = GProp_GProps()
+            BRepGProp.SurfaceProperties_s(ocp_solid, props)
+            surface_area = float(props.Mass())
+            if surface_area > 0:
+                sa_v_ratio = surface_area / volume
+        except Exception:
+            sa_v_ratio = None
+
+    if sa_v_ratio is not None:
+        step_05_info["criteria"].append(
+            {
+                "name": "SA/V < PROFILE_SA_V_RATIO_MAX",
+                "value": f"{sa_v_ratio:.3f}",
+                "expected": f"<{PROFILE_SA_V_RATIO_MAX}",
+                "pass": sa_v_ratio < PROFILE_SA_V_RATIO_MAX,
+            }
+        )
+
+    final_result = _step_0_5_solid_profile_fallback(solid, dims, volume)
+    step_05_info["verdict"] = "MATCH"
+    step_05_info["result"] = final_result.get("label")
+    steps_trace.append(step_05_info)
+
+    return {"final_result": final_result, "steps": steps_trace}
