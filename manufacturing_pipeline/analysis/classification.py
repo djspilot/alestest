@@ -461,8 +461,10 @@ def _step_0_1_slice_validation(solid) -> Optional[Step0Result]:
             step="0.1",
             method="rule",
             confidence=0.40,
-            fallthrough=False,
-            reason="geen stabiele extrusie-as gevonden",
+            # No stable extrusion axis blocks section-driven Step0 checks,
+            # but Step1-4 can still correctly identify plates/profiles.
+            fallthrough=True,
+            reason="geen stabiele extrusie-as gevonden; doorval naar Step 1",
         )
 
     try:
@@ -1034,8 +1036,14 @@ def _step_0_5_solid_profile_fallback(
         step="0.5",
         method="fallback",
         confidence=0.55,
-        fallthrough=False,
-        reason="geen classificatie gevonden in STEP 0",
+        # 0.5 ANDERS is explicitly low-confidence: let legacy Step1-4 decide.
+        fallthrough=True,
+        reason="geen classificatie gevonden in STEP 0; doorval naar Step 1",
+        features={
+            "volume_ratio": volume_ratio,
+            "length_ratio": length_ratio,
+            "cross_ratio": cross_ratio,
+        },
     )
 
 
@@ -1363,22 +1371,11 @@ def classify_step0_detailed_trace(solid) -> Dict[str, Any]:
 
         if not axis_ok:
             step_01_info["verdict"] = "FAIL"
-            step_01_info["result"] = "ANDERS"
+            step_01_info["next"] = "0.2"
+            step_01_info["note"] = "geen stabiele extrusieas; section-gedreven Step0-regels niet beslissend, doorval naar 0.2"
             steps_trace.append(step_01_info)
-            return {
-                "final_result": _result(
-                    label="ANDERS",
-                    step="0.1",
-                    method="rule",
-                    confidence=0.40,
-                    fallthrough=False,
-                    reason="geen stabiele extrusieas gevonden",
-                    features=step_01_info,
-                ),
-                "steps": steps_trace,
-            }
 
-        if sections_count < 3:
+        elif sections_count < 3:
             step_01_info["verdict"] = "FAIL"
             step_01_info["result"] = "ANDERS"
             steps_trace.append(step_01_info)
@@ -1395,7 +1392,7 @@ def classify_step0_detailed_trace(solid) -> Dict[str, Any]:
                 "steps": steps_trace,
             }
 
-        if cluster_ratio < STEP0_CLUSTER_RATIO_MIN:
+        elif cluster_ratio < STEP0_CLUSTER_RATIO_MIN:
             step_01_info["verdict"] = "FAIL"
             step_01_info["result"] = "ANDERS"
             steps_trace.append(step_01_info)
@@ -1412,7 +1409,7 @@ def classify_step0_detailed_trace(solid) -> Dict[str, Any]:
                 "steps": steps_trace,
             }
 
-        if round_shaft_check.get("applicable") and round_shaft_check.get("passed") is False:
+        elif round_shaft_check.get("applicable") and round_shaft_check.get("passed") is False:
             ratio = round_shaft_check.get("ratio")
             threshold = round_shaft_check.get("threshold")
             step_01_info["verdict"] = "FAIL"
@@ -1439,9 +1436,10 @@ def classify_step0_detailed_trace(solid) -> Dict[str, Any]:
                 "steps": steps_trace,
             }
 
-        step_01_info["verdict"] = "PASS"
-        step_01_info["next"] = "0.2"
-        steps_trace.append(step_01_info)
+        elif axis_ok:
+            step_01_info["verdict"] = "PASS"
+            step_01_info["next"] = "0.2"
+            steps_trace.append(step_01_info)
 
     # =======================================================================
     # STAP 0.2: Gesloten-hol (koker/buis)

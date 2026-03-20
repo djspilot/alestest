@@ -1274,7 +1274,7 @@ def classify_solid(solid, return_trace: bool = False):
     - 2B: Solid rectangular beam → "profiel"
     
     STEP 3: STANDARD CATALOG PARTS (moved LAST - fallback only)
-    - 3A: Hollow tube (cylindrical≥60%, vol<0.7) → "anders"
+    - 3A: Hollow tube (cylindrical≥60%, vol<0.7) → "profiel"
     - 3B: Variable thickness (I-beam, UNP) → "anders"
     
     STEP 4: DEFAULT
@@ -1353,7 +1353,7 @@ def classify_solid(solid, return_trace: bool = False):
                 "RECHTHOEKIGE_KOKER": "profiel",
                 "PLAAT": "plaat",
                 "GEZETTE_PLAAT": "plaat",
-                "RONDE_BUIS": "anders",
+                "RONDE_BUIS": "profiel",
                 "ANDERS": "anders",
             }
             final_class = label_to_class.get(step0_label, "anders")
@@ -1428,7 +1428,7 @@ def classify_solid(solid, return_trace: bool = False):
     # Cylindrical faces ≥60%, low volume ratio (hollow), NOT bent sheet
     if _detect_hollow_tube(solid, volume, dims):
         trace["rules"].append("standard_hollow_tube")
-        return ("anders", trace) if return_trace else "anders"
+        return ("profiel", trace) if return_trace else "profiel"
     
     # 3B. Variable thickness profile (DIN 1026 UNP, I-beams, etc.)
     # Top 2 faces differ >20%, elongated
