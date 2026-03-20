@@ -67,6 +67,10 @@ from manufacturing_pipeline.analysis.classification_variables import (
     PROFILE_LENGTH_RATIO_MIN,
     PROFILE_CROSS_RATIO_MIN,
     PROFILE_CROSS_RATIO_MAX,
+    ROUND_SHAFT_AXIAL_AREA_RATIO_MIN,
+    ROUND_SHAFT_CORE_BBOX_RATIO_MIN,
+    ROUND_SHAFT_CORE_COMPACTNESS_MIN,
+    ROUND_SHAFT_MIN_LENGTH_RATIO,
     STANDARD_TUBE_VOLUME_RATIO_MAX,
     STEP0_CLUSTER_RATIO_MIN,
 )
@@ -277,6 +281,155 @@ def _is_constant_thickness(solid) -> bool:
     return area_diff <= STANDARD_PROFILE_FACE_AREA_TOLERANCE
 
 
+def _evaluate_round_shaft_axial_slice(
+    *,
+    solid,
+    axis,
+    vertices,
+    core_sec,
+    core_features,
+    slice_solid_to_section_fn,
+) -> Dict[str, Any]:
+    """Check round solid shaft machining via longitudinal slice area ratio.
+
+    Only applicable to round (circular) core cross-sections.
+
+    Dmax is determined by sampling cross-sections including near-end positions
+    (0%/100%) to capture shoulders and diameter steps caused by turning.
+
+    The criterion is:
+        A_axial / (Dmax × L) >= ROUND_SHAFT_AXIAL_AREA_RATIO_MIN
+
+    A significantly lower ratio indicates machined/stepped geometry → ANDERS.
+    Both basis_u and basis_v are tried for the axial slice; the larger valid
+    area is used.
+    """
+    result: Dict[str, Any] = {
+        "applicable": False,
+        "passed": None,
+        "ratio": None,
+        "threshold": ROUND_SHAFT_AXIAL_AREA_RATIO_MIN,
+        "reason": "n.v.t.",
+    }
+
+    if core_sec is None or core_features is None or axis is None or vertices is None:
+        return result
+
+    if core_features.holes != 0 or core_features.reentrant_corners != 0:
+        result["reason"] = "geen massieve ronde kernsectie"
+        return result
+
+    # Only applicable to round (circular) core cross-sections
+    if core_features.compactness < ROUND_SHAFT_CORE_COMPACTNESS_MIN:
+        result["reason"] = "kernsectie onvoldoende rond (compactness)"
+        return result
+
+    if core_features.bbox_ratio < ROUND_SHAFT_CORE_BBOX_RATIO_MIN:
+        result["reason"] = "kernsectie onvoldoende rond (bbox_ratio)"
+        return result
+
+    try:
+        import numpy as np
+
+        projection = np.asarray(vertices, dtype=float) @ axis.direction
+        axis_length = float(np.max(projection) - np.min(projection))
+    except Exception:
+        result["reason"] = "lengteprojectie niet beschikbaar"
+        return result
+
+    if axis_length <= 0:
+        result["reason"] = "ongeldige lengte"
+        return result
+
+    # --- Dmax: sample cross-sections including near-end positions (0%/100%) ---
+    # This detects shoulders and diameter steps at turned ends.
+    dmax = 0.0
+    try:
+        from manufacturing_pipeline.analysis.step0_section_tools import (
+            section_plane_positions_from_vertices,
+        )
+
+        # Fractions from near-0% to near-100% — captures end-zone geometry
+        end_fracs = (0.02, 0.05, 0.10, 0.20, 0.35, 0.50, 0.65, 0.80, 0.90, 0.95, 0.98)
+        end_positions = section_plane_positions_from_vertices(
+            vertices, axis.direction, end_fracs
+        )
+        for pos in end_positions:
+            sec = slice_solid_to_section_fn(
+                solid,
+                plane_origin=axis.direction * pos,
+                plane_normal=axis.direction,
+                section_position=pos,
+            )
+            if sec is None or sec.polygon.area <= 0:
+                continue
+            # Use outer bounding-box dimension — unaffected by holes/threads
+            minx, miny, maxx, maxy = sec.polygon.bounds
+            dim = float(max(maxx - minx, maxy - miny))
+            if dim > dmax:
+                dmax = dim
+    except Exception as exc:
+        logger.debug("Dmax sampling fout: %s", exc)
+
+    if dmax <= 0:
+        # Fallback to core cross-section bounds
+        minx, miny, maxx, maxy = core_sec.polygon.bounds
+        dmax = float(max(maxx - minx, maxy - miny))
+
+    if dmax <= 0:
+        result["reason"] = "ongeldige diameter"
+        return result
+
+    length_ratio = axis_length / dmax
+    if length_ratio < ROUND_SHAFT_MIN_LENGTH_RATIO:
+        result["reason"] = "niet lang genoeg voor as-check"
+        return result
+
+    result["applicable"] = True
+
+    # --- Axial slice: try basis_u first, fall back to basis_v if None ---
+    # We do NOT take the maximum — basis_u is the primary direction for consistency.
+    # basis_v is only used when basis_u gives no usable section.
+    axial_area: Optional[float] = None
+    for normal_vec in (core_sec.basis_u, core_sec.basis_v):
+        try:
+            axial_sec = slice_solid_to_section_fn(
+                solid,
+                plane_origin=axis.origin,
+                plane_normal=normal_vec,
+                section_position=0.0,
+            )
+        except Exception as exc:
+            logger.debug("Axiale slice fout: %s", exc)
+            continue
+        if axial_sec is None or axial_sec.polygon.area <= 0:
+            continue
+        axial_area = float(axial_sec.polygon.area)
+        break  # use first valid result (basis_u preferred)
+
+    if axial_area is None:
+        result["reason"] = "geen geldige axiale doorsnede (basis_u en basis_v beiden mislukt)"
+        return result
+
+    expected_area = float(dmax * axis_length)
+    ratio = axial_area / max(expected_area, 1e-9)
+    passed = ratio >= ROUND_SHAFT_AXIAL_AREA_RATIO_MIN
+
+    result.update(
+        {
+            "passed": passed,
+            "ratio": ratio,
+            "axial_area": axial_area,
+            "expected_area": expected_area,
+            "axis_length": axis_length,
+            "diameter_ref": dmax,
+            "length_ratio": length_ratio,
+            "reason": "ok" if passed else "axiale doorsnede te klein voor onbewerkte ronde as",
+        }
+    )
+    return result
+
+
 # ===========================================================================
 # Stap 0.1 — Slice-validatie (poort)
 # ===========================================================================
@@ -293,6 +446,9 @@ def _step_0_1_slice_validation(solid) -> Optional[Step0Result]:
             section_plane_positions_from_vertices,
             slice_solid_to_section,
             dominant_section_cluster,
+            normalize_section_polygon,
+            extract_section_features,
+            section_distance,
         )
     except ImportError:
         # profile_classifier niet beschikbaar; poort overslaan
@@ -350,6 +506,51 @@ def _step_0_1_slice_validation(solid) -> Optional[Step0Result]:
             reason=f"doorsneden niet stabiel langs lengte (cluster {cluster_ratio:.2f})",
             features={"cluster_ratio": cluster_ratio},
         )
+
+    # Extra poort voor ronde massieve assen:
+    # detecteer diameterafname (afgedraaide/bewerkte einden) via axiale slice.
+    try:
+        import numpy as np
+
+        normalized = [normalize_section_polygon(sec.polygon) for sec in cluster]
+        dsum = [
+            sum(section_distance(a, b) for j, b in enumerate(normalized) if j != i)
+            for i, a in enumerate(normalized)
+        ]
+        core_sec = cluster[int(np.argmin(dsum))]
+        core_features = extract_section_features(core_sec)
+
+        round_shaft_check = _evaluate_round_shaft_axial_slice(
+            solid=solid,
+            axis=axis,
+            vertices=vertices,
+            core_sec=core_sec,
+            core_features=core_features,
+            slice_solid_to_section_fn=slice_solid_to_section,
+        )
+
+        if round_shaft_check.get("applicable") and round_shaft_check.get("passed") is False:
+            ratio = round_shaft_check.get("ratio")
+            threshold = round_shaft_check.get("threshold")
+            return _result(
+                label="ANDERS",
+                step="0.1",
+                method="rule",
+                confidence=0.65,
+                fallthrough=False,
+                reason=(
+                    "ronde massieve as met axiale diameterafname "
+                    f"(area_ratio={ratio:.3f} < {threshold:.3f})"
+                ),
+                features={
+                    "axial_area_ratio": ratio,
+                    "axial_area_ratio_min": threshold,
+                    "axis_length": round_shaft_check.get("axis_length"),
+                    "diameter_ref": round_shaft_check.get("diameter_ref"),
+                },
+            )
+    except Exception as e:
+        logger.debug("Ronde-as axial slice check overgeslagen: %s", e)
 
     # OK — doorloopt
     return None
@@ -1052,6 +1253,7 @@ def classify_step0_detailed_trace(solid) -> Dict[str, Any]:
             return {
                 "ok": True,
                 "axis": axis,
+                "vertices": vertices,
                 "sections": sections,
                 "cluster": cluster,
                 "cluster_ratio": cluster_ratio,
@@ -1094,6 +1296,9 @@ def classify_step0_detailed_trace(solid) -> Dict[str, Any]:
         axis_ok = section_context.get("axis") is not None
         sections_count = len(section_context.get("sections", []))
         cluster_ratio = float(section_context.get("cluster_ratio", 0.0))
+        core_sec = section_context.get("core_section")
+        core_features = section_context.get("core_features")
+        vertices_ctx = section_context.get("vertices")
 
         step_01_info["criteria"].append(
             {
@@ -1119,6 +1324,42 @@ def classify_step0_detailed_trace(solid) -> Dict[str, Any]:
                 "pass": cluster_ratio >= STEP0_CLUSTER_RATIO_MIN,
             }
         )
+
+        round_shaft_check = _evaluate_round_shaft_axial_slice(
+            solid=solid,
+            axis=section_context.get("axis"),
+            vertices=vertices_ctx,
+            core_sec=core_sec,
+            core_features=core_features,
+            slice_solid_to_section_fn=slice_solid_to_section,
+        )
+
+        if round_shaft_check.get("applicable"):
+            ratio = round_shaft_check.get("ratio")
+            threshold = round_shaft_check.get("threshold")
+            step_01_info["criteria"].append(
+                {
+                    "name": "ronde massieve as: axiale area_ratio >= d*L ratio-min",
+                    "value": (
+                        f"{ratio:.3f} "
+                        f"(ax={round_shaft_check.get('axial_area', 0.0):.2f}, "
+                        f"exp={round_shaft_check.get('expected_area', 0.0):.2f})"
+                    )
+                    if ratio is not None
+                    else "n.v.t.",
+                    "expected": f">={threshold:.3f}",
+                    "pass": round_shaft_check.get("passed"),
+                }
+            )
+        else:
+            step_01_info["criteria"].append(
+                {
+                    "name": "ronde massieve as-check",
+                    "value": round_shaft_check.get("reason", "n.v.t."),
+                    "expected": "alleen van toepassing op ronde assen",
+                    "pass": None,
+                }
+            )
 
         if not axis_ok:
             step_01_info["verdict"] = "FAIL"
@@ -1167,6 +1408,33 @@ def classify_step0_detailed_trace(solid) -> Dict[str, Any]:
                     fallthrough=False,
                     reason=f"doorsneden niet stabiel langs lengte (cluster {cluster_ratio:.2f})",
                     features=step_01_info,
+                ),
+                "steps": steps_trace,
+            }
+
+        if round_shaft_check.get("applicable") and round_shaft_check.get("passed") is False:
+            ratio = round_shaft_check.get("ratio")
+            threshold = round_shaft_check.get("threshold")
+            step_01_info["verdict"] = "FAIL"
+            step_01_info["result"] = "ANDERS"
+            steps_trace.append(step_01_info)
+            return {
+                "final_result": _result(
+                    label="ANDERS",
+                    step="0.1",
+                    method="rule",
+                    confidence=0.65,
+                    fallthrough=False,
+                    reason=(
+                        "ronde massieve as met axiale diameterafname "
+                        f"(area_ratio={ratio:.3f} < {threshold:.3f})"
+                    ),
+                    features={
+                        "axial_area_ratio": ratio,
+                        "axial_area_ratio_min": threshold,
+                        "axis_length": round_shaft_check.get("axis_length"),
+                        "diameter_ref": round_shaft_check.get("diameter_ref"),
+                    },
                 ),
                 "steps": steps_trace,
             }

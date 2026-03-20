@@ -155,3 +155,12 @@ HOLLOW_RECT_TOLERANCE_REL = 0.05            # Fallback: allow 5% dimensional var
 # Cluster ratio threshold: minimum fraction of sections that must belong to
 # the dominant cluster (same cross-sectional shape along the extrusion axis)
 STEP0_CLUSTER_RATIO_MIN = 0.30  # >= 30% of sections in dominant cluster
+
+# Round solid shaft longitudinal check (machining detection).
+# For an unmachined round shaft, the central longitudinal slice area is close to
+# diameter * length. A significantly lower ratio indicates turned/stepped ends
+# or other machining operations, and should route to ANDERS in Step 0.1.
+ROUND_SHAFT_CORE_COMPACTNESS_MIN = 0.90
+ROUND_SHAFT_CORE_BBOX_RATIO_MIN = 0.95
+ROUND_SHAFT_MIN_LENGTH_RATIO = 3.0
+ROUND_SHAFT_AXIAL_AREA_RATIO_MIN = 0.975
