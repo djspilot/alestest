@@ -345,6 +345,59 @@ def run_analysis(step_file, output_dir, args):
         part_category = "DRAAISTUK"
 
     source = "AAG+Standard" if aag_result.success else "Standard"
+
+    # Bugfix: quick-mode kon ONBEKEND/OVERIG tonen terwijl classify_solid al
+    # een valide eindklasse had (plaat/profiel/anders).
+    if part_category == "ONBEKEND":
+        try:
+            from manufacturing_pipeline.analysis.assembly_analysis import classify_solid
+
+            def _primary_solid_for_classification(cq_shape):
+                try:
+                    if hasattr(cq_shape, "solids"):
+                        solids_obj = cq_shape.solids()
+                        solids = solids_obj.vals() if hasattr(solids_obj, "vals") else list(solids_obj)
+                        if solids:
+                            first = solids[0]
+                            return first.wrapped if hasattr(first, "wrapped") else first
+                except Exception:
+                    pass
+
+                try:
+                    if hasattr(cq_shape, "val"):
+                        val = cq_shape.val()
+                        return val.wrapped if hasattr(val, "wrapped") else val
+                except Exception:
+                    pass
+
+                return cq_shape.wrapped if hasattr(cq_shape, "wrapped") else cq_shape
+
+            solid_for_classification = _primary_solid_for_classification(shape)
+            legacy_class, legacy_trace = classify_solid(solid_for_classification, return_trace=True)
+
+            if legacy_class == "plaat":
+                step0_label = str(legacy_trace.get("features", {}).get("step0_label", "")).upper()
+                if step0_label == "GEZETTE_PLAAT" or analysis.bend_count_erp > 0:
+                    part_category = "GEBOGEN PLAATWERK"
+                    analysis.part_type = PartType.COMPLEX
+                else:
+                    part_category = "PLAAT (vlak)"
+                    analysis.part_type = PartType.PLAAT
+                analysis.is_sheet_metal = True
+            elif legacy_class == "profiel":
+                part_category = "PROFIEL (ingekocht)"
+                if analysis.part_type not in [PartType.BUIS, PartType.KOKER, PartType.KOKER_PROFIEL]:
+                    analysis.part_type = PartType.KOKER_PROFIEL
+            elif legacy_class == "anders":
+                part_category = "ANDERS"
+                analysis.part_type = PartType.OVERIG
+
+            analysis.classification_trace = legacy_trace
+            source = f"{source}+classify_solid"
+        except Exception as e:
+            if args.verbose:
+                print(f"  Warning: classify_solid fallback failed ({e})")
+
     print(f"\n--- Classificatie ({source}) ---")
     print(f"Categorie:   {part_category}")
     print(f"Type:        {analysis.part_type.value.upper()}")
