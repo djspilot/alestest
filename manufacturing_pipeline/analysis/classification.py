@@ -874,6 +874,165 @@ def _step_0_4a_flat_plate(solid) -> Optional[Step0Result]:
     )
 
 
+def _select_step_0_4b_features(solid) -> Optional[Dict[str, Any]]:
+    """Selecteer section-features voor 0.4b, met alternatieve-as fallback.
+
+    Primair gebruiken we de as uit `find_extrusion_axis`. Als die doorsnede
+    convex uitvalt (reentrant=0) proberen we alternatieve assen en nemen we
+    de beste concave kandidaat (holes=0, hoogste reentrant-corners).
+    """
+    try:
+        from manufacturing_pipeline.analysis.step0_section_tools import (
+            find_extrusion_axis,
+            planar_face_normal_candidates,
+            pca_axis_candidate,
+            solid_vertices_np,
+            section_plane_positions_from_vertices,
+            slice_solid_to_section,
+            dominant_section_cluster,
+            normalize_section_polygon,
+            extract_section_features,
+            section_distance,
+        )
+    except ImportError:
+        return None
+
+    import numpy as np
+
+    axis = find_extrusion_axis(solid)
+    if axis is None:
+        return None
+
+    try:
+        vertices = solid_vertices_np(solid)
+    except Exception:
+        return None
+
+    def _evaluate_direction(direction: Any, source: str) -> Optional[Dict[str, Any]]:
+        try:
+            direction_vec = np.asarray(direction, dtype=float)
+            norm = float(np.linalg.norm(direction_vec))
+            if norm <= 1e-9:
+                return None
+            direction_vec = direction_vec / norm
+
+            positions = section_plane_positions_from_vertices(
+                vertices, direction_vec, (0.20, 0.35, 0.50, 0.65, 0.80)
+            )
+
+            sections = []
+            for pos in positions:
+                sec = slice_solid_to_section(
+                    solid,
+                    plane_origin=direction_vec * pos,
+                    plane_normal=direction_vec,
+                    section_position=pos,
+                )
+                if sec is not None and sec.polygon.area > 0:
+                    sections.append(sec)
+        except Exception:
+            return None
+
+        if len(sections) < 3:
+            return None
+
+        cluster = dominant_section_cluster(sections)
+        if not cluster:
+            return None
+
+        cluster_ratio = len(cluster) / max(len(sections), 1)
+        if cluster_ratio < STEP0_CLUSTER_RATIO_MIN:
+            return None
+
+        normalized = [normalize_section_polygon(sec.polygon) for sec in cluster]
+        dsum = [
+            sum(section_distance(a, b) for j, b in enumerate(normalized) if j != i)
+            for i, a in enumerate(normalized)
+        ]
+        core_sec = cluster[int(np.argmin(dsum))]
+        features = extract_section_features(core_sec)
+
+        return {
+            "features": features,
+            "source": source,
+            "direction": direction_vec,
+            "cluster_ratio": cluster_ratio,
+        }
+
+    primary_source = getattr(axis, "source", "find_extrusion_axis")
+    primary_eval = _evaluate_direction(axis.direction, primary_source)
+    if primary_eval is None:
+        return None
+
+    selected_eval = primary_eval
+    used_alternate_axis = False
+
+    primary_features = primary_eval["features"]
+    if primary_features.holes == 0 and primary_features.reentrant_corners == 0:
+        alternative_candidates: list[tuple[str, Any]] = []
+        for direction in planar_face_normal_candidates(solid):
+            alternative_candidates.append(("planar-face-normal", direction))
+        try:
+            alternative_candidates.append(("vertex-pca", pca_axis_candidate(vertices)))
+        except Exception:
+            pass
+
+        unique_candidates: list[tuple[str, Any]] = []
+        primary_dir = primary_eval["direction"]
+        for source, direction in alternative_candidates:
+            direction_vec = np.asarray(direction, dtype=float)
+            norm = float(np.linalg.norm(direction_vec))
+            if norm <= 1e-9:
+                continue
+            direction_vec = direction_vec / norm
+
+            # Skip dezelfde as (ook inverse richting) en duplicaten.
+            if abs(float(np.dot(direction_vec, primary_dir))) > 0.999:
+                continue
+            duplicate = any(
+                abs(float(np.dot(direction_vec, np.asarray(prev_dir, dtype=float)))) > 0.999
+                for _, prev_dir in unique_candidates
+            )
+            if duplicate:
+                continue
+            unique_candidates.append((source, direction_vec))
+
+        best_alt: Optional[Dict[str, Any]] = None
+        for source, direction_vec in unique_candidates:
+            candidate_eval = _evaluate_direction(direction_vec, source)
+            if candidate_eval is None:
+                continue
+
+            candidate_features = candidate_eval["features"]
+            if candidate_features.holes != 0:
+                continue
+
+            if best_alt is None:
+                best_alt = candidate_eval
+                continue
+
+            best_features = best_alt["features"]
+            if candidate_features.reentrant_corners > best_features.reentrant_corners:
+                best_alt = candidate_eval
+                continue
+            if (
+                candidate_features.reentrant_corners == best_features.reentrant_corners
+                and candidate_features.convexity < best_features.convexity
+            ):
+                best_alt = candidate_eval
+
+        if best_alt is not None and best_alt["features"].reentrant_corners > 0:
+            selected_eval = best_alt
+            used_alternate_axis = True
+
+    return {
+        "selected_features": selected_eval["features"],
+        "selected_axis_source": selected_eval["source"],
+        "used_alternate_axis": used_alternate_axis,
+        "primary_features": primary_features,
+    }
+
+
 # ===========================================================================
 # Stap 0.4b — Constant-dikte open sectie
 # ===========================================================================
@@ -888,56 +1047,13 @@ def _step_0_4b_constant_thickness_open(
     
     Note: gebruikt OCP-native section tools, niet profile_classifier.py.
     """
-    try:
-        from manufacturing_pipeline.analysis.step0_section_tools import (
-            find_extrusion_axis,
-            solid_vertices_np,
-            section_plane_positions_from_vertices,
-            slice_solid_to_section,
-            dominant_section_cluster,
-            normalize_section_polygon,
-            extract_section_features,
-            section_distance,
-        )
-    except ImportError:
+    section_eval = _select_step_0_4b_features(solid)
+    if section_eval is None:
         return None
 
-    axis = find_extrusion_axis(solid)
-    if axis is None:
+    features = section_eval.get("selected_features")
+    if features is None:
         return None
-
-    try:
-        vertices = solid_vertices_np(solid)
-        positions = section_plane_positions_from_vertices(
-            vertices, axis.direction, (0.20, 0.35, 0.50, 0.65, 0.80)
-        )
-        sections = []
-        for s in positions:
-            sec = slice_solid_to_section(
-                solid,
-                plane_origin=axis.direction * s,
-                plane_normal=axis.direction,
-                section_position=s,
-            )
-            if sec is not None and sec.polygon.area > 0:
-                sections.append(sec)
-    except Exception:
-        return None
-
-    if not sections:
-        return None
-
-    cluster = dominant_section_cluster(sections)
-    if not cluster:
-        return None
-
-    import numpy as np
-
-    normalized = [normalize_section_polygon(sec.polygon) for sec in cluster]
-    dsum = [sum(section_distance(a, b) for j, b in enumerate(normalized) if j != i)
-            for i, a in enumerate(normalized)]
-    core_sec = cluster[int(np.argmin(dsum))]
-    features = extract_section_features(core_sec)
 
     if features.holes != 0 or features.reentrant_corners == 0:
         return None
@@ -946,20 +1062,30 @@ def _step_0_4b_constant_thickness_open(
         return None
 
     smallest, middle, longest = dims
+    reason = "holes==0 + reentrant_corners>0 + dikteConstant"
+    if section_eval.get("used_alternate_axis"):
+        reason = f"{reason} + alternatieve doorsnede-as"
+
+    feature_payload: Dict[str, Any] = {
+        "holes": features.holes,
+        "reentrant_corners": features.reentrant_corners,
+        "axis_source": section_eval.get("selected_axis_source"),
+        "smallest": smallest,
+        "middle": middle,
+        "longest": longest,
+    }
+    if section_eval.get("used_alternate_axis") and section_eval.get("primary_features") is not None:
+        primary_features = section_eval["primary_features"]
+        feature_payload["primary_reentrant_corners"] = primary_features.reentrant_corners
+
     return _result(
         label="GEZETTE_PLAAT",
         step="0.4b",
         method="rule",
         confidence=0.88,
         fallthrough=False,
-        reason="holes==0 + reentrant_corners>0 + dikteConstant",
-        features={
-            "holes": features.holes,
-            "reentrant_corners": features.reentrant_corners,
-            "smallest": smallest,
-            "middle": middle,
-            "longest": longest,
-        },
+        reason=reason,
+        features=feature_payload,
     )
 
 
@@ -1738,13 +1864,18 @@ def classify_step0_detailed_trace(solid) -> Dict[str, Any]:
 
     holes_04b = None
     reentrant_04b = None
+    axis_source_04b = None
+    used_alt_axis_04b = False
+
     if has_section_tools:
-        if section_context is None:
-            section_context = _build_section_context()
-        core_features = section_context.get("core_features")
-        if core_features is not None:
-            holes_04b = core_features.holes
-            reentrant_04b = core_features.reentrant_corners
+        step_04b_eval = _select_step_0_4b_features(solid)
+        if step_04b_eval is not None:
+            selected_features = step_04b_eval.get("selected_features")
+            if selected_features is not None:
+                holes_04b = selected_features.holes
+                reentrant_04b = selected_features.reentrant_corners
+            axis_source_04b = step_04b_eval.get("selected_axis_source")
+            used_alt_axis_04b = bool(step_04b_eval.get("used_alternate_axis"))
 
     dikte_constant = _is_constant_thickness(solid)
 
@@ -1777,6 +1908,12 @@ def classify_step0_detailed_trace(solid) -> Dict[str, Any]:
     if real_04b is not None:
         step_04b_info["verdict"] = "MATCH"
         step_04b_info["result"] = real_04b.get("label")
+        if used_alt_axis_04b:
+            step_04b_info["note"] = (
+                f"alternatieve doorsnede-as gebruikt ({axis_source_04b})"
+                if axis_source_04b
+                else "alternatieve doorsnede-as gebruikt"
+            )
         steps_trace.append(step_04b_info)
         return {"final_result": real_04b, "steps": steps_trace}
 

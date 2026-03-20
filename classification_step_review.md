@@ -1,4 +1,4 @@
-# Classificatie Step Review - STEP 0 (v3.9)
+# Classificatie Step Review - STEP 0 (v3.10)
 
 ## Doel
 Dit document legt de huidige STEP 0 beslisboom vast zoals geimplementeerd in
@@ -10,6 +10,9 @@ Wijzigingen:
   Axiale slice probeert `basis_u` eerst, fallback naar `basis_v` bij NONE.
 - **v3.9**: Gesloten-hol labels `RONDE_BUIS` en `RECHTHOEKIGE_KOKER`
   mappen in de 3-klasse einduitkomst beide naar `profiel`.
+- **v3.10**: Stap `0.4b` heeft een alternatieve-as fallback.
+  Als de primaire as een convexe kern-sectie geeft (`holes==0`, `reentrant==0`),
+  worden alternatieve assen getest en wordt de beste concave kandidaat gekozen.
 
 ## Kerntermen
 - `section`: 2D doorsnede van een solid.
@@ -162,6 +165,12 @@ Criteria:
 - `holes == 0`
 - `reentrant_corners > 0`
 - `dikteConstant == True`
+
+As-selectie:
+- primair via `find_extrusion_axis`
+- fallback: bij `holes==0` en `reentrant_corners==0` op primaire as,
+  evalueer alternatieve assen (`planar-face-normal`, `vertex-pca`) en kies
+  de kandidaat met `holes==0` en hoogste `reentrant_corners`
 
 Uitkomst:
 - match -> `GEZETTE_PLAAT` (STOP)
