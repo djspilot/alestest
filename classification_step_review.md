@@ -1,281 +1,174 @@
-# Classificatie Step Review - STEP 0 (Definitieve structuur + exit regels)
+# Classificatie Step Review - STEP 0 (v3.11)
 
 ## Doel
-- Dit document legt STEP 0 eenduidig vast:
-  - welke criteria per stap gelden,
-  - waarom die criteria nodig zijn,
-  - welke broncode erbij hoort,
-  - wanneer de beslisboom direct stopt en wanneer hij moet doorvallen.
+Dit document beschrijft de actuele STEP 0 beslisboom zoals geimplementeerd in
+`manufacturing_pipeline/analysis/classification.py`.
 
-## Bevestiging van jouw 4 regels
-- Ja, dit is de bedoelde hoofdstructuur:
-  - 0.2 = alleen holle gesloten secties (buis/koker).
-  - 0.3 = open profiel (L/U/I/T).
-  - 0.4a = vlakke plaat.
-  - 0.4b = gezette plaat.
-- En ja: als 0.2 matcht, verlaat de boom STEP 0 direct. Dan ga je niet meer naar 0.3 of 0.4.
+Wijzigingen:
+- **v3.7**: Stap 0.1 axiale slice-check voor ronde massieve assen.
+- **v3.8**: Dmax-bepaling via eindzone-sampling (frac 0.02..0.98) vervangt Dcore.
+- **v3.9**: Gesloten-hol labels `RONDE_BUIS` en `RECHTHOEKIGE_KOKER` mappen beide naar eindklasse `profiel`.
+- **v3.10**: Stap 0.4b alternate-axis fallback voor gespiegelde onderdelen.
+- **v3.11**: Stap 0.4a aangepast:
+  - `near-rectangle` is geen harde plaat-poort meer,
+  - vlakke plaat vereist nu expliciet `reentrant_corners == 0` en `dikteConstant == True`,
+  - `near-rectangle + bbox_ratio <= 0.30` blijft alleen het high-confidence STOP pad.
 
 ## Kerntermen
-- section: 2D doorsnede van het solid.
-- holes: aantal interne lussen (interior rings) in die section.
-- reentrant_corners: aantal inwendige (concave) hoeken van de section.
-- dikteConstant:
-  - gewenste betekenis: lokale wanddikte ongeveer constant,
-  - huidige praktische implementatie: proxy via 3D face-area asymmetrie.
+- `section`: 2D doorsnede van een solid.
+- `core section`: representatieve doorsnede uit het dominante section-cluster.
+- `holes`: aantal interne lussen in een section.
+- `reentrant_corners`: aantal concave hoeken in een section.
+- `dikteConstant`: proxy op basis van top-2 face area verschil.
 
-## Stap 0 - Volgorde met exitgedrag
+## Beslisboom Overzicht
+1. `0.1` Slice-validatie (poort + ronde-as bewerkingscheck)
+2. `0.2` Gesloten-hol (buis/koker)
+3. `0.3` Open profiel (L/U/I/T)
+4. `0.4a` Vlakke plaat (met confidence-tier)
+5. `0.4b` Gezette plaat (constant-dikte open sectie)
+6. `0.5` Massief profiel fallback
 
-### 0.1 Slice-validatie (poort)
+Stopgedrag:
+- Zodra een stap matcht met `fallthrough=False`: STOP.
+- `0.1` zonder stabiele extrusie-as geeft `ANDERS` met `fallthrough=True` (door naar Step 1).
+- `0.4a` kan als low-confidence `PLAAT` met `fallthrough=True` doorgeven naar Step 1.
+- `0.5` `ANDERS` is low-confidence en geeft `fallthrough=True` (door naar Step 1).
+
+---
+
+## Stap 0.1 - Slice-validatie (poort)
+
+Primaire criteria:
+- stabiele extrusie-as gevonden
+- minimaal 3 geldige dwarsdoorsneden
+- dominant section cluster >= `STEP0_CLUSTER_RATIO_MIN` (nu 0.30)
+
+Dwarsdoorsnede-sampleposities:
+- fracties: `(0.20, 0.35, 0.50, 0.65, 0.80)`
+
+### Subcheck: ronde massieve as met axiale slice (v3.8)
+Deze check draait alleen als de `core section` lijkt op een ronde massieve as:
+- `holes == 0`
+- `reentrant_corners == 0`
+- `compactness >= ROUND_SHAFT_CORE_COMPACTNESS_MIN` (0.90)
+- `bbox_ratio >= ROUND_SHAFT_CORE_BBOX_RATIO_MIN` (0.95)
+- `length_ratio >= ROUND_SHAFT_MIN_LENGTH_RATIO` (3.0)
+
+Definities:
+$$A_{axial} = \text{oppervlakte axiale doorsnede}$$
+$$A_{exp} = D_{max} \times L$$
+$$\text{ratio} = \frac{A_{axial}}{A_{exp}}$$
+
+Beslisregel:
+- Als $\text{ratio} < ROUND\_SHAFT\_AXIAL\_AREA\_RATIO\_MIN$ (0.975):
+  - classificeer direct **ANDERS** in stap `0.1`
+  - reden: ronde massieve as met axiale diameterafname (afgedraaid/bewerkt)
+
+Exit:
+- geen stabiele extrusie-as -> **ANDERS** met `fallthrough=True`
+- onvoldoende stabiele secties of as-check faalt -> **ANDERS** (STOP)
+- anders -> door naar `0.2`
+
+---
+
+## Stap 0.2 - Gesloten-hol (koker/buis)
 Criteria:
-- stabiele extrusie-as,
-- minimaal 3 geldige sections,
-- dominant section cluster >= 0.60.
+- `holes == 1`
+- outer+inner near-circle -> `RONDE_BUIS`
+- outer+inner near-rectangle -> `RECHTHOEKIGE_KOKER`
 
-Waarom:
-- voorkomt false positives op instabiele of niet-extrusie-achtige geometrie.
+3-klasse eindmapping:
+- `RONDE_BUIS` -> `profiel`
+- `RECHTHOEKIGE_KOKER` -> `profiel`
 
-Exit:
-- niet gehaald -> ANDERS (stop).
-- wel gehaald -> door naar 0.2.
-
-Broncode:
-- manufacturing_pipeline/analysis/profile_classifier.py:1234-1286
-
-Gerelateerde code:
-```python
-axis = find_extrusion_axis(solid_shape)
-if axis is None:
-    return {"label": "ANDERS", "reason": "geen stabiele extrusie-as gevonden"}
-
-if len(sections) < 3:
-    return {"label": "ANDERS", "reason": "te weinig geldige doorsneden"}
-
-cluster = dominant_section_cluster(sections)
-if len(cluster) / max(len(sections), 1) < 0.60:
-    return {"label": "ANDERS", "reason": "doorsneden zijn niet stabiel genoeg langs de lengte"}
-```
-
----
-
-### 0.2 Gesloten-hol (koker/buis)
-Primaire criteria:
-- holes == 1,
-- outer+inner near-circle -> RONDE_BUIS,
-- outer+inner near-rectangle -> RECHTHOEKIGE_KOKER.
-
-Waarom:
-- holes==1 is het sterkste slice-signaal voor holle doorsnede.
-- exact "4 corners" is minder robuust dan near-rectangle (fillets/afrondingen).
-
-Extra confidence criteria (optioneel, scoreverhogend):
-- cylindrical face percentage hoog,
-- volume_ratio laag,
-- aspect niet te vlak.
+Wire-loop fallback:
+- gebruikt bij complexe/afgeronde ringen als polygon-hole reconstructie faalt
+- overlapdrempel: `HOLLOW_WIRE_OVERLAP_RATIO_MIN` (0.90)
 
 Exit:
-- match op buis/koker -> direct classificeren en STEP 0 verlaten.
-- geen match -> door naar 0.3.
-
-Broncode:
-- hoofdregel: manufacturing_pipeline/analysis/profile_classifier.py:1169-1186
-- extra confidence bouwsteen: manufacturing_pipeline/analysis/assembly_analysis.py:575-639
-
-Gerelateerde code:
-```python
-if features.holes == 1:
-    outer = Polygon(poly.exterior.coords)
-    inner = Polygon(list(poly.interiors[0].coords))
-    if _is_nearly_circle(outer, 0.90, 0.94) and _is_nearly_circle(inner, 0.90, 0.94):
-        return {"label": "RONDE_BUIS", "method": "rule", "features": features}
-    if _is_nearly_rectangle(outer) and _is_nearly_rectangle(inner):
-        return {"label": "RECHTHOEKIGE_KOKER", "method": "rule", "features": features}
-```
+- match -> STOP
+- geen match -> door naar `0.3`
 
 ---
 
-### 0.3 Open profiel (L/U/I/T)
-Primaire criteria:
-- holes == 0,
-- reentrant_corners > 0,
-- dikteConstant == false.
-
-Waarom:
-- reentrant_corners onderscheidt open concave secties van vlakke/massieve rechthoeken.
-- template-match borgt dat vorm echt in I/U/L/T familie valt.
-
-Extra confidence criteria:
-- best.score <= 0.12 (template threshold),
-- family in I_FAMILY/U_FAMILY/L_FAMILY/T_FAMILY,
-- bent-sheet veto actief om gezette plaat niet als profiel te labelen.
-
-Exit:
-- criteria + confidence gehaald -> PROFIEL en stop.
-- anders -> door naar 0.4.
-
-Broncode:
-- reentrant: manufacturing_pipeline/analysis/profile_classifier.py:958-974
-- template accept: manufacturing_pipeline/analysis/profile_classifier.py:1208-1217
-- bent-sheet signal: manufacturing_pipeline/analysis/assembly_analysis.py:752-839
-
-Gerelateerde code:
-```python
-reentrant = count_reentrant_corners(poly)
-matches = match_templates(poly, registry, top_k=5)
-best = matches[0] if matches else None
-if best and best.score <= template_accept_threshold:
-    return {
-        "label": best.family,
-        "method": "template",
-        "top_matches": matches,
-    }
-```
-
----
-
-### 0.4a Vlakke plaat
-Primaire criteria:
-- holes == 0,
-- reentrant_corners == 0,
-- dikteConstant == true.
-
-Extra confidence criteria (high confidence direct):
-- near-rectangle true,
-- bbox_ratio <= 0.30.
-
-Waarom:
-- voorkomt dat niet-rechthoekige of twijfelachtige solids te vroeg als plaat stoppen.
-
-Exit:
-- high confidence gehaald -> PLAAT en stop.
-- niet high confidence -> doorvallen naar Step 1 plaatdetectie (1A/1B/1C/1D).
-
-Broncode:
-- vlakke plaat rule: manufacturing_pipeline/analysis/profile_classifier.py:1190-1197
-- Step 1 fallback regels: manufacturing_pipeline/analysis/assembly_analysis.py:1364-1392
-
-Gerelateerde code:
-```python
-if features.holes == 0 and _is_nearly_rectangle(poly):
-    if features.bbox_ratio <= 0.30:
-        return {
-            "label": "PLAT_STAAL",
-            "confidence": 0.98,
-            "method": "rule",
-            "features": features,
-        }
-```
-
-Step 1 fallback (relevant):
-```python
-if _is_plate_by_face_analysis(solid, threshold=PLATE_FACE_TOP2_THRESHOLD_PCT):
-    return "plaat"
-if _detect_bent_sheet(solid, volume, dims):
-    return "plaat"
-if smallest < PLATE_THICK_MAX_MM and thickness_ratio < PLATE_THICKNESS_RATIO_MAX and aspect_ratio > PLATE_ASPECT_RATIO_MIN:
-    return "plaat"
-if _is_feature_heavy_plate_candidate(...):
-    return "plaat"
-```
-
----
-
-### 0.4b Gezette plaat
-Primaire criteria:
-- holes == 0,
-- reentrant_corners > 0,
-- dikteConstant == true.
-
-Besliscriterium:
-- _detect_bent_sheet(solid, volume, dims) == true -> GEZETTE PLAAT,
-- _detect_bent_sheet(solid, volume, dims) == false -> PROFIEL.
-
-Waarom:
-- scheidt constant-dikte open secties direct in STEP 0.
-- voorkomt dat 0.4b eerst nog moet doorvallen naar Step 1 voordat profiel versus gezette plaat beslist is.
-
-Exit:
-- _detect_bent_sheet == true -> GEZETTE PLAAT en stop.
-- _detect_bent_sheet == false -> PROFIEL en stop.
-
-Broncode:
-- bent sheet criteria: manufacturing_pipeline/analysis/assembly_analysis.py:752-839
-
-Gerelateerde code:
-```python
-if _detect_bent_sheet(solid, volume, dims):
-    return "plaat"
-return "profiel"
-```
-
----
-
-### 0.5 DikteConstant - huidige implementatie
-Huidige proxy:
-- dikteConstant = not _detect_variable_thickness(...)
-
-Waarom proxy:
-- open contouren hebben geen generieke, robuuste lokale 2D-thickness solver in de huidige code.
-
-Broncode:
-- manufacturing_pipeline/analysis/assembly_analysis.py:690-748
-
-Gerelateerde code:
-```python
-if _is_bent_sheet(solid):
-    return False
-
-length_ratio = max_dim / min_dim if min_dim > 0 else 0
-if length_ratio < PROFILE_LENGTH_RATIO_MIN:
-    return False
-
-area_diff = abs(top_area - second_area) / top_area
-return area_diff > STANDARD_PROFILE_FACE_AREA_TOLERANCE
-```
-
----
-
-### 0.6 Massief profiel fallback (behouden)
+## Stap 0.3 - Open profiel (L/U/I/T)
 Criteria:
-- profiel gate op dimensions,
-- volume_ratio en SA/V bevestiging.
-
-Waarom:
-- voorkomt dat niet-platte, massieve rechthoekige bars tussen classificaties vallen.
+- `holes == 0`
+- `reentrant_corners > 0`
+- bent-sheet veto (`_is_bent_sheet_geometry == False`)
+- template-match in open families (I/U/L/T) met score <= 0.12
 
 Exit:
-- match -> PROFIEL.
-- geen match -> ANDERS.
+- match -> `PROFIEL` (STOP)
+- geen match -> door naar `0.4a`
 
-Broncode:
-- manufacturing_pipeline/analysis/assembly_analysis.py:1398-1408
+---
 
-Gerelateerde code:
-```python
-if smallest >= PROFILE_SMALLEST_MIN_MM and length_ratio >= PROFILE_LENGTH_RATIO_MIN and PROFILE_CROSS_RATIO_MIN <= cross_ratio <= PROFILE_CROSS_RATIO_MAX:
-    if volume_ratio > PROFILE_VOLUME_RATIO_STRONG_MIN:
-        return "profiel"
-    elif volume_ratio >= PROFILE_VOLUME_RATIO_WEAK_MIN:
-        if sa_v_ratio < PROFILE_SA_V_RATIO_MAX:
-            return "profiel"
-```
+## Stap 0.4a - Vlakke plaat (v3.11)
+Doel:
+- vlakke platen (ook niet-rechthoekige contourplaten) herkennen,
+- maar gezette/open concave doorsneden niet als vlakke plaat laten stoppen.
 
-## Compacte beslisboom
-1. 0.1 slice-validatie, anders ANDERS.
-2. 0.2 holle gesloten sectie, match -> buis/koker en stop.
-3. 0.3 open profielpad, match -> profiel en stop.
-4. 0.4a vlakke plaat high confidence, match -> plaat en stop, anders Step 1 fallback.
-5. 0.4b constant-dikte open sectie: `_detect_bent_sheet` true -> plaat, false -> profiel, en stop.
-6. 0.6 massief profiel fallback, anders ANDERS.
+Harde criteria (plaat-kandidaat):
+- `holes == 0`
+- `reentrant_corners == 0`
+- `dikteConstant == True`
 
-## Kritieke risico's
-- R1: constante-dikte L-profielen hangen nu volledig af van `_detect_bent_sheet`; een false positive geeft onterecht gezette plaat.
-- R2: dikteConstant blijft een proxy; open-sectie fouten blijven mogelijk.
-- R3: echte gezette platen hangen in 0.4b ook volledig af van `_detect_bent_sheet`; een false negative geeft onterecht profiel.
-- R4: BENT_SHEET_LARGE_RADIUS_MIN_MM ontbreekt in centrale variables, waardoor _is_bent_sheet fragiel kan zijn.
-  - gebruikslocatie: manufacturing_pipeline/analysis/assembly_analysis.py:678
+Confidence-tier:
+- High confidence STOP:
+  - `near-rectangle == True`
+  - `bbox_ratio <= 0.30`
+  - resultaat: `PLAAT`, `fallthrough=False`
+- Low confidence (contourplaat of dikkere sectie):
+  - zelfde harde criteria, maar zonder high-confidence shape-score
+  - resultaat: `PLAAT`, `fallthrough=True` (door naar Step 1)
 
-## Slot
-- Je 4-regel structuur is correct als basisstructuur.
-- De extra confidence-criteria hierboven zijn nodig om classificatienauwkeurigheid hoog te houden.
-- Vlakke plaat mag direct stoppen bij high confidence; anders expliciet door naar Step 1 fallback.
-- 0.4b routeert nu direct met `_detect_bent_sheet`: false = profiel, true = gezette plaat.
+Belangrijk:
+- `near-rectangle` is in v3.11 alleen een high-confidence gate, geen harde toegangseis voor `PLAAT`.
+
+---
+
+## Stap 0.4b - Gezette plaat
+Criteria:
+- `holes == 0`
+- `reentrant_corners > 0`
+- `dikteConstant == True`
+
+As-selectie:
+- primair via `find_extrusion_axis`
+- fallback: bij `holes==0` en `reentrant_corners==0` op primaire as,
+  evalueer alternatieve assen (`planar-face-normal`, `vertex-pca`) en kies
+  de kandidaat met `holes==0` en hoogste `reentrant_corners`
+
+Uitkomst:
+- match -> `GEZETTE_PLAAT` (STOP)
+- geen match -> door naar `0.5`
+
+---
+
+## Stap 0.5 - Massief profiel fallback
+Dimensionele fallback op:
+- smallest >= `PROFILE_SMALLEST_MIN_MM`
+- length_ratio >= `PROFILE_LENGTH_RATIO_MIN`
+- cross_ratio binnen `[PROFILE_CROSS_RATIO_MIN, PROFILE_CROSS_RATIO_MAX]`
+- volume_ratio strong/weak + SA/V tiebreak
+
+Uitkomst:
+- `PROFIEL` of `ANDERS`
+
+---
+
+## Kernparameters
+In `manufacturing_pipeline/analysis/classification_variables.py`:
+- `ROUND_SHAFT_CORE_COMPACTNESS_MIN = 0.90`
+- `ROUND_SHAFT_CORE_BBOX_RATIO_MIN = 0.95`
+- `ROUND_SHAFT_MIN_LENGTH_RATIO = 3.0`
+- `ROUND_SHAFT_AXIAL_AREA_RATIO_MIN = 0.975`
+
+## Verwachte impact v3.11
+- Niet-rechthoekige vlakke contourplaten vallen minder snel onterecht uit in 0.4a.
+- Scheiding `vlak` versus `gezet` wordt explicieter:
+  - vlak: `reentrant == 0`
+  - gezet: `reentrant > 0` met constante dikte.
+- High-confidence snelle STOP blijft bestaan voor duidelijke rechthoekige plaatdoorsneden.
