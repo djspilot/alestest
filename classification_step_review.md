@@ -1,18 +1,18 @@
-# Classificatie Step Review - STEP 0 (v3.10)
+# Classificatie Step Review - STEP 0 (v3.11)
 
 ## Doel
-Dit document legt de huidige STEP 0 beslisboom vast zoals geimplementeerd in
+Dit document beschrijft de actuele STEP 0 beslisboom zoals geimplementeerd in
 `manufacturing_pipeline/analysis/classification.py`.
 
 Wijzigingen:
 - **v3.7**: Stap 0.1 axiale slice-check voor ronde massieve assen.
-- **v3.8**: Dmax-bepaling via eindzone-sampling (frac 0.02…0.98) vervangt Dcore.
-  Axiale slice probeert `basis_u` eerst, fallback naar `basis_v` bij NONE.
-- **v3.9**: Gesloten-hol labels `RONDE_BUIS` en `RECHTHOEKIGE_KOKER`
-  mappen in de 3-klasse einduitkomst beide naar `profiel`.
-- **v3.10**: Stap `0.4b` heeft een alternatieve-as fallback.
-  Als de primaire as een convexe kern-sectie geeft (`holes==0`, `reentrant==0`),
-  worden alternatieve assen getest en wordt de beste concave kandidaat gekozen.
+- **v3.8**: Dmax-bepaling via eindzone-sampling (frac 0.02..0.98) vervangt Dcore.
+- **v3.9**: Gesloten-hol labels `RONDE_BUIS` en `RECHTHOEKIGE_KOKER` mappen beide naar eindklasse `profiel`.
+- **v3.10**: Stap 0.4b alternate-axis fallback voor gespiegelde onderdelen.
+- **v3.11**: Stap 0.4a aangepast:
+  - `near-rectangle` is geen harde plaat-poort meer,
+  - vlakke plaat vereist nu expliciet `reentrant_corners == 0` en `dikteConstant == True`,
+  - `near-rectangle + bbox_ratio <= 0.30` blijft alleen het high-confidence STOP pad.
 
 ## Kerntermen
 - `section`: 2D doorsnede van een solid.
@@ -25,14 +25,14 @@ Wijzigingen:
 1. `0.1` Slice-validatie (poort + ronde-as bewerkingscheck)
 2. `0.2` Gesloten-hol (buis/koker)
 3. `0.3` Open profiel (L/U/I/T)
-4. `0.4a` Vlakke plaat (high confidence)
+4. `0.4a` Vlakke plaat (met confidence-tier)
 5. `0.4b` Gezette plaat (constant-dikte open sectie)
 6. `0.5` Massief profiel fallback
 
 Stopgedrag:
 - Zodra een stap matcht met `fallthrough=False`: STOP.
 - `0.1` zonder stabiele extrusie-as geeft `ANDERS` met `fallthrough=True` (door naar Step 1).
-- `0.4a` kan bij lage confidence met `fallthrough=True` doorgeven naar Step 1.
+- `0.4a` kan als low-confidence `PLAAT` met `fallthrough=True` doorgeven naar Step 1.
 - `0.5` `ANDERS` is low-confidence en geeft `fallthrough=True` (door naar Step 1).
 
 ---
@@ -51,42 +51,9 @@ Dwarsdoorsnede-sampleposities:
 Deze check draait alleen als de `core section` lijkt op een ronde massieve as:
 - `holes == 0`
 - `reentrant_corners == 0`
-- `compactness >= ROUND_SHAFT_CORE_COMPACTNESS_MIN` (0.90) — alleen voor cirkels
-- `bbox_ratio >= ROUND_SHAFT_CORE_BBOX_RATIO_MIN` (0.95) — idem
+- `compactness >= ROUND_SHAFT_CORE_COMPACTNESS_MIN` (0.90)
+- `bbox_ratio >= ROUND_SHAFT_CORE_BBOX_RATIO_MIN` (0.95)
 - `length_ratio >= ROUND_SHAFT_MIN_LENGTH_RATIO` (3.0)
-
-#### Hoe Dmax wordt bepaald (v3.8)
-Stap 1: sample dwarsdoorsneden op 11 fracties langs de extrusie-as:
-
-```
-fracs = (0.02, 0.05, 0.10, 0.20, 0.35, 0.50, 0.65, 0.80, 0.90, 0.95, 0.98)
-```
-
-**Waarom niet 0.0 / 1.0?**
-Slicen op exact frac=0.00 of 1.00 snijdt op de grens van het solid. De BRep-sectie
-levert dan vrijwel altijd een lege of degenererende polygoon terug (geen edges).
-0.02 en 0.98 zijn veilige eindposities die eindzone-bewerkingen (schouders, afdraaiingen)
-daadwerkelijk treffen zonder grens-artefacten.
-
-Stap 2: per doorsnede wordt de buitenomvang gemeten:
-```
-dim = max(bbox_width, bbox_height)   # bounding-box van de dwarsdoorsnede-polygoon
-Dmax = max(dim) over alle 11 doorsneden
-```
-
-**Waarom bounding-box en niet equivalent diameter?**
-- Bounding-box is onafhankelijk van gaten/draadprofielen in de sectie.
-- Gaten (frac=0.05: draad/boring) verlagen de vlakoppervlakte maar NIET de bounding-box.
-- Schouders (frac=0.98: Ø25 op een Ø20 schacht) verhogen de bounding-box wel.
-- Zo geeft Dmax altijd de grootste aanwezige buitenomtrek, ook bij eindzone-bewerkingen.
-
-#### Axiale slice
-Na Dmax-bepaling wordt een longitudinale (axiale) doorsnede gemaakt — een vlak
-parallel aan de extrusie-as door het middelpunt (`axis.origin`).
-
-Vlakrichting: probeer `core_sec.basis_u` eerst; als die geen geldige sectie
-geeft (bijv. als `basis_u` toevallig parallel loopt met een vlak vlak),
-gebruik dan `basis_v` als fallback.
 
 Definities:
 $$A_{axial} = \text{oppervlakte axiale doorsnede}$$
@@ -98,20 +65,10 @@ Beslisregel:
   - classificeer direct **ANDERS** in stap `0.1`
   - reden: ronde massieve as met axiale diameterafname (afgedraaid/bewerkt)
 
-Intuïtie:
-- Een onbewerkte ronde as heeft overal diameter ≈ Dmax → axiale doorsnede ≈ rechthoek D×L → ratio ≈ 1.0.
-- Een afgedraaide as met schouder heeft het merendeel van de lengte diameter < Dmax → axiale doorsnede kleiner → ratio << 1.
-
-Voorbeeldwaarden:
-| Part | Dmax | L | A_exp | A_axial | ratio | uitkomst |
-|------|------|---|-------|---------|-------|---------|
-| 10000182371 (as Ø20, schouder Ø25) | 25.0 | 133 | 3325 | 2679 | 0.806 | ANDERS |
-| 10000550594 (ax. reductie) | ~20 | ~133 | ~2660 | 2596 | 0.971 | ANDERS |
-
 Exit:
-- geen stabiele extrusie-as → **ANDERS** met `fallthrough=True` (door naar Step 1)
-- te weinig/stabiele secties onvoldoende, of as-check faalt → **ANDERS** (STOP)
-- anders → door naar `0.2`
+- geen stabiele extrusie-as -> **ANDERS** met `fallthrough=True`
+- onvoldoende stabiele secties of as-check faalt -> **ANDERS** (STOP)
+- anders -> door naar `0.2`
 
 ---
 
@@ -148,15 +105,27 @@ Exit:
 
 ---
 
-## Stap 0.4a - Vlakke plaat
-Criteria:
-- `holes == 0`
-- near-rectangle
-- high confidence bij `bbox_ratio <= 0.30`
+## Stap 0.4a - Vlakke plaat (v3.11)
+Doel:
+- vlakke platen (ook niet-rechthoekige contourplaten) herkennen,
+- maar gezette/open concave doorsneden niet als vlakke plaat laten stoppen.
 
-Exit:
-- high confidence -> `PLAAT`, `fallthrough=False` (STOP)
-- lage confidence -> `PLAAT`, `fallthrough=True` (door naar Step 1)
+Harde criteria (plaat-kandidaat):
+- `holes == 0`
+- `reentrant_corners == 0`
+- `dikteConstant == True`
+
+Confidence-tier:
+- High confidence STOP:
+  - `near-rectangle == True`
+  - `bbox_ratio <= 0.30`
+  - resultaat: `PLAAT`, `fallthrough=False`
+- Low confidence (contourplaat of dikkere sectie):
+  - zelfde harde criteria, maar zonder high-confidence shape-score
+  - resultaat: `PLAAT`, `fallthrough=True` (door naar Step 1)
+
+Belangrijk:
+- `near-rectangle` is in v3.11 alleen een high-confidence gate, geen harde toegangseis voor `PLAAT`.
 
 ---
 
@@ -190,14 +159,16 @@ Uitkomst:
 
 ---
 
-## Kernparameters (nieuw in v3.7)
+## Kernparameters
 In `manufacturing_pipeline/analysis/classification_variables.py`:
 - `ROUND_SHAFT_CORE_COMPACTNESS_MIN = 0.90`
 - `ROUND_SHAFT_CORE_BBOX_RATIO_MIN = 0.95`
 - `ROUND_SHAFT_MIN_LENGTH_RATIO = 3.0`
 - `ROUND_SHAFT_AXIAL_AREA_RATIO_MIN = 0.975`
 
-## Verwachte impact
-- Ronde massieve assen met duidelijke eindbewerking schuiven van `PROFIEL`
-  naar `ANDERS` al in stap `0.1`.
-- Gesloten-hol buis/koker route (`0.2`) valt in de eindklasse onder `profiel`.
+## Verwachte impact v3.11
+- Niet-rechthoekige vlakke contourplaten vallen minder snel onterecht uit in 0.4a.
+- Scheiding `vlak` versus `gezet` wordt explicieter:
+  - vlak: `reentrant == 0`
+  - gezet: `reentrant > 0` met constante dikte.
+- High-confidence snelle STOP blijft bestaan voor duidelijke rechthoekige plaatdoorsneden.

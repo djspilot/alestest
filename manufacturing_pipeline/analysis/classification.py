@@ -787,10 +787,10 @@ def _step_0_3_open_profile(solid, dims: Tuple[float, float, float]) -> Optional[
 # ===========================================================================
 
 def _step_0_4a_flat_plate(solid) -> Optional[Step0Result]:
-    """Detecteer vlakke plaat via holes==0, near-rectangle, bbox_ratio.
+    """Detecteer vlakke plaat via holes==0, reentrant==0, dikteConstant.
 
-    High confidence path: stopt direct.
-    Lage confidence: geeft fallthrough=True zodat Step 1 verder kan.
+    High confidence path: near-rectangle + lage bbox_ratio stopt direct.
+    Overige vlakke-plaat gevallen blijven PLAAT met fallthrough=True naar Step 1.
     """
     try:
         from manufacturing_pipeline.analysis.step0_section_tools import (
@@ -847,11 +847,18 @@ def _step_0_4a_flat_plate(solid) -> Optional[Step0Result]:
     if features.holes != 0:
         return None
 
-    if not _is_nearly_rectangle(core_poly):
+    # Concave doorsneden horen bij open/gezette vormen en niet bij vlakke plaat.
+    if features.reentrant_corners > 0:
         return None
 
+    dikte_constant = _is_constant_thickness(solid)
+    if not dikte_constant:
+        return None
+
+    near_rectangle = _is_nearly_rectangle(core_poly)
+
     # High confidence: near-rectangle + bbox_ratio <= 0.30
-    if features.bbox_ratio <= 0.30:
+    if near_rectangle and features.bbox_ratio <= 0.30:
         return _result(
             label="PLAAT",
             step="0.4a",
@@ -859,18 +866,35 @@ def _step_0_4a_flat_plate(solid) -> Optional[Step0Result]:
             confidence=0.98,
             fallthrough=False,
             reason=f"vlakke plaat high confidence (bbox_ratio={features.bbox_ratio:.3f})",
-            features={"bbox_ratio": features.bbox_ratio, "holes": 0},
+            features={
+                "bbox_ratio": features.bbox_ratio,
+                "holes": 0,
+                "reentrant_corners": 0,
+                "near_rectangle": near_rectangle,
+                "dikte_constant": dikte_constant,
+            },
         )
 
-    # Lagere confidence: near-rectangle maar dikkere sectie → door naar Step 1
+    # Lagere confidence: contourplaten of dikkere sectie → door naar Step 1
+    reason = (
+        f"vlakke plaat lage confidence (near_rectangle=False, bbox_ratio={features.bbox_ratio:.3f}) → Step 1"
+        if not near_rectangle
+        else f"vlakke plaat lage confidence (bbox_ratio={features.bbox_ratio:.3f}) → Step 1"
+    )
     return _result(
         label="PLAAT",
         step="0.4a",
         method="rule",
         confidence=0.65,
         fallthrough=True,
-        reason=f"vlakke plaat lage confidence (bbox_ratio={features.bbox_ratio:.3f}) → Step 1",
-        features={"bbox_ratio": features.bbox_ratio, "holes": 0},
+        reason=reason,
+        features={
+            "bbox_ratio": features.bbox_ratio,
+            "holes": 0,
+            "reentrant_corners": 0,
+            "near_rectangle": near_rectangle,
+            "dikte_constant": dikte_constant,
+        },
     )
 
 
@@ -1816,8 +1840,10 @@ def classify_step0_detailed_trace(solid) -> Dict[str, Any]:
         core_poly = section_context.get("core_polygon")
 
         holes = core_features.holes if core_features is not None else None
+        reentrant = core_features.reentrant_corners if core_features is not None else None
         bbox_ratio = core_features.bbox_ratio if core_features is not None else None
         near_rectangle = _is_nearly_rectangle(core_poly) if core_poly is not None else False
+        dikte_constant = _is_constant_thickness(solid)
 
         step_04a_info["criteria"].append(
             {
@@ -1829,9 +1855,25 @@ def classify_step0_detailed_trace(solid) -> Dict[str, Any]:
         )
         step_04a_info["criteria"].append(
             {
-                "name": "near-rectangle",
-                "value": near_rectangle,
+                "name": "reentrant_corners == 0",
+                "value": reentrant,
+                "expected": 0,
+                "pass": (reentrant == 0) if reentrant is not None else None,
+            }
+        )
+        step_04a_info["criteria"].append(
+            {
+                "name": "dikteConstant == true",
+                "value": dikte_constant,
                 "expected": True,
+                "pass": dikte_constant,
+            }
+        )
+        step_04a_info["criteria"].append(
+            {
+                "name": "near-rectangle (high-confidence gate)",
+                "value": near_rectangle,
+                "expected": "optioneel",
                 "pass": near_rectangle,
             }
         )
