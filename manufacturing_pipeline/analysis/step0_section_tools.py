@@ -98,6 +98,11 @@ def _require_ocp() -> None:
         raise RuntimeError("OCP is required for Step 0 section tools")
 
 
+def _as_ocp_shape(shape: Any) -> Any:
+    """Return underlying OCP shape when a CadQuery wrapper is provided."""
+    return shape.wrapped if hasattr(shape, "wrapped") else shape
+
+
 def normalize(v: Sequence[float], eps: float = 1e-12) -> np.ndarray:
     arr = np.asarray(v, dtype=float)
     norm = float(np.linalg.norm(arr))
@@ -155,6 +160,7 @@ def simplify_relative(poly: Polygon, rel_tol: float = 0.003) -> Polygon:
 
 def solid_vertices_np(solid_shape: Any, tol: float = 1e-8) -> np.ndarray:
     _require_ocp()
+    solid_shape = _as_ocp_shape(solid_shape)
     pts: list[list[float]] = []
     explorer = TopExp_Explorer(solid_shape, TopAbs_VERTEX)
     while explorer.More():
@@ -168,6 +174,7 @@ def solid_vertices_np(solid_shape: Any, tol: float = 1e-8) -> np.ndarray:
 
 def planar_face_normal_candidates(solid_shape: Any, angle_tol_deg: float = 1.0) -> list[np.ndarray]:
     _require_ocp()
+    solid_shape = _as_ocp_shape(solid_shape)
     raw: list[tuple[np.ndarray, float]] = []
     explorer = TopExp_Explorer(solid_shape, TopAbs_FACE)
     while explorer.More():
@@ -225,6 +232,7 @@ def section_plane_positions_from_vertices(vertices: np.ndarray, axis: np.ndarray
 
 def _iter_edges(shape: Any) -> Iterator[Any]:
     _require_ocp()
+    shape = _as_ocp_shape(shape)
     explorer = TopExp_Explorer(shape, TopAbs_EDGE)
     while explorer.More():
         yield TopoDS.Edge_s(explorer.Current())
@@ -352,6 +360,7 @@ def slice_solid_to_section(
     connect_tol: float = 1e-5,
 ) -> Section2D | None:
     _require_ocp()
+    solid_shape = _as_ocp_shape(solid_shape)
     n, u, v = orthonormal_basis_from_normal(plane_normal)
     origin = np.asarray(plane_origin, dtype=float)
     plane = gp_Pln(gp_Pnt(*origin.tolist()), gp_Dir(*n.tolist()))
@@ -501,7 +510,8 @@ def count_reentrant_corners(poly: Polygon, rel_tol: float = 0.004) -> int:
         c = ring[(idx + 1) % len(ring)]
         v1 = a - b
         v2 = c - b
-        cross = float(np.cross(v1, v2))
+        # 2D scalar cross product to avoid NumPy 2.0 deprecation on np.cross(2d, 2d)
+        cross = float((v1[0] * v2[1]) - (v1[1] * v2[0]))
         if cross > 0:
             count += 1
     return count
@@ -749,15 +759,12 @@ def find_extrusion_axis(
         axis_extents[key] = extent
         max_extent = max(max_extent, extent)
 
-    best: AxisCandidate | None = None
     positions_cache: dict[tuple[float, float, float], list[float]] = {}
-    for cand in candidates:
+    extent_prefilter_ratio = 0.60
+
+    def _evaluate_candidate(cand: AxisCandidate) -> None:
         key = tuple(np.round(cand.direction, 9))
         axis_extent = axis_extents[key]
-        if max_extent > 0 and axis_extent < 0.60 * max_extent:
-            cand.score = -1e9
-            cand.metrics = {"success": 0.0, "axis_extent": axis_extent}
-            continue
         if key not in positions_cache:
             positions_cache[key] = section_plane_positions_from_vertices(vertices, cand.direction, interior_fracs)
         positions = positions_cache[key]
@@ -766,7 +773,12 @@ def find_extrusion_axis(
         for position in positions:
             plane_origin = cand.direction * position
             try:
-                section = slice_solid_to_section(solid_shape, plane_origin=plane_origin, plane_normal=cand.direction, section_position=position)
+                section = slice_solid_to_section(
+                    solid_shape,
+                    plane_origin=plane_origin,
+                    plane_normal=cand.direction,
+                    section_position=position,
+                )
             except Exception:
                 section = None
             if section is not None and not section.polygon.is_empty and section.polygon.area > 0:
@@ -774,8 +786,12 @@ def find_extrusion_axis(
 
         if len(sections) < min_successful_sections:
             cand.score = -1e9
-            cand.metrics = {"success": float(len(sections)), "axis_extent": axis_extent}
-            continue
+            cand.metrics = {
+                "success": float(len(sections)),
+                "axis_extent": axis_extent,
+                "extent_prefilter_pass": axis_extent >= extent_prefilter_ratio * max_extent if max_extent > 0 else True,
+            }
+            return
 
         cluster = dominant_section_cluster(sections)
         cluster_ratio = len(cluster) / max(len(sections), 1)
@@ -803,19 +819,36 @@ def find_extrusion_axis(
             "area_cv": area_cv,
             "perimeter_cv": perimeter_cv,
             "axis_extent": axis_extent,
+            "extent_prefilter_pass": axis_extent >= extent_prefilter_ratio * max_extent if max_extent > 0 else True,
         }
-        if best is None or cand.score > best.score:
-            best = cand
 
-    if best is None:
-        return None
+    def _passes_quality_gates(cand: AxisCandidate) -> bool:
+        return (
+            cand.metrics.get("success", 0.0) >= min_successful_sections
+            and cand.metrics.get("cluster_ratio", 0.0) >= STEP0_CLUSTER_RATIO_MIN
+            and cand.metrics.get("mean_section_distance", 1.0) <= 0.50
+            and cand.metrics.get("area_cv", 1.0) <= 0.25
+        )
 
-    if best.metrics.get("success", 0.0) < min_successful_sections:
-        return None
-    if best.metrics.get("cluster_ratio", 0.0) < STEP0_CLUSTER_RATIO_MIN:
-        return None
-    if best.metrics.get("mean_section_distance", 1.0) > 0.50:
-        return None
-    if best.metrics.get("area_cv", 1.0) > 0.25:
-        return None
-    return best
+    for cand in candidates:
+        _evaluate_candidate(cand)
+
+    preferred: list[AxisCandidate] = []
+    fallback: list[AxisCandidate] = []
+    for cand in candidates:
+        key = tuple(np.round(cand.direction, 9))
+        axis_extent = axis_extents[key]
+        if max_extent > 0 and axis_extent >= extent_prefilter_ratio * max_extent:
+            preferred.append(cand)
+        else:
+            fallback.append(cand)
+
+    preferred_valid = [cand for cand in preferred if _passes_quality_gates(cand)]
+    if preferred_valid:
+        return max(preferred_valid, key=lambda c: c.score)
+
+    fallback_valid = [cand for cand in fallback if _passes_quality_gates(cand)]
+    if fallback_valid:
+        return max(fallback_valid, key=lambda c: c.score)
+
+    return None

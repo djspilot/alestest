@@ -140,7 +140,8 @@ def main():
             bom_list,
             material=args.material,
             output_xml_path=str(output_xml),
-            reference_xml_path=str(reference_xml) if reference_xml and reference_xml.exists() else None
+            reference_xml_path=str(reference_xml) if reference_xml and reference_xml.exists() else None,
+            preserve_bom_identity=True,
         )
         
         print(f"\n[OK] XML generated: {output_path}")

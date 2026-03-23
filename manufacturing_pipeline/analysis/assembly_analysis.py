@@ -152,6 +152,7 @@ class BOMItem:
     children: List["BOMItem"] = field(default_factory=list)
     level: int = 0
     classification_trace: Dict[str, Any] = field(default_factory=dict)
+    solid_index: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         result = asdict(self)
@@ -201,6 +202,7 @@ def get_solid_volume(solid) -> float:
     if not HAS_OCP:
         return 0.0
     try:
+        solid = solid.wrapped if hasattr(solid, "wrapped") else solid
         props = GProp_GProps()
         BRepGProp.VolumeProperties_s(solid, props)
         return props.Mass()
@@ -215,6 +217,7 @@ def get_solid_bounding_box(solid) -> Tuple[float, float, float]:
     try:
         from OCP.Bnd import Bnd_Box
         from OCP.BRepBndLib import BRepBndLib
+        solid = solid.wrapped if hasattr(solid, "wrapped") else solid
         box = Bnd_Box()
         BRepBndLib.Add_s(solid, box)
         xmin, ymin, zmin, xmax, ymax, zmax = box.Get()
@@ -228,6 +231,7 @@ def get_solid_topology_counts(solid) -> Tuple[int, int]:
     if not HAS_OCP:
         return (0, 0)
     try:
+        solid = solid.wrapped if hasattr(solid, "wrapped") else solid
         face_count = 0
         edge_count = 0
         face_exp = TopExp_Explorer(solid, TopAbs_FACE)
@@ -295,6 +299,7 @@ def get_solid_bbox_center(solid) -> Tuple[float, float, float]:
     try:
         from OCP.Bnd import Bnd_Box
         from OCP.BRepBndLib import BRepBndLib
+        solid = solid.wrapped if hasattr(solid, "wrapped") else solid
         
         bbox = Bnd_Box()
         BRepBndLib.Add_s(solid, bbox)
@@ -452,6 +457,7 @@ def _get_top2_parallel_planar_face_percent(solid, parallel_dot_min: float = 0.98
     try:
         if not HAS_OCP:
             return 0.0
+        solid = solid.wrapped if hasattr(solid, "wrapped") else solid
 
         from OCP.BRepAdaptor import BRepAdaptor_Surface
         from OCP.GeomAbs import GeomAbs_Plane
@@ -1450,6 +1456,7 @@ def _get_solid_surface_area(solid) -> float:
     try:
         from OCP.GProp import GProp_GProps
         from OCP.BRepGProp import BRepGProp
+        solid = solid.wrapped if hasattr(solid, "wrapped") else solid
         
         props = GProp_GProps()
         if hasattr(BRepGProp, "SurfaceProperties_s"):
@@ -2357,7 +2364,7 @@ def analyze_assembly(
     )
     
     # Phase 2: Group solids by their assigned STEP name
-    grouped_solids = []  # [(representative_solid, count, volume, dims, part_name)]
+    grouped_solids = []  # [(representative_solid, count, volume, dims, part_name, rep_idx)]
     part_name_to_solid = {}
     name_groups = {}  # {step_name: [solid_indices]}
     
@@ -2375,7 +2382,7 @@ def analyze_assembly(
         volume = get_solid_volume(rep_solid)
         dims = get_solid_bounding_box(rep_solid)
         count = len(indices)
-        grouped_solids.append((rep_solid, count, volume, dims, name))
+        grouped_solids.append((rep_solid, count, volume, dims, name, rep_idx))
         part_name_to_solid[name] = rep_solid
     
     # Generate BOM items
@@ -2395,7 +2402,7 @@ def analyze_assembly(
         "brass": 8500,
     }
 
-    for i, (solid, count, volume, dims, part_name) in enumerate(grouped_solids):
+    for i, (solid, count, volume, dims, part_name, rep_idx) in enumerate(grouped_solids):
         item_num = f"{i+1:03d}"
 
         # Check if fastener
@@ -2424,6 +2431,7 @@ def analyze_assembly(
                 unit_cost=fastener_info.get("unit_cost", 0.10),
                 total_cost=fastener_info.get("unit_cost", 0.10) * count,
                 level=0,
+                solid_index=rep_idx,
             )
         else:
             # Regular part
@@ -2488,6 +2496,7 @@ def analyze_assembly(
                 unit_cost=unit_cost,
                 total_cost=unit_cost * count,
                 level=0,
+                solid_index=rep_idx,
             )
 
             material_summary[default_material] += mass_per_unit * count
