@@ -22,7 +22,7 @@
 
 3. **Test- en pytest-stabilisatie**
    - `pytest.ini` toegevoegd om reguliere testdiscovery te stabiliseren en legacy script-tests uit standaardrun te houden.
-   - `tests/test_xml_export.py` gemoderniseerd naar pytest-compatibele smoke-tests (zonder verouderde `PartAnalyzer`-import).
+   - `manufacturing_pipeline/tests/test_xml_export.py` gemoderniseerd naar pytest-compatibele smoke-tests (zonder verouderde `PartAnalyzer`-import).
    - Resultaat: `python -m pytest -q` draait stabiel en groen.
 
 4. **Warning-cleanup**
@@ -386,7 +386,7 @@ Deploy als webservice voor analyse op afstand.
 
 ```bash
 # Start
-docker compose up -d
+docker compose -f deploy/docker-compose.yml up -d
 
 # Analyseer een bestand
 curl -X POST http://localhost:8000/api/v1/analyze \
@@ -449,7 +449,7 @@ cp .env.example .env
 echo "API_KEYS=mijn-geheime-key" >> .env
 
 # 2. Start
-docker compose up -d
+docker compose -f deploy/docker-compose.yml up -d
 
 # 3. Automatiseer vanuit je eigen systeem
 curl -X POST http://jouw-server:8000/api/v1/analyze \
@@ -497,7 +497,7 @@ python run.py -f G:\ALES\Input --batch --excel --reference G:\ALES\spaceclaim.xm
 │                 │ aag      │                                     │
 │                 └──────────┘                                     │
 │                                                                  │
-│  api/app.py ──▶ routes.py ──▶ manufacturing_pipeline (zelfde)   │
+│  manufacturing_pipeline/api/app.py ──▶ routes.py (zelfde pkg)   │
 │  file_watcher ──▶ map monitoren ──▶ manufacturing_pipeline       │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -567,7 +567,7 @@ python run.py -f G:\ALES\Input --batch --excel --reference G:\ALES\spaceclaim.xm
 cp .env.example .env
 # Bewerk .env — zet minimaal API_KEYS
 
-docker compose up -d
+docker compose -f deploy/docker-compose.yml up -d
 curl http://localhost:8000/api/v1/health
 ```
 
@@ -579,7 +579,7 @@ apt update && apt install docker.io docker-compose-v2 nginx certbot python3-cert
 git clone https://github.com/djspilot/alestest.git /opt/manufacturing-api
 cd /opt/manufacturing-api
 echo "API_KEYS=jouw-geheime-key" > .env
-docker compose up -d
+docker compose -f deploy/docker-compose.yml up -d
 
 # Nginx reverse proxy
 cp deploy/nginx.conf /etc/nginx/sites-available/manufacturing-api
@@ -686,11 +686,11 @@ v2_profile_sa_v_ratio_max = 1.2
 │   │   └── ...
 │   ├── data/                           # Caching, database
 │   ├── reporting/                      # PDF, Excel, XML, CLI output
-│   └── scripts/                        # AAG analyzer, ERP vergelijking
+│   ├── scripts/                        # AAG analyzer, ERP vergelijking
+│   ├── api/                            # REST API (FastAPI)
+│   └── tests/                          # Testsuite
 │
-├── api/                                # REST API (FastAPI)
-├── deploy/                             # Deployment (file watcher, nginx, deploy.sh)
-├── tests/                              # Testsuite
+├── deploy/                             # Deployment, Docker & configs
 ├── docs/                               # Documentatie, scripts & archief
 │   ├── scripts/                       # Standalone analyse/validatie scripts
 │   ├── archive/                       # Historische changelogs, profile_pipeline, etc.
@@ -709,7 +709,7 @@ v2_profile_sa_v_ratio_max = 1.2
 ### Tests draaien
 
 ```bash
-python -m pytest tests/
+python -m pytest
 ```
 
 ### ERP-vergelijkingstool
