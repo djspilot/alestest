@@ -168,10 +168,17 @@ python -m pytest tests/
 │   ├── test_basic.py
 │   └── test_xml_export.py
 │
+├── docs/                           # All documentation, scripts & archive
+│   ├── *.md                        # Handovers, classificatie, workflows
+│   ├── scripts/                    # Standalone validation/analysis scripts
+│   ├── archive/                    # Archived code (profile_pipeline, etc.)
+│   └── plans/                      # Implementation plans
+│
 └── data/                           # Runtime data (gitignored)
     ├── input/                      # STEP files for analysis
     ├── output/                     # Analysis results (per-part subdirs)
     ├── parts/                      # Quick-access sample parts
+    ├── snapshots/                  # XML status snapshots (git-tracked)
     ├── config/                     # pipeline_config.json
     └── db/                         # manufacturing_data.db, pipeline_cache.json
 ```

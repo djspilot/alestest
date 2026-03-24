@@ -688,18 +688,17 @@ v2_profile_sa_v_ratio_max = 1.2
 │   ├── reporting/                      # PDF, Excel, XML, CLI output
 │   └── scripts/                        # AAG analyzer, ERP vergelijking
 │
-├── profile_pipeline/                   # Cross-sectie profiel classificatie module
 ├── api/                                # REST API (FastAPI)
 ├── deploy/                             # Deployment (file watcher, nginx, deploy.sh)
-├── scripts/                            # Standalone analyse/validatie scripts
 ├── tests/                              # Testsuite
-│   └── legacy/                        # Oudere test scripts
-├── docs/                               # Documentatie
-│   ├── archive/                       # Historische changelogs, handoffs, validatie reports
+├── docs/                               # Documentatie, scripts & archief
+│   ├── scripts/                       # Standalone analyse/validatie scripts
+│   ├── archive/                       # Historische changelogs, profile_pipeline, etc.
 │   └── ENGINE.md                      # Technische engine-beschrijving
 └── data/                               # Runtime data (gitignored)
     ├── input/                          # STEP-bestanden voor analyse
     ├── output/                         # Analyseresultaten
+    ├── snapshots/                      # XML status snapshots (git-tracked)
     └── db/                             # SQLite database
 ```
 
