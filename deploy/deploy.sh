@@ -81,7 +81,7 @@ fi
 # --- Status check ---
 if $STATUS_ONLY; then
     info "Checking VPS status at ${VPS_HOST}..."
-    ssh_cmd "cd ${VPS_DIR} && docker compose ps && echo '' && echo '--- Recent logs ---' && docker compose logs --tail=20"
+    ssh_cmd "cd ${VPS_DIR} && docker compose -f deploy/docker-compose.yml ps && echo '' && echo '--- Recent logs ---' && docker compose -f deploy/docker-compose.yml logs --tail=20"
     exit 0
 fi
 
@@ -137,10 +137,10 @@ info "Files synced"
 # --- Step 3: Build and restart ---
 if $QUICK; then
     info "Quick restart (no rebuild)..."
-    ssh_cmd "cd ${VPS_DIR} && docker compose restart"
+    ssh_cmd "cd ${VPS_DIR} && docker compose -f deploy/docker-compose.yml restart"
 else
     info "Building Docker image and restarting (this may take a few minutes)..."
-    ssh_cmd "cd ${VPS_DIR} && docker compose up -d --build"
+    ssh_cmd "cd ${VPS_DIR} && docker compose -f deploy/docker-compose.yml up -d --build"
 fi
 
 # --- Step 4: Verify ---
@@ -161,12 +161,12 @@ else
     warn "Health check returned HTTP ${HTTP_STATUS}"
     warn "Container may still be starting. Check logs:"
     echo "  ./deploy.sh --status"
-    echo "  ssh ${VPS_USER}@${VPS_HOST} 'cd ${VPS_DIR} && docker compose logs -f'"
+    echo "  ssh ${VPS_USER}@${VPS_HOST} 'cd ${VPS_DIR} && docker compose -f deploy/docker-compose.yml logs -f'"
 fi
 
 # --- Optional: Tail logs ---
 if $LOGS; then
     echo ""
     info "Tailing logs (Ctrl+C to stop)..."
-    ssh_cmd "cd ${VPS_DIR} && docker compose logs -f --tail=50"
+    ssh_cmd "cd ${VPS_DIR} && docker compose -f deploy/docker-compose.yml logs -f --tail=50"
 fi

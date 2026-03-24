@@ -119,7 +119,7 @@ echo -e "${YELLOW}[4/6] Building and starting Docker containers...${NC}"
 echo "  (This may take 5-10 minutes on first run)"
 
 cd "$INSTALL_DIR"
-docker compose up -d --build
+docker compose -f deploy/docker-compose.yml up -d --build
 
 echo -e "${GREEN}  Done.${NC}"
 
@@ -197,8 +197,8 @@ fi
 echo ""
 echo "  Manage:"
 echo "    cd $INSTALL_DIR"
-echo "    docker compose logs -f     # View logs"
-echo "    docker compose restart     # Restart"
-echo "    docker compose down        # Stop"
-echo "    docker compose up -d --build  # Rebuild"
+echo "    docker compose -f deploy/docker-compose.yml logs -f     # View logs"
+echo "    docker compose -f deploy/docker-compose.yml restart     # Restart"
+echo "    docker compose -f deploy/docker-compose.yml down        # Stop"
+echo "    docker compose -f deploy/docker-compose.yml up -d --build  # Rebuild"
 echo ""
