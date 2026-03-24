@@ -184,12 +184,117 @@ class MissingPythonOCC(RuntimeError):
 
 
 def _require_occ() -> None:
+    # Accepteer zowel oud 'OCC' (pythonocc-core) als nieuw 'OCP' (cadquery/OCP),
+    # inclusief de occ_compat-shim die OCC.Core.* naar OCP.* mapt.
     try:
         import OCC  # noqa: F401
+        return
+    except ModuleNotFoundError:
+        pass
+    try:
+        import OCP  # noqa: F401
+        return
     except ModuleNotFoundError as exc:
         raise MissingPythonOCC(
-            "pythonocc-core is not installed. Install e.g. 'conda install -c conda-forge pythonocc-core'."
+            "Noch 'OCC' (pythonocc-core) noch 'OCP' (cadquery/OCP) is beschikbaar."
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# OCC.Core.* → OCP.* compatibility shim
+#
+# Als OCC (oud pythonocc-core) niet beschikbaar is maar OCP (nieuw) wel,
+# maak dan fake `OCC.Core.<module>` entries in sys.modules die wijzen naar
+# de equivalente `OCP.<module>`.  Vervolgens werken alle `from OCC.Core.X
+# import Y`-statements in de functies hieronder automatisch.
+#
+# Extra: topods-adapter (API-verschil: topods.Vertex(s) → TopoDS.Vertex_s(s))
+#        en brepgprop_SurfaceProperties-adapter.
+# ---------------------------------------------------------------------------
+def _install_occ_ocp_shim() -> None:
+    """Installeer OCC.Core.* → OCP.* shim in sys.modules (eenmalig)."""
+    import sys
+    import types
+
+    try:
+        import OCC  # noqa: F401
+        return  # OCC al beschikbaar, shim niet nodig
+    except ImportError:
+        pass
+
+    try:
+        import OCP  # noqa: F401
+    except ImportError:
+        return  # ook OCP niet beschikbaar, niets te doen
+
+    # Maak top-level OCC package aan als dat nog niet bestaat
+    if "OCC" not in sys.modules:
+        occ_pkg = types.ModuleType("OCC")
+        sys.modules["OCC"] = occ_pkg
+    else:
+        occ_pkg = sys.modules["OCC"]
+
+    if "OCC.Core" not in sys.modules:
+        occ_core = types.ModuleType("OCC.Core")
+        sys.modules["OCC.Core"] = occ_core
+        occ_pkg.Core = occ_core  # type: ignore[attr-defined]
+    else:
+        occ_core = sys.modules["OCC.Core"]
+
+    # Alle OCC.Core submodules mappen naar OCP.*
+    _ocp_modules = [
+        "BRep", "BRepAdaptor", "BRepAlgoAPI", "BRepGProp", "BRepTools",
+        "GProp", "GeomAbs", "IFSelect", "Interface", "STEPCAFControl",
+        "STEPControl", "ShapeAnalysis", "TColStd", "TCollection",
+        "TDF", "TDocStd", "TopAbs", "TopExp", "TopLoc", "TopTools",
+        "TopoDS", "XCAFDoc", "gp",
+    ]
+    for mod_name in _ocp_modules:
+        occ_key = f"OCC.Core.{mod_name}"
+        if occ_key not in sys.modules:
+            try:
+                ocp_mod = __import__(f"OCP.{mod_name}", fromlist=[mod_name])
+                sys.modules[occ_key] = ocp_mod
+                setattr(occ_core, mod_name, ocp_mod)
+            except ImportError:
+                pass
+
+    # topods-adapter: OCC gebruikt topods.Vertex(s), OCP gebruikt TopoDS.Vertex_s(s)
+    try:
+        from OCP.TopoDS import TopoDS as _TopoDS
+        _topods = types.SimpleNamespace(
+            Vertex=lambda s: _TopoDS.Vertex_s(s),
+            Face=lambda s: _TopoDS.Face_s(s),
+            Edge=lambda s: _TopoDS.Edge_s(s),
+            Wire=lambda s: _TopoDS.Wire_s(s),
+            Solid=lambda s: _TopoDS.Solid_s(s),
+            Shell=lambda s: _TopoDS.Shell_s(s),
+            Compound=lambda s: _TopoDS.Compound_s(s),
+        )
+        if "OCC.Core.TopoDS" in sys.modules:
+            sys.modules["OCC.Core.TopoDS"].topods = _topods  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+    # brepgprop-adapter: OCC gebruikt brepgprop_SurfaceProperties(shape, props)
+    # OCP gebruikt BRepGProp.SurfaceProperties_s(shape, props)
+    try:
+        from OCP.BRepGProp import BRepGProp as _BRepGProp
+        if "OCC.Core.BRepGProp" in sys.modules:
+            sys.modules["OCC.Core.BRepGProp"].brepgprop_SurfaceProperties = (  # type: ignore[attr-defined]
+                lambda shape, props: _BRepGProp.SurfaceProperties_s(shape, props)
+            )
+            sys.modules["OCC.Core.BRepGProp"].brepgprop_VolumeProperties = (  # type: ignore[attr-defined]
+                lambda shape, props: _BRepGProp.VolumeProperties_s(shape, props)
+            )
+            sys.modules["OCC.Core.BRepGProp"].brepgprop_LinearProperties = (  # type: ignore[attr-defined]
+                lambda shape, props: _BRepGProp.LinearProperties_s(shape, props)
+            )
+    except Exception:
+        pass
+
+
+_install_occ_ocp_shim()
 
 
 

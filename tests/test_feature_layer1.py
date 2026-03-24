@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+import cadquery as cq
 
 from manufacturing_pipeline.analysis import cut_features
 
@@ -111,7 +112,7 @@ def test_layer1_ambiguous_thread_match_stays_round(monkeypatch: pytest.MonkeyPat
 
 
 def test_layer1_shaped_hole_types_and_contours(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Slot/rect shaped holes should be typed and perimeter-estimated correctly."""
+    """Shaped holes should be counted/measured without separate output labels."""
 
     _stub_cq(monkeypatch)
     _stub_sheet_geometry(monkeypatch)
@@ -134,6 +135,72 @@ def test_layer1_shaped_hole_types_and_contours(monkeypatch: pytest.MonkeyPatch) 
 
     assert result is not None
     assert result.nr_holes == 2
-    assert result.hole_types == ["slot", "shaped"]
+    assert result.hole_types == ["hole", "hole"]
     assert result.hole_contours[0] == pytest.approx(20.0 + 10.0 * 3.14159265359, rel=1e-6)
     assert result.hole_contours[1] == pytest.approx(18.0, rel=1e-6)
+
+
+def test_profile_thread_disambiguation_prefers_tapped_for_small_ambiguous(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ambiguous small profile holes should map to thread when matching tap-drill pattern."""
+
+    holes = [_hole(5.0, 3.0)]
+
+    monkeypatch.setattr(cut_features, "detect_holes", lambda *_a, **_k: holes)
+    monkeypatch.setattr(cut_features, "detect_shaped_holes", lambda *_a, **_k: [])
+    monkeypatch.setattr(cut_features, "deduplicate_holes", lambda c, _s: c)
+    monkeypatch.setattr(cut_features, "_detect_countersunk_holes", lambda *_a, **_k: {})
+    monkeypatch.setattr(cut_features, "_detect_standalone_countersunk_holes", lambda *_a, **_k: [])
+    monkeypatch.setattr(cut_features, "_infer_profile_countersink_pairs", lambda *_a, **_k: (set(), set()))
+
+    monkeypatch.setattr(
+        cut_features.iso_standards,
+        "identify_thread_from_diameter",
+        lambda _d, _t: [
+            SimpleNamespace(designation="M5", major_diameter=5.0),
+            SimpleNamespace(designation="M6 (tapped)", major_diameter=6.0),
+        ],
+    )
+
+    test_solid = cq.Workplane("XY").box(10, 10, 10).val().wrapped
+    result = cut_features.extract_cut_features_for_profile(solid=test_solid, part_classification="profiel")
+
+    assert result is not None
+    assert result.nr_holes == 1
+    assert result.threaded_holes == 1
+    assert result.countersunk_holes == 0
+    assert result.hole_types == ["thread"]
+
+
+def test_profile_infers_countersink_from_stepped_pair(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stepped cylindrical pair should count as one countersunk hole in profile flow."""
+
+    large = SimpleNamespace(
+        diameter=17.0,
+        depth=3.0,
+        axis=(1.0, 0.0, 0.0),
+        position=(-8.5, 82.0, 0.0),
+        axis_origin=(-8.5, 82.0, 0.0),
+    )
+    small = SimpleNamespace(
+        diameter=8.5,
+        depth=3.0,
+        axis=(1.0, 0.0, 0.0),
+        position=(8.5, 84.0, 0.0),
+        axis_origin=(8.5, 84.0, 0.0),
+    )
+
+    monkeypatch.setattr(cut_features, "detect_holes", lambda *_a, **_k: [large, small])
+    monkeypatch.setattr(cut_features, "detect_shaped_holes", lambda *_a, **_k: [])
+    monkeypatch.setattr(cut_features, "deduplicate_holes", lambda c, _s: c)
+    monkeypatch.setattr(cut_features, "_detect_countersunk_holes", lambda *_a, **_k: {})
+    monkeypatch.setattr(cut_features, "_detect_standalone_countersunk_holes", lambda *_a, **_k: [])
+    monkeypatch.setattr(cut_features.iso_standards, "identify_thread_from_diameter", lambda *_a, **_k: [])
+
+    test_solid = cq.Workplane("XY").box(10, 10, 10).val().wrapped
+    result = cut_features.extract_cut_features_for_profile(solid=test_solid, part_classification="profiel")
+
+    assert result is not None
+    assert result.nr_holes == 1
+    assert result.countersunk_holes == 1
+    assert result.threaded_holes == 0
+    assert result.hole_types == ["countersunk"]

@@ -1,0 +1,545 @@
+# Hole Detection Review (actueel)
+
+## Doel
+Dit document beschrijft uitsluitend de huidige, actieve hole-detection criteria
+en beslislogica in:
+- `manufacturing_pipeline/analysis/step_processing.py`
+- `manufacturing_pipeline/analysis/cut_features.py`
+- `manufacturing_pipeline/analysis/iso_standards.py`
+- `manufacturing_pipeline/reporting/xml_exporter.py`
+
+Doel van dit document:
+- per feature vastleggen welke thresholds actief zijn
+- per feature samenvatten welke rekenmethode wordt gebruikt
+- vastleggen hoe de uiteindelijke beslissing wordt genomen
+- een stabiele basis maken voor gecontroleerde verbeteringen
+
+## Begrippen
+- `cylindrical hole`: intern cilindrisch vlak dat als gat wordt geïnterpreteerd.
+- `shaped hole`: niet-cirkelvormig gat zoals sleuf, rechthoek of polygoon.
+- `turned part`: as-symmetrisch onderdeel waarbij interne cylinders ook boring/freesbewerking kunnen zijn.
+- `flat pattern`: ontvouwen plaatgeometrie.
+- `countersink`: conisch verzonken gat, herkend via conische faces.
+- `major match`: diameter-match op nominale buitendiameter van metrische draad.
+- `tapped match`: diameter-match op interne draad / tapboordiameter-logica.
+
+## Architectuuroverzicht
+De actieve code is opgebouwd in drie lagen:
+
+1. `step_processing.py`
+   - gedeelde kern voor detectie van cilindrische gaten en vormgaten
+2. `cut_features.py`
+   - wrappers per classificatiegroep
+   - vertaling van ruwe detecties naar `hole_types`, counts en contouren
+3. `xml_exporter.py`
+   - mapping van `CutFeatures` naar `Sheet_*` of `Tube_*` velden
+
+Belangrijke architectuurnoot:
+- de kern van de geometrische gatdetectie is gedeeld
+- plaat en gezette plaat gebruiken dezelfde wrapper
+- profiel gebruikt een aparte wrapper met andere post-filters en thread-logica
+
+---
+
+## Feature-overzicht
+1. Cilindrische gaten
+2. Vormgaten
+3. Duplicaatfilter tussen rond en vormgat
+4. Tapgat-herkenning
+5. Verzonken gat-herkenning
+6. Standalone conische gaten
+7. Wrapper-specifieke verschillen: plaat versus profiel
+
+Stopregel:
+- er is geen enkele globale “eerste match stopt alles” regel zoals bij Step 0
+- alle subdetectoren leveren kandidaten op
+- de wrapper beslist daarna hoe deze kandidaten worden gelabeld en geteld
+
+---
+
+## Feature 1 - Cilindrische gaten (`detect_holes`)
+
+Actieve functie:
+- `detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=None, face_data=None)`
+
+### Doel
+Vind interne cilindrische vlakken die een bruikbaar gat representeren.
+
+### Broncriteria op face-niveau
+Een face wordt alleen kandidaat als:
+- surface type = `GeomAbs_Cylinder`
+- bij normale 3D analyse: face orientation = `TopAbs_REVERSED`
+- bij flat pattern analyse: orientation-check wordt losgelaten
+
+### Extra filter voor flat patterns
+- er is géén harde afkap meer op `diameter > 100 mm`
+- grote gaten blijven toegestaan, maar krijgen extra artefact-filters:
+   - dieptegate (alleen als thickness-proxy beschikbaar):
+
+$$
+depth \le max(20.0, 3.0 \cdot thickness\_ref)
+$$
+
+   - groepshoekgate voor grote diameter:
+      - bij `diameter > 100 mm` geldt in flat-pattern `total_angle > 300°`
+
+### Rekenmethode
+Per cilindrische face wordt berekend:
+- `diameter = 2 * radius`
+- `angle_deg = degrees(abs(u_max - u_min))`
+- `arc_length = radius * abs(u_max - u_min)`
+- `depth = area / arc_length`
+
+Deze `depth` is dus geen expliciete boorlengte uit topologie, maar een afgeleide maat:
+
+$$
+depth = \frac{A_{cilinder}}{r \cdot \Delta u}
+$$
+
+waarbij bij een volledige cilinder in de praktijk geldt:
+
+$$
+A \approx 2\pi r \cdot depth
+$$
+
+### Groepering van split faces
+Kandidaten worden gegroepeerd als ze tegelijk voldoen aan:
+- diameter verschil `<= 0.01 mm`
+- as-richtingen parallel: `abs(abs(dot) - 1.0) <= 0.01`
+- assen collineair: `dist_sq < 0.01`
+- projectiecentrum langs as: `abs(t1 - t2) < 5.0 mm`
+
+### Gat-validatie op groepsniveau
+Een groep wordt alleen geaccepteerd als de som van face-hoeken groot genoeg is:
+- flat pattern: `total_angle > 160°`
+- normale 3D analyse: `total_angle > 270°`
+- extra voor grote flat-pattern gaten (`diameter > 100 mm`): `total_angle > 300°`
+
+### Bore-filter voor draaidelen
+Alleen actief als:
+- `filter_bores=True`
+- `is_turned=True`
+- bounding box beschikbaar
+
+Dan geldt:
+- `min_dim = kleinste bounding-box maat`
+- als `max_depth > 0.5 * min_dim` -> kandidaat wordt als boring gezien en verworpen
+
+### Samenvatting beslissing
+Een cilindrisch gat wordt opgenomen als:
+- het een interne cylinder is
+- de split-face groep voldoende omtrekhoek heeft
+- het niet door het boringfilter wordt weggegooid
+
+---
+
+## Feature 2 - Vormgaten (`detect_shaped_holes`)
+
+Actieve functie:
+- `detect_shaped_holes(shape, face_data=None)`
+
+### Doel
+Vind niet-cirkelvormige openingen op planaire faces.
+
+### Broncriteria
+Alleen planaire faces worden onderzocht:
+- surface type = `GeomAbs_Plane`
+
+Per face worden alle wires verzameld en gesorteerd op bounding-box diagonaal.
+
+Actieve aanname:
+- grootste wire = buitencontour
+- alle overige wires = kandidaat-gaten
+
+### Cirkel-uitsluiting
+Een wire wordt niet als shaped hole behandeld als:
+- het exact 1 cirkel-edge bevat
+- of exact 2 cirkel-edges bevat die samen een cirkel vormen
+
+### Vormclassificatie
+Per inner wire wordt gekeken naar aantallen lijnen en cirkelbogen:
+
+#### Slot
+- `lines == 2`
+- `circles == 2`
+
+Afgeleide maten:
+- `width = 2 * avg(radius)`
+- `total_len = max(line_lengths) + 2 * avg(radius)`
+- `dim = "{total_len}x{width}"`
+
+#### Rect (R)
+- `lines >= 4`
+- `circles >= 4`
+
+Dimensies uit wire bounding box:
+- `dim = "max_dim x mid_dim"`
+
+#### Rect / Poly
+- `lines >= 3`
+- `circles == 0`
+- `Rect` als `lines == 4`
+- anders `Poly`
+
+### Deduplicatie tussen shaped holes onderling
+Shaped holes worden samengevoegd per `(type, dim)` bucket.
+
+Een tweede shaped hole wordt als duplicaat gezien als:
+- centrumafstand `dist_sq < 0.01`
+- of het centrumverschil vrijwel in de normal-richting ligt: `dot > 0.9`
+
+### Samenvatting beslissing
+Een vormgat wordt opgenomen als:
+- het op een planair vlak als inner wire verschijnt
+- het geen pure cirkel is
+- de edge-samenstelling overeenkomt met Slot, Rect (R), Rect of Poly
+
+Output-notitie (actueel):
+- vormgaten worden wel meegeteld en gemeten
+- maar niet als aparte labelcategorie naar XML geschreven
+- in output `hole_types` vallen deze onder generiek `hole`
+
+---
+
+## Feature 3 - Deduplicatie rond versus vormgat (`deduplicate_holes`)
+
+Actieve functie:
+- `deduplicate_holes(circular_holes, shaped_holes)`
+
+### Doel
+Voorkom dat ronde subdelen van een vormgat dubbel geteld worden.
+
+### Actieve logica
+Een rond gat wordt alleen als potentieel duplicaat gezien als:
+- as van het ronde gat voldoende parallel is aan shaped normal:
+  - `dot >= 0.7`
+
+Daarna wordt uit `shaped["dim"]` bepaald:
+- `max_dim`
+- `min_dim`
+
+### Veiligheidsregel
+Een rond gat blijft zelfstandig als:
+
+$$
+circ\_diam < 0.25 \cdot min\_dim
+$$
+
+Reden:
+- een klein boorgat vlak naast een grote opening mag niet verdwijnen
+
+### Duplicaatregel
+Een rond gat wordt verwijderd als:
+
+$$
+dist(center_{round}, center_{shaped}) < 0.8 \cdot max\_dim
+$$
+
+### Samenvatting beslissing
+Deze stap verwijdert alleen ronde gaten.
+Shaped holes blijven altijd bestaan.
+
+Belangrijke systeemnoot:
+- als `detect_shaped_holes` een vals positief shaped hole genereert,
+  kan deze stap echte ronde gaten verwijderen
+- deze stap corrigeert geen foutieve shaped hole detecties
+
+---
+
+## Feature 4 - Tapgat-herkenning
+
+Actieve lookup:
+- `iso_standards.identify_thread_from_diameter(diameter, tolerance)`
+
+Lookup-tolerantie in wrappers:
+- `tolerance = 0.20 mm`
+
+### ISO lookup-logica
+De functie probeert meerdere matches te vinden:
+- match op major diameter van metrische draad
+- match op interne draad / minor-diameter logica
+- match op fijne draadseries
+
+Resultaat:
+- lijst met mogelijke thread matches
+
+### Beslislogica voor plaat (`extract_cut_features_for_sheet`)
+1. zoek alle thread matches met `tolerance=0.20`
+2. splits in:
+   - `tapped_matches`: designation bevat `"tapped"`
+   - `major_matches`: designation bevat geen `"tapped"`
+3. als beide aanwezig zijn:
+   - behandel als clearance/ambigu
+   - `tapped_matches = []`
+4. extra plausibility gate voor plaat:
+
+$$
+major\_diameter \le 1.35 \cdot hole\_depth
+$$
+
+Als geen plausibele tapmatch overblijft:
+- label blijft `round`
+
+Als wel plausibele tapmatch overblijft:
+- label wordt `thread`
+
+### Beslislogica voor profiel (`extract_cut_features_for_profile`)
+1. zoek alle thread matches met `tolerance=0.20`
+2. splits in `tapped_matches` en `major_matches`
+3. alleen als:
+   - `tapped_matches` bestaat
+   - `major_matches` leeg is
+   -> label = `thread`
+
+Dus voor profiel is de thread-logica strenger dan voor plaat.
+
+### Samenvatting beslissing
+Een cilindrisch gat wordt alleen tapgat als ISO-diametermatching sterk genoeg is.
+
+Belangrijke systeemnoot:
+- de huidige logica gebruikt alleen diameter en beperkte plausibility-regels
+- schroefdraad wordt niet direct topologisch herkend
+- dit maakt de detectie gevoelig voor ambigue diameters
+
+---
+
+## Feature 5 - Verzonken gat-herkenning (`_detect_countersunk_holes`)
+
+Actieve functie:
+- `_detect_countersunk_holes(cq_object, cylindrical_holes)`
+
+### Doel
+Koppel conische faces aan reeds gevonden cilindrische gaten.
+
+### Brondetectie conische faces
+Een conische face wordt alleen meegenomen als:
+- surface type = `GeomAbs_Cone`
+- genormaliseerde as geldig is
+- included angle > 0
+
+### Conische face parameters
+Per cone worden vastgelegd:
+- `axis`
+- `origin`
+- `included_angle = 2 * degrees(abs(semi_angle))`
+- `inner_radius`
+- `outer_radius`
+
+Als circle edges aanwezig zijn:
+- `inner_radius = min(circle_radii)`
+- `outer_radius = max(circle_radii)`
+
+### Match-criteria cone ↔ cylinder
+Per cilindrisch gat wordt over alle cones gezocht met:
+- as-paralleliteit: `axis_dot >= 0.97`
+- radiale afstand tot as:
+
+$$
+radial\_dist \le max(1.0, 1.25 \cdot hole\_radius)
+$$
+
+- axiale afstand:
+
+$$
+axial\_dist \le max(25.0, 6.0 \cdot hole\_radius)
+$$
+
+- included angle tussen `55°` en `150°`
+
+### Scorefunctie
+Beste cone wordt gekozen op minimum van:
+
+$$
+score = radial\_dist + 10 \cdot (1 - axis\_dot) + 0.05 \cdot axial\_dist
+$$
+
+### Samenvatting beslissing
+Als minimaal één cone voldoende goed matcht:
+- gatlabel = `countersunk`
+- teller `countersunk_holes += 1`
+- angle wordt opgeslagen
+
+---
+
+## Feature 6 - Standalone conische gaten (`_detect_standalone_countersunk_holes`)
+
+Actieve functies:
+- `_detect_standalone_countersunk_holes(...)`
+- `_group_conical_countersink_faces(...)`
+- `_candidate_matches_cylindrical_hole(...)`
+
+### Doel
+Vang STEP-varianten af waar alleen een conische countersink zichtbaar is en geen bruikbare cilindrische hole-face.
+
+### Groepering van conische faces
+Conische faces worden samengevoegd als:
+- `axis_dot >= 0.999`
+- `radial_dist <= 0.2`
+- `axial_dist <= 1.0`
+- `abs(angle_diff) <= 1.0°`
+- `abs(inner_radius_diff) <= 0.3 mm`
+
+### Kandidaatfilter
+Een grouped countersink kandidaat blijft alleen over als:
+- `inner_radius > 0`
+- `55° <= included_angle <= 150°`
+- hij niet al matcht met een cilindrisch gat
+
+### Matchcheck tegen bestaande cylindrische gaten
+Een standalone kandidaat wordt als “reeds gekoppeld” gezien als:
+- `axis_dot >= 0.97`
+- `radial_dist <= max(1.0, min(candidate_inner_radius, hole_radius) * 0.8)`
+- `axial_dist <= max(40.0, hole_radius * 8.0)`
+
+### Huidige wrapper-beslissing
+Belangrijke actieve logica:
+- standalone countersinks worden momenteel niet als `countersunk` gelabeld
+- ze worden in beide wrappers als `thread` toegevoegd
+
+Actief gedrag:
+- `hole_types.append("thread")`
+- `threaded_holes += 1`
+
+Belangrijke systeemnoot:
+- dit is bewust conservatief om false positive countersinks te vermijden
+- functioneel betekent dit wel dat standalone conische gaten nu niet als verzonken gat in XML verschijnen
+
+---
+
+## Feature 7 - Wrapperverschillen plaat versus profiel
+
+### Plaat / gezette plaat (`extract_cut_features_for_sheet`)
+Actieve keuzes:
+- `filter_bores=True`
+- `is_flat_pattern=True` alleen als unfold succesvol is
+- anders 3D analyse
+- shaped holes blijven actief
+- outer contour wordt berekend
+- box dimensions worden berekend
+
+Extra plate-specific thread gate:
+- plausibility check op verhouding nominale draadmaat versus hole depth
+
+### Profiel (`extract_cut_features_for_profile`)
+Actieve keuzes:
+- altijd 3D analyse
+- `filter_bores=False`
+- daarna eigen profiel-filter op diepte
+
+Profiel bore-filter:
+- bepaal `longest_dim` uit bounding box
+- verwijder cilindrische gaten als:
+
+$$
+hole\_depth > 0.30 \cdot longest\_dim
+$$
+
+Doel:
+- interne buisboring of lange profielboring niet als echt gat tellen
+
+Verder:
+- shaped holes blijven actief
+- outer contour = `0.0`
+- `box_x = 0.0`, `box_y = 0.0`
+- thread-logica is strenger dan bij plaat
+
+---
+
+## XML mapping
+
+### Plaat / gezette plaat
+Wordt naar `Sheet_*` velden geschreven, o.a.:
+- `Sheet_NrHoles`
+- `Sheet_HoleContours`
+- `Sheet_FeatExtTotL` (zelfde inhoud als `Sheet_HoleContours`)
+- `Sheet_HoleRadii`
+- `Sheet_HoleTypes`
+- `Sheet_ThreadedHoles`
+- `Sheet_CountersunkHoles`
+- `Sheet_CountersunkAngles`
+
+### Profiel
+Wordt naar `Tube_*` velden geschreven, o.a.:
+- `Tube_NrHoles`
+- `Tube_HoleContours`
+- `Tube_FeatExtTotL` (zelfde inhoud als `Tube_HoleContours`)
+- `Tube_HoleRadii`
+- `Tube_HoleTypes`
+- `Tube_ThreadedHoles`
+- `Tube_CountersunkHoles`
+- `Tube_CountersunkAngles`
+
+---
+
+## Kernparameters (actief)
+
+### `detect_holes`
+- flat large-cylinder hard reject: verwijderd
+- flat large-hole depth gate: `depth <= max(20.0, 3.0 * thickness_ref)`
+- face group diameter tolerance: `0.01 mm`
+- parallel-axis tolerance: `abs(abs(dot) - 1.0) <= 0.01`
+- collinear-axis tolerance: `dist_sq < 0.01`
+- center projection tolerance: `abs(t1 - t2) < 5.0 mm`
+- minimal total angle flat: `> 160°`
+- minimal total angle 3D: `> 270°`
+- minimal total angle flat for diameter `> 100 mm`: `> 300°`
+- turned-part bore reject: `depth > 0.5 * min_dim`
+
+### `detect_shaped_holes`
+- shaped dedup center tolerance: `dist_sq < 0.01`
+- shaped dedup normal alignment: `dot > 0.9`
+
+### `deduplicate_holes`
+- circle/shaped plane alignment: `dot >= 0.7`
+- small independent circle guard: `circ_diam < 0.25 * min_dim`
+- duplicate distance gate: `dist < 0.8 * max_dim`
+
+### thread detection
+- ISO diameter tolerance: `0.20 mm`
+- plate plausibility gate: `major_diameter <= 1.35 * hole_depth`
+
+### countersink detection
+- axis alignment: `axis_dot >= 0.97`
+- radial gate: `<= max(1.0, 1.25 * hole_radius)`
+- axial gate: `<= max(25.0, 6.0 * hole_radius)`
+- included angle: `55° .. 150°`
+
+### standalone countersink grouping
+- axis alignment: `axis_dot >= 0.999`
+- radial distance: `<= 0.2`
+- axial distance: `<= 1.0`
+- angle diff: `<= 1.0°`
+- inner-radius diff: `<= 0.3 mm`
+
+### profiel-only bore post-filter
+- reject if `hole_depth > 0.30 * longest_dim`
+
+---
+
+## Bekende actuele zwakke plekken
+
+1. `detect_shaped_holes` gebruikt de aanname dat elke inner wire op een planair vlak een gat is.
+   - bij profielen kan dit valse shaped holes geven
+
+2. Thread-detectie is diameter-gedreven.
+   - bij ambigue diameters valt de beslissing snel terug naar `round`
+
+3. Standalone countersinks worden momenteel als `thread` geboekt en niet als `countersunk`.
+
+4. Profiel-wrapper gebruikt een andere threadbeslissing dan plaat-wrapper.
+   - dit kan verschillende uitkomsten geven voor vergelijkbare gaten
+
+5. Countersink-herkenning vereist een bruikbare conische representatie in STEP.
+   - als de conische topologie anders is opgebouwd, wordt geen match gevonden
+
+---
+
+## Aanbevolen verbeterstrategie
+
+1. eerst deze review als referentie gebruiken voor elke wijziging
+2. per feature één defect tegelijk aanpakken:
+   - shaped-hole false positives
+   - tapgat disambiguatie
+   - countersink matching
+3. na elke wijziging laag 1 tests uitbreiden
+4. daarna pas wrapper-tests (laag 2) en XML-tests (laag 3)

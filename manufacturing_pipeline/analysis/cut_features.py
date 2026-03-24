@@ -283,11 +283,9 @@ def extract_cut_features_for_sheet(
             shaped_type = shaped.get("type", "Unknown")
             shaped_types.append(shaped_type)
 
-            shaped_type_l = (shaped_type or "").lower()
-            if "slot" in shaped_type_l:
-                hole_types.append("slot")
-            else:
-                hole_types.append("shaped")
+            # Output-level policy: shaped holes are counted and measured,
+            # but not labeled as a separate category in XML.
+            hole_types.append("hole")
 
         # Fallback: sommige STEP-modellen met tapgaten bevatten alleen conische
         # insteek/chamfer-faces en geen bruikbare cilindrische hole-face.
@@ -846,8 +844,15 @@ def extract_cut_features_for_profile(
 
         # Match conische faces op cilindrische gaten (verzonken gaten)
         countersink_matches = _detect_countersunk_holes(cq_object, cylindrical_holes)
+        inferred_countersunk, suppressed_subholes = _infer_profile_countersink_pairs(
+            cylindrical_holes,
+            countersink_matches,
+        )
 
         for idx, hole in enumerate(cylindrical_holes):
+            if idx in suppressed_subholes:
+                continue
+
             radius = hole.diameter / 2.0
             perimeter = 2.0 * math.pi * radius
             hole_contours.append(perimeter)
@@ -855,10 +860,11 @@ def extract_cut_features_for_profile(
 
             hole_type = "round"
             cs_angle = countersink_matches.get(idx)
-            if cs_angle is not None:
+            if cs_angle is not None or idx in inferred_countersunk:
                 hole_type = "countersunk"
                 countersunk_holes += 1
-                countersunk_angles.append(cs_angle)
+                if cs_angle is not None:
+                    countersunk_angles.append(cs_angle)
             else:
                 # Tapgat detectie met disambiguatie:
                 # Als diameter matcht op zowel major (=clearance) als tapped,
@@ -871,6 +877,18 @@ def extract_cut_features_for_profile(
                     # Alleen tap-drill match → waarschijnlijk tapgat
                     hole_type = "thread"
                     threaded_holes += 1
+                elif tapped_matches and major_matches:
+                    # Ambigue match (major + tapped): voor kleine profielgaten in
+                    # wanddikte-orde prefereren we tapped om typische tapgaten
+                    # niet als clearance te verliezen.
+                    hole_depth = float(getattr(hole, "depth", 0.0) or 0.0)
+                    if hole.diameter <= 6.0 and hole_depth <= max(6.0, hole.diameter * 1.5):
+                        for match in tapped_matches:
+                            delta = float(match.major_diameter) - float(hole.diameter)
+                            if 0.8 <= delta <= 1.4:
+                                hole_type = "thread"
+                                threaded_holes += 1
+                                break
                 # elif tapped_matches and major_matches: ambigue → default round
 
             hole_types.append(hole_type)
@@ -896,10 +914,9 @@ def extract_cut_features_for_profile(
             shaped_type = shaped.get("type", "Unknown")
             shaped_types.append(shaped_type)
 
-            if "slot" in (shaped_type or "").lower():
-                hole_types.append("slot")
-            else:
-                hole_types.append("shaped")
+            # Output-level policy: shaped holes are counted and measured,
+            # but not labeled as a separate category in XML.
+            hole_types.append("hole")
 
         # Standalone countersinks (conische faces zonder cilindrische hole-face)
         standalone_countersinks = _detect_standalone_countersunk_holes(
@@ -946,3 +963,77 @@ def extract_cut_features_for_profile(
     except Exception as e:
         logger.error(f"[CutFeatures] FOUT tijdens profiel extractie: {e}", exc_info=True)
         return None
+
+
+def _infer_profile_countersink_pairs(cylindrical_holes, countersink_matches: Dict[int, float]) -> Tuple[set, set]:
+    """Infer countersinks from stepped cylindrical pairs when conical matching is absent.
+
+    Returns:
+    --------
+    Tuple[set, set]
+        - inferred countersunk indices (large-diameter side)
+        - suppressed sub-hole indices (small-diameter side)
+    """
+    inferred: set = set()
+    suppressed: set = set()
+
+    if not cylindrical_holes:
+        return inferred, suppressed
+
+    for i, large in enumerate(cylindrical_holes):
+        if i in countersink_matches:
+            continue
+
+        best_j = None
+        best_score = None
+
+        for j, small in enumerate(cylindrical_holes):
+            if i == j or j in suppressed:
+                continue
+            if j in countersink_matches:
+                continue
+
+            if float(large.diameter) <= float(small.diameter):
+                continue
+
+            ratio = float(large.diameter) / max(float(small.diameter), 1e-9)
+            if ratio < 1.6 or ratio > 2.6:
+                continue
+
+            a = _normalize_vector(getattr(large, "axis", None))
+            b = _normalize_vector(getattr(small, "axis", None))
+            if a is None or b is None:
+                continue
+
+            axis_dot = abs(_dot(a, b))
+            if axis_dot < 0.98:
+                continue
+
+            p_large = _as_point_tuple(getattr(large, "position", None))
+            p_small = _as_point_tuple(getattr(small, "position", None))
+            if p_large is None or p_small is None:
+                continue
+
+            perp = _distance_point_to_axis(p_small, p_large, a)
+            if perp > 4.0:
+                continue
+
+            axial = abs(_signed_axis_distance(p_small, p_large, a))
+            if axial < 5.0 or axial > 30.0:
+                continue
+
+            depth_large = float(getattr(large, "depth", 0.0) or 0.0)
+            depth_small = float(getattr(small, "depth", 0.0) or 0.0)
+            if abs(depth_large - depth_small) > 2.0:
+                continue
+
+            score = perp + 0.05 * abs(axial - 15.0)
+            if best_score is None or score < best_score:
+                best_score = score
+                best_j = j
+
+        if best_j is not None:
+            inferred.add(i)
+            suppressed.add(best_j)
+
+    return inferred, suppressed

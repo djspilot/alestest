@@ -805,6 +805,10 @@ def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=
         except Exception:
             part_dims = None
 
+    # For flat patterns, the smallest bbox dimension is a practical thickness proxy.
+    # This is used to reject bend/artefact cylinders without hard-limiting real large holes.
+    thickness_ref = part_dims[0] if part_dims and part_dims[0] > 0 else None
+
     # Check if this is a turned part (axisymmetric)
     if is_turned is None:
         is_turned = is_turned_part(cq_object) if filter_bores else False
@@ -818,8 +822,6 @@ def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=
                 continue
 
             radius = fd['radius']
-            if is_flat_pattern and radius * 2 > 100:
-                continue
 
             u_min = fd['u_min']
             u_max = fd['u_max']
@@ -827,6 +829,12 @@ def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=
 
             arc_length = radius * abs(u_max - u_min)
             depth = fd['area'] / arc_length if arc_length > 0 else 0
+
+            # Large flat-pattern cylinders can be real cut-outs, but bend artefacts
+            # typically show very large depth compared to sheet thickness.
+            if is_flat_pattern and radius * 2 > 100 and thickness_ref is not None:
+                if depth > max(20.0, thickness_ref * 3.0):
+                    continue
 
             candidates.append({
                 "diameter": radius * 2,
@@ -850,10 +858,6 @@ def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=
                 cylinder = surf.Cylinder()
                 radius = cylinder.Radius()
 
-                # Filter out large cylinders (bend faces, not holes)
-                if is_flat_pattern and radius * 2 > 100:
-                    continue
-
                 location = cylinder.Location()
                 axis = cylinder.Axis().Direction()
 
@@ -868,6 +872,12 @@ def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=
 
                 arc_length = radius * abs(u_max - u_min)
                 depth = area / arc_length if arc_length > 0 else 0
+
+                # Large flat-pattern cylinders can be real cut-outs, but bend artefacts
+                # typically show very large depth compared to sheet thickness.
+                if is_flat_pattern and radius * 2 > 100 and thickness_ref is not None:
+                    if depth > max(20.0, thickness_ref * 3.0):
+                        continue
 
                 candidates.append({
                     "diameter": radius * 2,
@@ -947,10 +957,14 @@ def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=
         # Sum angles
         total_angle = sum(c["angle"] for c in group)
 
-        # Filter out fillets (usually 90 degrees or less per face)
-        # A hole should be close to 360 degrees
-        # For flat patterns, use lower threshold (faces may not group perfectly)
+        # Filter out fillets (usually 90 degrees or less per face).
+        # A hole should be close to 360 degrees. Flat patterns use a lower
+        # threshold for regular holes, but large-diameter cylinders require
+        # near-full coverage to avoid bend artefacts.
         min_angle = 160 if is_flat_pattern else 270
+        group_diameter = group[0]["diameter"] if group else 0.0
+        if is_flat_pattern and group_diameter > 100:
+            min_angle = 300
         if total_angle > min_angle:
             # Use properties of the first face (or average)
             # Depth is usually the same for all faces in a split hole

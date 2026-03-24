@@ -117,6 +117,7 @@ CLASSIFICATION_FEATURE_SCHEMA: Dict[str, Dict[str, Any]] = {
         "optional": [
             "Sheet_NrBends", "Sheet_BendAngles", "Sheet_BendInnerRadii", "Sheet_BendLength",
             "Sheet_HoleTypes", "Sheet_ThreadedHoles", "Sheet_CountersunkHoles", "Sheet_CountersunkAngles",
+            "Sheet_FeatExtTotL",
         ],
     },
     "gezette_plaat": {
@@ -133,6 +134,7 @@ CLASSIFICATION_FEATURE_SCHEMA: Dict[str, Dict[str, Any]] = {
         ],
         "optional": [
             "Sheet_HoleTypes", "Sheet_ThreadedHoles", "Sheet_CountersunkHoles", "Sheet_CountersunkAngles",
+            "Sheet_FeatExtTotL",
         ],
     },
     "profiel": {
@@ -148,6 +150,7 @@ CLASSIFICATION_FEATURE_SCHEMA: Dict[str, Dict[str, Any]] = {
             "Tube_NrHoles", "Tube_HoleContours", "Tube_HoleRadii",
             "Tube_HoleTypes", "Tube_ThreadedHoles",
             "Tube_CountersunkHoles", "Tube_CountersunkAngles",
+            "Tube_FeatExtTotL",
         ],
     },
     "anders": {
@@ -1778,6 +1781,7 @@ def _process_plaat_item(
     ET.SubElement(calc_result, 'Sheet_BendLength').text = ''
     ET.SubElement(calc_result, 'Sheet_NrHoles').text = '0'
     ET.SubElement(calc_result, 'Sheet_HoleContours').text = ''
+    ET.SubElement(calc_result, 'Sheet_FeatExtTotL').text = ''
     ET.SubElement(calc_result, 'Sheet_HoleRadii').text = ''
     ET.SubElement(calc_result, 'Sheet_HoleTypes').text = ''
     ET.SubElement(calc_result, 'Sheet_ThreadedHoles').text = '0'
@@ -1803,7 +1807,9 @@ def _process_plaat_item(
 
             calc_result.find('Sheet_NrHoles').text = str(hole_count)
             if hole_contours:
-                calc_result.find('Sheet_HoleContours').text = '_'.join(_format_float(v) for v in hole_contours)
+                contours_text = '_'.join(_format_float(v) for v in hole_contours)
+                calc_result.find('Sheet_HoleContours').text = contours_text
+                calc_result.find('Sheet_FeatExtTotL').text = contours_text
             if hole_radii:
                 calc_result.find('Sheet_HoleRadii').text = '_'.join(_format_float(v) for v in hole_radii)
             if hole_types:
@@ -2430,6 +2436,12 @@ def _process_plaat_item(
                 if thickness_elem is not None:
                     thickness_elem.text = _format_float(thickness)
 
+    # Keep a unified extraction-length alias in sync for downstream consumers.
+    sheet_hole_contours = calc_result.find('Sheet_HoleContours')
+    sheet_feat_ext_tot_l = calc_result.find('Sheet_FeatExtTotL')
+    if sheet_feat_ext_tot_l is not None and sheet_hole_contours is not None:
+        sheet_feat_ext_tot_l.text = sheet_hole_contours.text or ''
+
     approx_volume = length * width * thickness
     volume = solid_volume if solid_volume > 0 else approx_volume
     ET.SubElement(calc_result, 'Sheet_Volume').text = _format_float(volume)
@@ -2681,6 +2693,7 @@ def _process_profiel_item(
     tube_file_path = f"{source_step_name}.step" if source_step_name else ''
     ET.SubElement(calc_result, 'Tube_FilePath').text = tube_file_path
     ET.SubElement(calc_result, 'Tube_Weight').text = _format_float(weight * quantity)  # Total weight
+    ET.SubElement(calc_result, 'Tube_FeatExtTotL').text = ''
 
     # Fase 2: Hole detection for profiles
     if HAS_CUT_FEATURES and part_solid is not None:
@@ -2698,7 +2711,9 @@ def _process_profiel_item(
                 ]
 
                 ET.SubElement(calc_result, 'Tube_NrHoles').text = str(cut_features.nr_holes)
-                ET.SubElement(calc_result, 'Tube_HoleContours').text = '_'.join(_format_float(v) for v in hole_contours) if hole_contours else ''
+                contours_text = '_'.join(_format_float(v) for v in hole_contours) if hole_contours else ''
+                ET.SubElement(calc_result, 'Tube_HoleContours').text = contours_text
+                calc_result.find('Tube_FeatExtTotL').text = contours_text
                 ET.SubElement(calc_result, 'Tube_HoleRadii').text = '_'.join(_format_float(v) for v in hole_radii) if hole_radii else ''
                 ET.SubElement(calc_result, 'Tube_HoleTypes').text = '_'.join(hole_types) if hole_types else ''
                 ET.SubElement(calc_result, 'Tube_ThreadedHoles').text = str(max(0, threaded_count))
