@@ -1,9 +1,45 @@
 # ALES Manufacturing Pipeline
 
 **Laatste update:** 24 maart 2026
-**Versie:** 3.8-dev (Projectstructuur opgeschoond)
+**Versie:** 3.9-dev (3D Viewer in webfrontend)
 
 > Zie [docs/TIMELINE.md](docs/TIMELINE.md) voor de volledige versiegeschiedenis.
+
+### v3.9-dev — 3D Viewer in webfrontend (24 maart 2026)
+
+**Doel van deze update:** een interactieve 3D-visualisatie toevoegen aan de web-viewer zodat analyse-resultaten visueel geïnspecteerd kunnen worden — rechtstreeks in de browser, zonder externe software.
+
+**Wat is gedaan:**
+
+1. **Three.js 3D viewer geïntegreerd in `index.html`**
+   - Three.js (module build) en OrbitControls lokaal gebundeld in `manufacturing_pipeline/api/static/vendor/`.
+   - 3D-scene met perspectief-camera, directional + ambient lighting, en een grid-helper voor oriëntatie.
+   - OrbitControls voor roteren, zoomen en pannen van het model.
+
+2. **Bounding-box visualisatie op basis van analyse-afmetingen**
+   - Na analyse wordt een `BoxGeometry` gegenereerd met de werkelijke X/Y/Z afmetingen uit de pipeline.
+   - Draadframe-edges (wit) over een metallic materiaal voor duidelijk contrast.
+   - Camera positioneert zich automatisch op basis van de onderdeel-afmetingen.
+
+3. **2D + 3D overlay met dimensie-annotaties**
+   - Transparant 2D canvas bovenop de 3D-viewport voor dimensie-labels (breedte × diepte × hoogte in mm).
+   - Aparte 2D bovenaanzicht-projectie naast het 3D-model voor snelle maatcontrole.
+   - Labels volgen de camera-oriëntatie bij roteren.
+
+4. **Fullscreen en Reset View**
+   - Fullscreen-toggle voor gedetailleerde inspectie.
+   - Reset View-knop om terug te keren naar standaard camerapositie.
+   - Automatische resize bij vensterwijziging.
+
+5. **Pipeline Replay timeline**
+   - Visuele tijdlijn naast de 3D-viewer die de analysestappen toont.
+   - Toont per stap: classificatie, gaten, zettingen, afmetingen, en productiedata.
+
+**Status:** De viewer toont momenteel een bounding-box representatie op basis van afmetingen. Echte STEP-geometrie renderen (BREP → mesh) is een volgende stap die server-side tessellatie vereist.
+
+**Technische stack:** Three.js r170+ (ES module), OrbitControls, vanilla JS — geen build-stap nodig.
+
+---
 
 ### v3.8-dev — Projectstructuur opgeschoond (24 maart 2026)
 
