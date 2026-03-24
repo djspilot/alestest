@@ -111,7 +111,7 @@ try {
     }
 
     Write-Host ""
-    Write-Host "[OK] Pipeline complete. XML generated and snapshot stored in snapshots/xml_status."
+    Write-Host "[OK] Pipeline complete. XML generated and snapshot stored in data/snapshots/xml_status."
 }
 finally {
     Pop-Location

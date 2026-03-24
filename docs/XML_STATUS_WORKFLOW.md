@@ -29,8 +29,8 @@ Optional parameters:
 
 1. Generates XML via `scripts/generate_xml_dxf.py`
 2. Validates critical status in `scripts/preserve_xml_status.py`
-3. Saves snapshot to `snapshots/xml_status/<xml_stem>/<timestamp>/`
-4. Writes pointer file: `snapshots/xml_status/LATEST_<xml_stem>.txt`
+3. Saves snapshot to `data/snapshots/xml_status/<xml_stem>/<timestamp>/`
+4. Writes pointer file: `data/snapshots/xml_status/LATEST_<xml_stem>.txt`
 5. Stores metadata (`meta.json`) with git branch/commit and validation summary
 
 ## Validation rules
@@ -58,6 +58,6 @@ With `-FailOnWarning`, warnings also return exit code `1`.
 
 Snapshots are stored in:
 
-- `snapshots/xml_status/`
+- `data/snapshots/xml_status/`
 
-This location is intentionally outside `data/output/` so it is not ignored by default.
+This location is under `data/` but not gitignored (only `data/input/`, `data/output/`, `data/db/` etc. are ignored).

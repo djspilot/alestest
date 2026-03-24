@@ -180,7 +180,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--xml", required=True, help="Path to generated XML file")
     parser.add_argument(
         "--snapshot-root",
-        default="snapshots/xml_status",
+        default="data/snapshots/xml_status",
         help="Snapshot root directory (relative to repo root by default)",
     )
     parser.add_argument("--tag", default="", help="Optional label for this snapshot")
