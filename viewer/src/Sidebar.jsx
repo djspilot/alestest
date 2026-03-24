@@ -27,6 +27,24 @@ function summarizePayload(payload) {
     .join(' | ')
 }
 
+function parseIsoToMs(value) {
+  if (!value) return null
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function formatDuration(seconds) {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '-'
+  if (seconds < 10) return `${seconds.toFixed(1)}s`
+  if (seconds < 60) return `${seconds.toFixed(0)}s`
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = Math.round(seconds % 60)
+  if (minutes < 60) return `${minutes}m ${String(remainingSeconds).padStart(2, '0')}s`
+  const hours = Math.floor(minutes / 60)
+  const remainingMinutes = minutes % 60
+  return `${hours}u ${String(remainingMinutes).padStart(2, '0')}m`
+}
+
 function formatLabel(value) {
   return String(value || '')
     .replace(/_/g, ' ')
@@ -59,6 +77,7 @@ export default function Sidebar({
   const events = pipelineState?.events || []
   const summary = pipelineState?.summary
   const pipelineResult = pipelineState?.result
+  const [nowMs, setNowMs] = useState(() => Date.now())
   const groupedStages = useMemo(() => {
     const order = []
     const map = new Map()
@@ -81,6 +100,18 @@ export default function Sidebar({
   const selectedEvent = selectedStage?.events?.[selectedEventIndex] || null
   const selectedPayloadEntries = Object.entries(selectedEvent?.payload || {})
     .filter(([, value]) => value !== undefined)
+  const analysisStartedMs = parseIsoToMs(summary?.analysis_started_at)
+  const activeStageStartedMs = parseIsoToMs(summary?.active_stage_started_at)
+  const liveTotalElapsed =
+    pipelineState?.status === 'processing' && analysisStartedMs
+      ? Math.max(0, (nowMs - analysisStartedMs) / 1000)
+      : summary?.total_elapsed_seconds
+  const liveActiveElapsed =
+    pipelineState?.status === 'processing' && summary?.active_stage && activeStageStartedMs
+      ? Math.max(0, (nowMs - activeStageStartedMs) / 1000)
+      : summary?.active_stage_elapsed_seconds
+  const totalStepsHint = summary?.total_steps_hint || summary?.step_count || groupedStages.length
+  const completedStepCount = summary?.completed_step_count || 0
 
   useEffect(() => {
     setSelectedStageIndex(0)
@@ -94,10 +125,52 @@ export default function Sidebar({
   useEffect(() => {
     onStageFocus?.(selectedStage?.stage || null)
   }, [onStageFocus, selectedStage])
+
+  useEffect(() => {
+    if (pipelineState?.status !== 'processing') return undefined
+    const id = window.setInterval(() => setNowMs(Date.now()), 250)
+    return () => window.clearInterval(id)
+  }, [pipelineState?.status])
+
   const routerVisuals = pipelineVisuals?.router || null
   const classificationVisuals = pipelineVisuals?.classification || null
   const holeVisuals = pipelineVisuals?.holes || null
   const unfoldVisuals = pipelineVisuals?.unfold || null
+
+  function getStageMeta(group) {
+    const finishedEvent = [...group.events].reverse().find((event) =>
+      ['stage_end', 'stage_failed', 'stage_skipped'].includes(event.type)
+    )
+
+    if (finishedEvent) {
+      let stateLabel = 'Klaar'
+      if (finishedEvent.type === 'stage_failed') stateLabel = 'Mislukt'
+      if (finishedEvent.type === 'stage_skipped') stateLabel = 'Overgeslagen'
+      return {
+        stateLabel,
+        elapsed: finishedEvent.payload?.elapsed_seconds,
+      }
+    }
+
+    if (summary?.active_stage === group.stage) {
+      return {
+        stateLabel: 'Bezig',
+        elapsed: liveActiveElapsed,
+      }
+    }
+
+    if (group.events.some((event) => event.type === 'stage_start')) {
+      return {
+        stateLabel: 'Gestart',
+        elapsed: null,
+      }
+    }
+
+    return {
+      stateLabel: `${group.events.length} events`,
+      elapsed: null,
+    }
+  }
 
   return (
     <div className="sidebar">
@@ -186,9 +259,14 @@ export default function Sidebar({
         <h3>Keuzes Per Stap</h3>
         {summary && (
           <div className="timeline-summary">
-            <div>{summary.step_count || 0} stappen</div>
+            <div>{completedStepCount}/{totalStepsHint} stappen klaar</div>
             <div>{summary.event_count || 0} events</div>
-            <div>{summary.total_elapsed_seconds || 0}s</div>
+            <div>{formatDuration(liveTotalElapsed)}</div>
+            <div>
+              {summary.active_stage
+                ? `${summary.active_stage} actief · ${formatDuration(liveActiveElapsed)}`
+                : 'Geen actieve stap'}
+            </div>
           </div>
         )}
         {pipelineResult?.route && (
@@ -208,26 +286,43 @@ export default function Sidebar({
           <>
             <div className="timeline-stage-list">
               {groupedStages.map((group, index) => (
-                <button
-                  key={`${group.stage}-${group.firstIndex}`}
-                  className={`timeline-stage-button ${selectedStageIndex === index ? 'is-active' : ''}`}
-                  onClick={() => setSelectedStageIndex(index)}
-                >
-                  <span className="timeline-stage-button-title">{group.stage}</span>
-                  <span className="timeline-stage-button-meta">{group.events.length} events</span>
-                </button>
+                (() => {
+                  const stageMeta = getStageMeta(group)
+                  return (
+                    <button
+                      key={`${group.stage}-${group.firstIndex}`}
+                      className={`timeline-stage-button ${selectedStageIndex === index ? 'is-active' : ''}`}
+                      onClick={() => setSelectedStageIndex(index)}
+                    >
+                      <span className="timeline-stage-button-copy">
+                        <span className="timeline-stage-button-title">{group.stage}</span>
+                        <span className="timeline-stage-button-meta">{stageMeta.stateLabel}</span>
+                      </span>
+                      <span className="timeline-stage-button-side">
+                        <span className="timeline-stage-button-time">{formatDuration(stageMeta.elapsed)}</span>
+                        <span className="timeline-stage-button-meta">{group.events.length} events</span>
+                      </span>
+                    </button>
+                  )
+                })()
               ))}
             </div>
 
             {selectedStage && (
               <div className="timeline-detail-card">
                 <div className="timeline-detail-head">
-                  <div>
-                    <div className="timeline-title">{selectedStage.stage}</div>
-                    <div className="timeline-text">
-                      Stap {selectedStageIndex + 1} van {groupedStages.length}
+                    <div>
+                      <div className="timeline-title">{selectedStage.stage}</div>
+                      <div className="timeline-text">
+                        Stap {selectedStageIndex + 1} van {groupedStages.length}
+                      </div>
+                      <div className="timeline-text">
+                        {(() => {
+                          const stageMeta = getStageMeta(selectedStage)
+                          return `${stageMeta.stateLabel} · ${formatDuration(stageMeta.elapsed)}`
+                        })()}
+                      </div>
                     </div>
-                  </div>
                   <div className="timeline-nav">
                     <button
                       className="timeline-nav-btn"
@@ -255,7 +350,9 @@ export default function Sidebar({
                     >
                       <div className="timeline-item-head">
                         <span className="timeline-stage">{formatLabel(event.type)}</span>
-                        <span className="timeline-type">{event.status || '-'}</span>
+                        <span className="timeline-type">
+                          {event.status || '-'} · {formatDuration((event.timestamp_ms || 0) / 1000)}
+                        </span>
                       </div>
                       <div className="timeline-text">{summarizePayload(event.payload)}</div>
                     </button>
@@ -311,6 +408,9 @@ export default function Sidebar({
                           Categorie: {classificationVisuals.part_category || '-'} | Type: {classificationVisuals.part_type || '-'}
                         </div>
                         <div className="timeline-text">Dikte: {classificationVisuals.thickness ?? '-'} mm</div>
+                        <div className="timeline-text">
+                          Visualisatie: donkerrood = section contouren, oranje = buitenmaat, roze = tweede maat, geel = dikte-as.
+                        </div>
                         <div className="reasoning-list">
                           {(classificationVisuals.reasoning || []).map((reason, index) => (
                             <div className="reasoning-card" key={`${reason.step}-${index}`}>
@@ -333,7 +433,7 @@ export default function Sidebar({
                           Bron: {holeVisuals.source || '-'} | Totaal: {holeVisuals.total || 0}
                         </div>
                         <div className="timeline-text">
-                          De gaten worden nu als harde outlines getoond op de brongeometrie. Bij `flat` schakelt de viewer automatisch naar de uitslag.
+                          De gaten worden nu als echte edge-traces met leader line getoond op de brongeometrie. Bij `flat` schakelt de viewer automatisch naar de uitslag.
                         </div>
                         <div className="reasoning-list">
                           {(holeVisuals.items || []).map((hole, index) => (

@@ -73,12 +73,19 @@ class TimelineSummary(BaseModel):
     event_count: int = 0
     step_count: int = 0
     part_name: Optional[str] = None
+    analysis_started_at: Optional[datetime] = None
+    active_stage: Optional[str] = None
+    active_stage_started_at: Optional[datetime] = None
+    active_stage_elapsed_seconds: Optional[float] = None
+    completed_step_count: int = 0
+    total_steps_hint: int = 0
 
 
 class MeshData(BaseModel):
     vertices: list[float] = []   # flat [x,y,z, x,y,z, ...]
     indices: list[int] = []      # flat [i0,i1,i2, ...]
     normals: list[float] = []    # flat [nx,ny,nz, ...]
+    display_edges: list[float] = []  # flat [x1,y1,z1, x2,y2,z2, ...]
 
 
 class AnalysisResult(BaseModel):
@@ -110,6 +117,8 @@ class JobStatus(BaseModel):
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    timeline_summary: Optional[TimelineSummary] = None
+    timeline_events: list[TimelineEvent] = Field(default_factory=list)
     result: Optional[AnalysisResult] = None
     error: Optional[str] = None
 

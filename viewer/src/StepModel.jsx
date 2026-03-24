@@ -2,21 +2,33 @@ import React, { useEffect, useState, useMemo } from 'react'
 import * as THREE from 'three'
 import { parseStepFile } from './stepLoader'
 
+function edgeThresholdForMesh(vertexCount) {
+  if (vertexCount > 250000) return 72
+  if (vertexCount > 120000) return 58
+  if (vertexCount > 60000) return 46
+  return 38
+}
+
 function createThreeData(meshes) {
   return meshes.map((mesh) => {
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3))
     geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1))
-    if (mesh.normals) {
+    if (mesh.normals?.length === mesh.positions.length) {
       geometry.setAttribute('normal', new THREE.BufferAttribute(mesh.normals, 3))
     } else {
       geometry.computeVertexNormals()
     }
-    const edgesGeo = new THREE.EdgesGeometry(geometry, 38)
-    const color = mesh.color
-      ? new THREE.Color(mesh.color[0], mesh.color[1], mesh.color[2])
-      : new THREE.Color('#7899aa')
-    return { geometry, edgesGeo, color }
+    const vertexCount = (mesh.positions?.length || 0) / 3
+    const edgePositions = mesh.edgeSegments
+    let lineGeometry
+    if (edgePositions?.length) {
+      lineGeometry = new THREE.BufferGeometry()
+      lineGeometry.setAttribute('position', new THREE.BufferAttribute(edgePositions, 3))
+    } else {
+      lineGeometry = new THREE.EdgesGeometry(geometry, edgeThresholdForMesh(vertexCount))
+    }
+    return { geometry, lineGeometry }
   })
 }
 
@@ -27,6 +39,7 @@ function buildBackendMeshes(mesh) {
     positions: new Float32Array(mesh.vertices),
     indices: new Uint32Array(mesh.indices),
     normals: mesh.normals?.length ? new Float32Array(mesh.normals) : null,
+    edgeSegments: mesh.display_edges?.length ? new Float32Array(mesh.display_edges) : null,
     color: null,
     name: 'pipeline-mesh',
   }]
@@ -68,7 +81,15 @@ function summarizeMeshes(meshes) {
   }
 }
 
-function StepGeometry({ buffer, mesh, onLoaded, onError, onStatus, parseMode = 'auto' }) {
+function disposeThreeData(threeData) {
+  if (!threeData?.items) return
+  threeData.items.forEach((item) => {
+    item.geometry?.dispose?.()
+    item.lineGeometry?.dispose?.()
+  })
+}
+
+function StepGeometry({ buffer, mesh, onLoaded, onError, onStatus, parseMode = 'auto', renderMode = 'clean' }) {
   const [meshData, setMeshData] = useState(null)
 
   useEffect(() => {
@@ -79,7 +100,7 @@ function StepGeometry({ buffer, mesh, onLoaded, onError, onStatus, parseMode = '
       if (backendMeshes) {
         setMeshData(backendMeshes)
         onLoaded?.(summarizeMeshes(backendMeshes))
-        onStatus?.('3D mesh geladen via pipeline')
+        onStatus?.('Viewer asset geladen via pipeline')
         return
       }
 
@@ -105,7 +126,9 @@ function StepGeometry({ buffer, mesh, onLoaded, onError, onStatus, parseMode = '
     }
 
     load()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [buffer, mesh, onLoaded, onError, onStatus, parseMode])
 
   const threeData = useMemo(() => {
@@ -117,24 +140,33 @@ function StepGeometry({ buffer, mesh, onLoaded, onError, onStatus, parseMode = '
     }
   }, [meshData])
 
+  useEffect(() => {
+    return () => disposeThreeData(threeData)
+  }, [threeData])
+
   if (!threeData) return null
 
   return (
     <group position={[-threeData.center.x, -threeData.center.y, -threeData.center.z]}>
       {threeData.items.map((item, i) => (
         <React.Fragment key={i}>
-          <mesh geometry={item.geometry} castShadow receiveShadow>
-            <meshStandardMaterial
-              color="#d7e1e8"
-              metalness={0.05}
-              roughness={0.92}
-              transparent
-              opacity={0.045}
-              side={THREE.DoubleSide}
-            />
-          </mesh>
-          <lineSegments geometry={item.edgesGeo}>
-            <lineBasicMaterial color="#08131d" transparent opacity={1} />
+          {renderMode !== 'edges' && (
+            <mesh geometry={item.geometry}>
+              <meshStandardMaterial
+                color="#dfe6ec"
+                roughness={0.88}
+                metalness={0.02}
+                transparent
+                opacity={renderMode === 'ghost' ? 0.08 : 0.22}
+                side={THREE.DoubleSide}
+                polygonOffset
+                polygonOffsetFactor={1}
+                polygonOffsetUnits={1}
+              />
+            </mesh>
+          )}
+          <lineSegments geometry={item.lineGeometry}>
+            <lineBasicMaterial color="#1d2a35" transparent opacity={0.82} />
           </lineSegments>
         </React.Fragment>
       ))}
@@ -142,7 +174,7 @@ function StepGeometry({ buffer, mesh, onLoaded, onError, onStatus, parseMode = '
   )
 }
 
-export default function StepModel({ buffer, mesh, onLoaded, onError, onStatus, parseMode }) {
+export default function StepModel({ buffer, mesh, onLoaded, onError, onStatus, parseMode, renderMode }) {
   return (
     <StepGeometry
       buffer={buffer}
@@ -151,6 +183,7 @@ export default function StepModel({ buffer, mesh, onLoaded, onError, onStatus, p
       onError={onError}
       onStatus={onStatus}
       parseMode={parseMode}
+      renderMode={renderMode}
     />
   )
 }

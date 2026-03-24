@@ -1,50 +1,77 @@
 # ALES Manufacturing Pipeline
 
 **Laatste update:** 24 maart 2026
-**Versie:** 3.10-dev (ALES STEP Viewer + pipeline visualisaties)
+**Versie:** 3.11-dev (ALES STEP Viewer + live pipeline inspectie)
 
 > Zie [docs/TIMELINE.md](docs/TIMELINE.md) voor de volledige versiegeschiedenis.
 
-### v3.10-dev — ALES STEP Viewer + pipeline visualisaties (24 maart 2026)
+### v3.11-dev — ALES STEP Viewer + live pipeline inspectie (24 maart 2026)
 
-**Doel van deze update:** de browserviewer bruikbaar maken als echte inspectietool voor STEP-bestanden en pipeline-keuzes, in plaats van alleen een bounding box of losse statusmeldingen.
+**Doel van deze update:** de viewer niet alleen STEP-bestanden laten tonen, maar ook de manufacturing-pipeline live inzichtelijk maken terwijl die draait, met een schonere en snellere 3D-weergave die bruikbaar blijft op macOS, Linux en Windows.
 
 **Wat is gedaan:**
 
-1. **Nieuwe React/Vite viewer toegevoegd in `viewer/`**
-   - Losse ALES STEP Viewer met drag-and-drop voor `.step`/`.stp`.
-   - Sidebar met pipeline-status, API-configuratie en klikbare stapnavigatie.
-   - `run_viewer.sh` start de lokale API en viewer samen.
+1. **Viewer is omgezet naar een echte React/Vite inspectietool in `viewer/`**
+   - Drag-and-drop voor `.step`/`.stp`.
+   - Sidebar met API-configuratie, job ID, klikbare stage-navigatie en stage-detailpaneel.
+   - `run_viewer.sh` start API + viewer samen op macOS/Linux.
+   - `run_viewer.py` biedt hetzelfde startpad voor macOS, Linux en Windows.
 
-2. **STEP rendering in de browser werkt nu op echte geometrie**
+2. **Live pipeline-progress tijdens analyse**
+   - De API houdt nu tijdens `processing` al stage-events en timing bij in memory.
+   - De viewer pollt live `timeline_events` en `timeline_summary` via `GET /api/v1/jobs/{job_id}`.
+   - Je ziet nu tijdens runtime:
+     - welke stap actief is,
+     - hoe lang die stap al loopt,
+     - hoeveel stappen afgerond zijn,
+     - wanneer een stap `Klaar`, `Overgeslagen` of `Mislukt` is.
+   - Resultaat-events worden direct doorgestuurd voor o.a.:
+     - `Profile Router`
+     - `Classify geometry`
+     - `Unfold`
+     - `Detect holes`
+
+3. **STEP rendering gebruikt nu primair backend-assets**
    - Browserloader en backend normaliseren STEP-bestanden met rommel vóór `ISO-10303-21;`.
-   - Viewer gebruikt backend-mesh wanneer beschikbaar en valt anders terug op OpenCascade WASM in de browser.
-   - Camera fit en orbit target centreren het model automatisch.
+   - Viewer gebruikt eerst backend-geometry en valt alleen terug op OpenCascade WASM in de browser als fallback.
+   - Browser-STEP parsing draait in een Web Worker in plaats van op de main thread.
+   - `occt-import-js` en WASM zijn lokaal ge-vendord in plaats van via CDN.
 
-3. **Viewer-weergave is rustiger en CAD-achtiger gemaakt**
-   - Geen agressieve triangulated wireframe meer als hoofdbeeld.
-   - Hoofdweergave toont een bijna transparante body met duidelijke silhouette/feature edges.
-   - Object blijft gecentreerd tijdens roteren en zoomen.
+4. **3D-weergave is schoner en sneller gemaakt**
+   - Geen agressieve triangle-wireframe als hoofdbeeld.
+   - Backend levert nu een lichte solids-mesh plus vooraf berekende `display_edges`.
+   - De viewer toont een subtiel transparante body met schone silhouette/feature edges.
+   - Camera fit, orbit target en reset-view houden het object stabiel gecentreerd.
+   - Canvas gebruikt `frameloop="demand"` en een lichtere scene voor minder GPU-belasting.
 
-4. **Pipeline-stappen zijn visueel inspecteerbaar**
-   - `Detect holes` toont harde hole-outlines in plaats van subtiele bolletjes.
-   - `Classify geometry` en `Profile Router` tonen profielcontouren op section-posities.
-   - `Unfold` schakelt, wanneer flat data bestaat, over naar de vlakke uitslagmesh in plaats van de 3D-mesh.
-   - Sidebar toont per stage events, payloads en keuze-uitleg.
+5. **Pipeline-visualisaties volgen de juiste brongeometrie**
+   - `Detect holes` toont duidelijke hole-outlines en leader lines in plaats van subtiele markers.
+   - Hole-overlays volgen de echte bron: `3d` of `flat`.
+   - `Classify geometry` en `Profile Router` tonen profielcontouren en maat-/evidence-lijnen.
+   - `Unfold` schakelt, wanneer flat data bestaat, over naar de vlakke uitslagweergave in plaats van de 3D-weergave.
+   - Flat-holes worden daardoor niet meer fout op het 3D-model geprojecteerd.
 
-5. **Brongeometrie klopt nu beter per visualisatie**
-   - Hole-overlays volgen de bron (`3d` of `flat`) uit de pipeline.
-   - API geeft nu optioneel ook `flat_mesh` terug bij een geslaagde unfold.
-   - Hierdoor worden flat-holes niet langer fout op een 3D-model geprojecteerd.
+6. **Performance en load-flow zijn aangescherpt**
+   - De zware 3D viewer wordt lazy geladen.
+   - De app leest het STEP-bestand niet meer altijd meteen in de browser als de backend al geometry terugstuurt.
+   - Vite-chunks zijn opgesplitst zodat de app-shell sneller zichtbaar wordt.
+   - De viewer blijft bruikbaar zonder browser-side STEP parse zolang de lokale API draait.
 
 **Belangrijke beperking nu:**
 - De echte `Profile Router` section-debug is nog afhankelijk van `pythonocc-core` in de oude routercode. Zonder die dependency gebruikt de viewer een sterke fallback-visualisatie op basis van profieltype en globale afmetingen.
 
 **Zelf starten:**
 
+macOS/Linux:
 ```bash
 cd /Users/ds/AIdoel/alestest
 ./run_viewer.sh
+```
+
+Cross-platform:
+```bash
+cd /Users/ds/AIdoel/alestest
+python run_viewer.py
 ```
 
 Daarna:

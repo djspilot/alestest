@@ -21,19 +21,81 @@ import json
 import os
 import time
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 
 class AnalysisProfiler:
     """Times manufacturing pipeline analysis steps and produces summary reports."""
 
-    def __init__(self, part_name: str, file_size_mb: float):
+    def __init__(self, part_name: str, file_size_mb: float, event_callback=None):
         self.part_name = part_name
         self.file_size_mb = file_size_mb
+        self.event_callback = event_callback
         self.steps: list[dict] = []
         self.counts: dict[str, int] = {}
         self._current_step: dict | None = None
         self._first_start: float | None = None
+        self._first_start_at_iso: str | None = None
         self._last_end: float | None = None
+        self._events: list[dict] = []
+
+    def _utc_now_iso(self) -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def _current_elapsed(self, now: float | None = None) -> float:
+        if self._first_start is None:
+            return 0.0
+        current = now if now is not None else (self._last_end if self._last_end is not None else time.perf_counter())
+        return max(current - self._first_start, 0.0)
+
+    def _build_live_summary(self, now: float | None = None) -> dict:
+        current_step = self._current_step
+        active_stage = None
+        active_stage_started_at = None
+        active_stage_elapsed_seconds = None
+        if current_step is not None and not current_step.get("_finished"):
+            active_stage = current_step.get("name")
+            active_stage_started_at = current_step.get("_started_at_iso")
+            active_stage_elapsed_seconds = round(
+                max((now if now is not None else time.perf_counter()) - current_step.get("_start_perf", 0.0), 0.0),
+                4,
+            )
+
+        total_steps_hint = max(
+            (step.get("total") or 0 for step in self.steps),
+            default=len(self.steps),
+        ) or len(self.steps)
+
+        return {
+            "total_elapsed_seconds": round(self._current_elapsed(now), 4),
+            "event_count": len(self._events),
+            "step_count": len(self.steps),
+            "part_name": self.part_name,
+            "analysis_started_at": self._first_start_at_iso,
+            "active_stage": active_stage,
+            "active_stage_started_at": active_stage_started_at,
+            "active_stage_elapsed_seconds": active_stage_elapsed_seconds,
+            "completed_step_count": sum(1 for step in self.steps if step.get("_finished")),
+            "total_steps_hint": total_steps_hint,
+        }
+
+    def _emit_event(self, event: dict, now: float | None = None):
+        self._events.append(event)
+        if self.event_callback:
+            self.event_callback(event, self._build_live_summary(now))
+
+    def emit(self, event_type: str, stage: str, payload: dict | None = None, status: str = "OK"):
+        now = time.perf_counter()
+        self._emit_event(
+            {
+                "type": event_type,
+                "stage": stage,
+                "timestamp_ms": int(round(self._current_elapsed(now) * 1000)),
+                "status": status,
+                "payload": payload or {},
+            },
+            now,
+        )
 
     @contextmanager
     def step(self, name: str, step_num: int = None, total_steps: int = None):
@@ -46,27 +108,79 @@ class AnalysisProfiler:
             "status": "OK",
             "sub_steps": [],
             "error": None,
+            "_start_perf": 0.0,
+            "_started_at_iso": None,
+            "_finished": False,
         }
         self.steps.append(entry)
         prev_step = self._current_step
         self._current_step = entry
 
         start = time.perf_counter()
+        started_at_iso = self._utc_now_iso()
+        entry["_start_perf"] = start
+        entry["_started_at_iso"] = started_at_iso
         if self._first_start is None:
             self._first_start = start
+            self._first_start_at_iso = started_at_iso
+
+        self._emit_event(
+            {
+                "type": "stage_start",
+                "stage": name,
+                "timestamp_ms": int(round(self._current_elapsed(start) * 1000)),
+                "status": "START",
+                "payload": {
+                    "num": step_num,
+                    "total": total_steps,
+                },
+            },
+            start,
+        )
 
         try:
             yield entry
         except Exception as exc:
+            end = time.perf_counter()
             entry["status"] = "FAIL"
             entry["error"] = str(exc)
-            entry["elapsed"] = time.perf_counter() - start
-            self._last_end = time.perf_counter()
-            self._current_step = prev_step
+            entry["elapsed"] = end - start
+            entry["_finished"] = True
+            self._last_end = end
+            self._emit_event(
+                {
+                    "type": "stage_failed",
+                    "stage": name,
+                    "timestamp_ms": int(round(self._current_elapsed(end) * 1000)),
+                    "status": "FAIL",
+                    "payload": {
+                        "elapsed_seconds": round(entry["elapsed"], 4),
+                        "error": entry["error"],
+                    },
+                },
+                end,
+            )
             raise
         else:
-            entry["elapsed"] = time.perf_counter() - start
-            self._last_end = time.perf_counter()
+            end = time.perf_counter()
+            entry["elapsed"] = end - start
+            entry["_finished"] = True
+            self._last_end = end
+            status = (entry.get("status") or "OK").upper()
+            event_type = "stage_skipped" if status == "SKIP" else "stage_end"
+            self._emit_event(
+                {
+                    "type": event_type,
+                    "stage": name,
+                    "timestamp_ms": int(round(self._current_elapsed(end) * 1000)),
+                    "status": status,
+                    "payload": {
+                        "elapsed_seconds": round(entry["elapsed"], 4),
+                        "error": entry["error"],
+                    },
+                },
+                end,
+            )
         finally:
             self._current_step = prev_step
 

@@ -233,6 +233,98 @@ def tessellate_shape(cq_shape, deflection=0.5, angular_deflection=0.5):
     }
 
 
+def extract_display_edges(mesh_data, angle_threshold_deg=32.0, min_length_ratio=0.0025):
+    """Extract a cleaner set of display edges from tessellated mesh data.
+
+    Keeps boundary edges and sharp feature edges while dropping coplanar
+    tessellation diagonals that create noisy wireframes in the viewer.
+    """
+    vertices = mesh_data.get("vertices") or []
+    indices = mesh_data.get("indices") or []
+    if len(vertices) < 6 or len(indices) < 3:
+        return []
+
+    points = [
+        (float(vertices[i]), float(vertices[i + 1]), float(vertices[i + 2]))
+        for i in range(0, len(vertices), 3)
+    ]
+
+    min_x = min(point[0] for point in points)
+    min_y = min(point[1] for point in points)
+    min_z = min(point[2] for point in points)
+    max_x = max(point[0] for point in points)
+    max_y = max(point[1] for point in points)
+    max_z = max(point[2] for point in points)
+    diagonal = math.sqrt(
+        (max_x - min_x) ** 2 +
+        (max_y - min_y) ** 2 +
+        (max_z - min_z) ** 2
+    )
+    min_length = max(diagonal * min_length_ratio, 0.75)
+    sharp_threshold = math.cos(math.radians(angle_threshold_deg))
+
+    def _sub(a, b):
+        return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+    def _cross(a, b):
+        return (
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        )
+
+    def _normalize(v):
+        length = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+        if length <= 1e-9:
+            return None
+        return (v[0] / length, v[1] / length, v[2] / length)
+
+    def _dot(a, b):
+        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+    edge_faces = {}
+    for tri_index in range(0, len(indices), 3):
+        i0, i1, i2 = indices[tri_index:tri_index + 3]
+        if i0 >= len(points) or i1 >= len(points) or i2 >= len(points):
+            continue
+
+        p0, p1, p2 = points[i0], points[i1], points[i2]
+        normal = _normalize(_cross(_sub(p1, p0), _sub(p2, p0)))
+        if normal is None:
+            continue
+
+        for start, end in ((i0, i1), (i1, i2), (i2, i0)):
+            key = (start, end) if start < end else (end, start)
+            edge_faces.setdefault(key, []).append(normal)
+
+    display_edges = []
+    for (start, end), normals_for_edge in edge_faces.items():
+        p0 = points[start]
+        p1 = points[end]
+        edge_length = math.sqrt(
+            (p1[0] - p0[0]) ** 2 +
+            (p1[1] - p0[1]) ** 2 +
+            (p1[2] - p0[2]) ** 2
+        )
+
+        include_edge = False
+        if len(normals_for_edge) == 1:
+            include_edge = edge_length >= (min_length * 0.35)
+        else:
+            for left_index in range(len(normals_for_edge)):
+                for right_index in range(left_index + 1, len(normals_for_edge)):
+                    if _dot(normals_for_edge[left_index], normals_for_edge[right_index]) < sharp_threshold:
+                        include_edge = edge_length >= min_length
+                        break
+                if include_edge:
+                    break
+
+        if include_edge:
+            display_edges.extend([*p0, *p1])
+
+    return display_edges
+
+
 def analyze_sheet_metal(solid):
     """
     Analyze a solid to determine if it's a sheet metal part.

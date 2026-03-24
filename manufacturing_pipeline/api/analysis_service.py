@@ -165,6 +165,12 @@ def _build_timeline(result: dict, analysis, total_holes: int, timing_data: dict 
         "event_count": len(events),
         "step_count": len(steps),
         "part_name": timing_data.get("part_name") or result.get("file"),
+        "analysis_started_at": None,
+        "active_stage": None,
+        "active_stage_started_at": None,
+        "active_stage_elapsed_seconds": None,
+        "completed_step_count": len(steps),
+        "total_steps_hint": max((step.get("total") or 0 for step in steps), default=len(steps)) or len(steps),
     }
     return events, summary
 
@@ -183,7 +189,7 @@ def _serialize_analysis_reasoning(analysis) -> list[dict]:
     return serialized
 
 
-def run_step_analysis(step_file: str, use_aag: bool = True) -> dict:
+def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=None) -> dict:
     """Run the manufacturing analysis pipeline on a STEP file.
 
     Args:
@@ -209,7 +215,12 @@ def run_step_analysis(step_file: str, use_aag: bool = True) -> dict:
 
     try:
         output_dir, _ = get_output_dir(step_file)
-        analysis, total_holes = run_analysis(step_file, output_dir, args)
+        analysis, total_holes = run_analysis(
+            step_file,
+            output_dir,
+            args,
+            progress_callback=progress_callback,
+        )
         timing_data = _load_timing_json(output_dir, step_file)
 
         # Build base result
@@ -318,15 +329,21 @@ def run_step_analysis(step_file: str, use_aag: bool = True) -> dict:
 
         # Tessellate STEP geometry for 3D viewer
         try:
-            from manufacturing_pipeline.analysis.step_processing import tessellate_shape, load_step_file
+            from manufacturing_pipeline.analysis.step_processing import (
+                extract_display_edges,
+                load_step_file,
+                tessellate_shape,
+            )
 
             def _rounded_mesh(path: str):
                 shape = load_step_file(path)
-                mesh_data = tessellate_shape(shape, deflection=0.5)
+                mesh_data = tessellate_shape(shape, deflection=0.8, angular_deflection=0.7)
                 if not mesh_data or len(mesh_data.get("vertices", [])) == 0:
                     return None
+                mesh_data["display_edges"] = extract_display_edges(mesh_data)
                 mesh_data["vertices"] = [round(v, 2) for v in mesh_data["vertices"]]
                 mesh_data["normals"] = [round(n, 4) for n in mesh_data["normals"]]
+                mesh_data["display_edges"] = [round(v, 2) for v in mesh_data.get("display_edges", [])]
                 return mesh_data
 
             mesh_data = _rounded_mesh(step_file)

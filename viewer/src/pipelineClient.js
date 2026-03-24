@@ -176,6 +176,10 @@ export async function runPipelineAnalysis(file, options = {}) {
       status: job?.status || 'unknown',
       jobId,
       job,
+      timeline: {
+        events: job?.timeline_events || [],
+        summary: job?.timeline_summary || null,
+      },
     })
 
     if (job?.status === 'completed') {

@@ -6,6 +6,7 @@ import io
 import os
 import uuid
 import shutil
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
 
@@ -31,11 +32,41 @@ import tempfile
 router = APIRouter(prefix="/api/v1")
 
 
+def _refresh_live_summary(summary_raw: dict | None) -> dict | None:
+    if not summary_raw:
+        return None
+
+    summary = dict(summary_raw)
+    now = datetime.now(timezone.utc)
+
+    analysis_started_at = summary.get("analysis_started_at")
+    if analysis_started_at:
+        try:
+            started_dt = datetime.fromisoformat(analysis_started_at)
+            summary["total_elapsed_seconds"] = round(max((now - started_dt).total_seconds(), 0.0), 4)
+        except ValueError:
+            pass
+
+    active_stage_started_at = summary.get("active_stage_started_at")
+    if summary.get("active_stage") and active_stage_started_at:
+        try:
+            active_dt = datetime.fromisoformat(active_stage_started_at)
+            summary["active_stage_elapsed_seconds"] = round(max((now - active_dt).total_seconds(), 0.0), 4)
+        except ValueError:
+            pass
+
+    return summary
+
+
 def _run_analysis_job(job_id: str, step_path: str, use_aag: bool):
     """Background task that runs the analysis and updates job state."""
     jobs.mark_processing(job_id)
     try:
-        result = run_step_analysis(step_path, use_aag=use_aag)
+        result = run_step_analysis(
+            step_path,
+            use_aag=use_aag,
+            progress_callback=lambda event, summary: jobs.record_progress(job_id, event, summary),
+        )
         jobs.mark_completed(job_id, result)
     except Exception as e:
         jobs.mark_failed(job_id, str(e))
@@ -106,7 +137,7 @@ async def list_jobs(
     )
 
 
-@router.get("/jobs/{job_id}")
+@router.get("/jobs/{job_id}", response_model=JobStatus)
 async def get_job(
     job_id: str,
     format: str = Query("json", description="Response format: json, csv, xml, or excel"),
@@ -125,12 +156,21 @@ async def get_job(
     if format == "excel" and job.status == "completed" and job.result:
         return _result_to_excel(job.result)
 
+    if job.status == "completed":
+        timeline_raw = (job.result or {}).get("timeline") or []
+        summary_raw = (job.result or {}).get("timeline_summary")
+    else:
+        timeline_raw = getattr(job, "progress_events", None) or []
+        summary_raw = _refresh_live_summary(getattr(job, "progress_summary", None))
+
     response = JobStatus(
         job_id=job.job_id,
         status=job.status,
         created_at=job.created_at,
         started_at=job.started_at,
         completed_at=job.completed_at,
+        timeline_summary=TimelineSummary(**summary_raw) if summary_raw else None,
+        timeline_events=[TimelineEvent(**e) for e in timeline_raw],
         error=job.error,
     )
 
@@ -147,16 +187,12 @@ async def get_job_timeline(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    if job.status != "completed":
-        return JobTimelineResponse(
-            job_id=job.job_id,
-            status=job.status,
-            summary=None,
-            events=[],
-        )
-
-    timeline_raw = (job.result or {}).get("timeline") or []
-    summary_raw = (job.result or {}).get("timeline_summary")
+    if job.status == "completed":
+        timeline_raw = (job.result or {}).get("timeline") or []
+        summary_raw = (job.result or {}).get("timeline_summary")
+    else:
+        timeline_raw = getattr(job, "progress_events", None) or []
+        summary_raw = _refresh_live_summary(getattr(job, "progress_summary", None))
 
     summary = TimelineSummary(**summary_raw) if summary_raw else None
     events = [TimelineEvent(**e) for e in timeline_raw]

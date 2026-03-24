@@ -91,6 +91,43 @@ class TestTimelineBuild(unittest.TestCase):
 
 
 class TestTimelineRoute(unittest.TestCase):
+    def test_get_job_timeline_processing_job_uses_live_progress(self):
+        job = SimpleNamespace(
+            job_id="job-live",
+            status="processing",
+            progress_summary={
+                "total_elapsed_seconds": 1.2,
+                "event_count": 2,
+                "step_count": 1,
+                "part_name": "demo.step",
+                "analysis_started_at": "2026-03-24T10:00:00+00:00",
+                "active_stage": "Load STEP",
+                "active_stage_started_at": "2026-03-24T10:00:00+00:00",
+                "active_stage_elapsed_seconds": 1.2,
+                "completed_step_count": 0,
+                "total_steps_hint": 7,
+            },
+            progress_events=[
+                {
+                    "type": "stage_start",
+                    "stage": "Load STEP",
+                    "timestamp_ms": 0,
+                    "status": "START",
+                    "payload": {"num": 1, "total": 7},
+                }
+            ],
+            result=None,
+        )
+
+        with patch("manufacturing_pipeline.api.routes.jobs.get", return_value=job):
+            response = asyncio.run(get_job_timeline("job-live"))
+
+        self.assertEqual(response.job_id, "job-live")
+        self.assertEqual(response.status, "processing")
+        self.assertEqual(len(response.events), 1)
+        self.assertEqual(response.events[0].stage, "Load STEP")
+        self.assertEqual(response.summary.active_stage, "Load STEP")
+
     def test_get_job_timeline_completed_job(self):
         job = SimpleNamespace(
             job_id="job-1",

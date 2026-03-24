@@ -214,7 +214,7 @@ def get_output_dir(step_file):
     return part_output, part_name
 
 
-def run_analysis(step_file, output_dir, args):
+def run_analysis(step_file, output_dir, args, progress_callback=None):
     """Run the complete analysis pipeline.
 
     IMPROVED FLOW:
@@ -242,7 +242,11 @@ def run_analysis(step_file, output_dir, args):
 
     # Initialize profiler
     file_size_mb = os.path.getsize(step_file) / (1024 * 1024)
-    profiler = AnalysisProfiler(os.path.basename(step_file), file_size_mb)
+    profiler = AnalysisProfiler(
+        os.path.basename(step_file),
+        file_size_mb,
+        event_callback=progress_callback,
+    )
 
     print("\n[1/7] Loading STEP file...")
     with profiler.step("Load STEP", 1, 7):
@@ -260,6 +264,18 @@ def run_analysis(step_file, output_dir, args):
                   f"(profiel: {route_result.profile_label}, "
                   f"confidence: {route_result.confidence:.0%})")
             print(f"  {route_result.reasoning}")
+            profiler.emit(
+                "classification_decision",
+                "Profile Router",
+                {
+                    "category": getattr(route_result.category, "value", None),
+                    "profile_label": route_result.profile_label,
+                    "confidence": route_result.confidence,
+                    "method": route_result.method,
+                    "variant": route_result.variant,
+                    "reasoning": route_result.reasoning,
+                },
+            )
         except Exception as e:
             print(f"  Warning: Router failed ({e}), continuing without routing")
             route_result = None
@@ -404,6 +420,20 @@ def run_analysis(step_file, output_dir, args):
     print(f"Afmetingen:  {analysis.length:.0f} x {analysis.width:.0f} x {analysis.height:.0f} mm")
     print(f"Dikte:       {analysis.thickness:.1f} mm")
     print(f"Zettingen:   {analysis.bend_count_erp}")
+    profiler.emit(
+        "geometry_classified",
+        "Classify geometry",
+        {
+            "category": part_category,
+            "part_type": analysis.part_type.value if hasattr(analysis.part_type, "value") else str(analysis.part_type),
+            "length": round(float(analysis.length or 0), 3),
+            "width": round(float(analysis.width or 0), 3),
+            "height": round(float(analysis.height or 0), 3),
+            "thickness": round(float(analysis.thickness or 0), 3),
+            "bends_total": int(analysis.bend_count_erp or 0),
+            "source": source,
+        },
+    )
 
     # ================================================================
     # STEP 5: Unfold if gebogen plaatwerk
@@ -441,10 +471,33 @@ def run_analysis(step_file, output_dir, args):
                     print(f"  [OK] Flat STEP: {flat_step_path}")
             else:
                 print(f"  ⚠ Unfold niet gelukt: {unfold_result.get('error', 'onbekend') if unfold_result else 'geen resultaat'}")
+
+        profiler.emit(
+            "unfold_result",
+            "Unfold",
+            {
+                "success": bool(unfold_result and unfold_result.get("success")),
+                "flat_length": unfold_result.get("flat_length") if unfold_result else None,
+                "flat_width": unfold_result.get("flat_width") if unfold_result else None,
+                "fold_lines": unfold_result.get("fold_lines") if unfold_result else 0,
+                "error": unfold_result.get("error") if unfold_result else None,
+            },
+            status="OK" if unfold_result and unfold_result.get("success") else "FAIL",
+        )
     else:
         print(f"\n[5/7] Unfold: Niet nodig ({part_category})")
         with profiler.step("Unfold", 5, 7) as s:
             s["status"] = "SKIP"
+        profiler.emit(
+            "unfold_result",
+            "Unfold",
+            {
+                "success": False,
+                "skipped": True,
+                "reason": f"Niet nodig ({part_category})",
+            },
+            status="SKIP",
+        )
 
     # ================================================================
     # STEP 6: Detect holes - on FLAT pattern if available
@@ -489,6 +542,16 @@ def run_analysis(step_file, output_dir, args):
         print(f"    {i+1}. {h['type']} {h['dim']} at {h['center']}")
 
     print(f"  Totaal: {total_holes}")
+    profiler.emit(
+        "holes_detected",
+        "Detect holes",
+        {
+            "total": total_holes,
+            "cylindrical": len(circular_holes),
+            "shaped": len(shaped_holes),
+            "source": "flat" if is_flat else "3d",
+        },
+    )
 
     analysis.detected_hole_visuals = {
         "source": "flat" if is_flat else "3d",

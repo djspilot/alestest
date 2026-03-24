@@ -9,6 +9,7 @@ import os
 import sqlite3
 import threading
 import time
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -18,7 +19,7 @@ from manufacturing_pipeline.api.config import JOB_TTL_SECONDS, DB_PATH
 class Job:
     __slots__ = ("job_id", "status", "created_at", "started_at", "completed_at",
                  "result", "error", "file_path", "file_name", "file_hash",
-                 "file_size_bytes")
+                 "file_size_bytes", "progress_events", "progress_summary")
 
     def __init__(self, job_id: str, file_path: str, file_name: str = "",
                  file_hash: str = "", file_size_bytes: int = 0):
@@ -33,6 +34,8 @@ class Job:
         self.file_name = file_name or os.path.basename(file_path)
         self.file_hash = file_hash
         self.file_size_bytes = file_size_bytes
+        self.progress_events: list[dict] = []
+        self.progress_summary: Optional[dict] = None
 
 
 class JobManager:
@@ -118,6 +121,8 @@ class JobManager:
         job.file_path = ""
         result_json = row["result_json"]
         job.result = json.loads(result_json) if result_json else None
+        job.progress_events = []
+        job.progress_summary = None
         return job
 
     # ------------------------------------------------------------------
@@ -167,6 +172,8 @@ class JobManager:
             if job:
                 job.status = "processing"
                 job.started_at = now
+                job.progress_events = []
+                job.progress_summary = None
         self._update_db(job_id, status="processing",
                         started_at=self._dt_to_str(now))
 
@@ -193,6 +200,15 @@ class JobManager:
         self._update_db(job_id, status="failed",
                         completed_at=self._dt_to_str(now),
                         error=error)
+
+    def record_progress(self, job_id: str, event: dict, summary: Optional[dict] = None):
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return
+            job.progress_events.append(deepcopy(event))
+            if summary is not None:
+                job.progress_summary = deepcopy(summary)
 
     # ------------------------------------------------------------------
     # Listing & stats (from SQLite)
