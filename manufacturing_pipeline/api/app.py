@@ -8,9 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from api.config import API_KEYS, UPLOAD_DIR
-from api.job_manager import jobs
-from api.routes import router
+from manufacturing_pipeline.api.config import API_KEYS, UPLOAD_DIR
+from manufacturing_pipeline.api.job_manager import jobs
+from manufacturing_pipeline.api.routes import router
 
 app = FastAPI(
     title="Manufacturing Analysis API",

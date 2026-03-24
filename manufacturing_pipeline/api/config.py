@@ -16,7 +16,7 @@ JOB_TTL_SECONDS = int(os.environ.get("JOB_TTL_SECONDS", "3600"))
 
 # Databasepad voor persistente taakhistorie
 DB_PATH = os.environ.get("DB_PATH", os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "data", "db", "manufacturing_data.db"
 ))
 
