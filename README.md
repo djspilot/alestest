@@ -1,9 +1,80 @@
 # ALES Manufacturing Pipeline
 
-**Laatste update:** 23 maart 2026
-**Versie:** 3.7-dev (Step 0 stabilisatie + testfundament)
+**Laatste update:** 24 maart 2026
+**Versie:** 3.9-dev (3D Viewer in webfrontend)
 
-> Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis.
+> Zie [docs/TIMELINE.md](docs/TIMELINE.md) voor de volledige versiegeschiedenis.
+
+### v3.9-dev — 3D Viewer in webfrontend (24 maart 2026)
+
+**Doel van deze update:** een interactieve 3D-visualisatie toevoegen aan de web-viewer zodat analyse-resultaten visueel geïnspecteerd kunnen worden — rechtstreeks in de browser, zonder externe software.
+
+**Wat is gedaan:**
+
+1. **Three.js 3D viewer geïntegreerd in `index.html`**
+   - Three.js (module build) en OrbitControls lokaal gebundeld in `manufacturing_pipeline/api/static/vendor/`.
+   - 3D-scene met perspectief-camera, directional + ambient lighting, en een grid-helper voor oriëntatie.
+   - OrbitControls voor roteren, zoomen en pannen van het model.
+
+2. **Bounding-box visualisatie op basis van analyse-afmetingen**
+   - Na analyse wordt een `BoxGeometry` gegenereerd met de werkelijke X/Y/Z afmetingen uit de pipeline.
+   - Draadframe-edges (wit) over een metallic materiaal voor duidelijk contrast.
+   - Camera positioneert zich automatisch op basis van de onderdeel-afmetingen.
+
+3. **2D + 3D overlay met dimensie-annotaties**
+   - Transparant 2D canvas bovenop de 3D-viewport voor dimensie-labels (breedte × diepte × hoogte in mm).
+   - Aparte 2D bovenaanzicht-projectie naast het 3D-model voor snelle maatcontrole.
+   - Labels volgen de camera-oriëntatie bij roteren.
+
+4. **Fullscreen en Reset View**
+   - Fullscreen-toggle voor gedetailleerde inspectie.
+   - Reset View-knop om terug te keren naar standaard camerapositie.
+   - Automatische resize bij vensterwijziging.
+
+5. **Pipeline Replay timeline**
+   - Visuele tijdlijn naast de 3D-viewer die de analysestappen toont.
+   - Toont per stap: classificatie, gaten, zettingen, afmetingen, en productiedata.
+
+**Status:** De viewer toont momenteel een bounding-box representatie op basis van afmetingen. Echte STEP-geometrie renderen (BREP → mesh) is een volgende stap die server-side tessellatie vereist.
+
+**Technische stack:** Three.js r170+ (ES module), OrbitControls, vanilla JS — geen build-stap nodig.
+
+---
+
+### v3.8-dev — Projectstructuur opgeschoond (24 maart 2026)
+
+**Doel van deze update:** root directory opschonen tot een minimale, overzichtelijke structuur zonder dat paden of imports breken.
+
+**Wat is gedaan:**
+
+1. **Root directory opgeschoond (van 25 naar 9 items)**
+   - 10 losse markdown-bestanden (handovers, classificatie-docs, notities) verplaatst naar `docs/`.
+   - `scripts/` (standalone validatie/analyse) verplaatst naar `docs/scripts/`.
+   - `snapshots/` verplaatst naar `data/snapshots/`.
+   - `profile_pipeline/` gearchiveerd naar `docs/archive/` (niet actief geïntegreerd).
+
+2. **Docker-bestanden gecentraliseerd in `deploy/`**
+   - `Dockerfile`, `docker-compose.yml` en `.env.example` verplaatst van root naar `deploy/`.
+   - Alle deploy-scripts bijgewerkt met `-f deploy/docker-compose.yml` flag.
+
+3. **`api/` samengevoegd in `manufacturing_pipeline/api/`**
+   - API is nu een subpackage van het hoofdpakket.
+   - Alle imports bijgewerkt van `from api.` naar `from manufacturing_pipeline.api.`.
+   - DB_PATH-berekening gecorrigeerd voor nieuwe nesting.
+   - Dockerfile CMD bijgewerkt naar `manufacturing_pipeline.api.app:app`.
+
+4. **`tests/` samengevoegd in `manufacturing_pipeline/tests/`**
+   - Tests zijn nu een subpackage van het hoofdpakket.
+   - `pytest.ini` testpaths bijgewerkt.
+   - Alle 25 tests passen na verplaatsing.
+
+**Huidige root:**
+```
+run.py  README.md  CLAUDE.md  requirements.txt  pytest.ini
+manufacturing_pipeline/  data/  deploy/  docs/
+```
+
+---
 
 ### v3.7-dev — Step 0 stabilisatie + testfundament (23 maart 2026)
 
@@ -22,7 +93,7 @@
 
 3. **Test- en pytest-stabilisatie**
    - `pytest.ini` toegevoegd om reguliere testdiscovery te stabiliseren en legacy script-tests uit standaardrun te houden.
-   - `tests/test_xml_export.py` gemoderniseerd naar pytest-compatibele smoke-tests (zonder verouderde `PartAnalyzer`-import).
+   - `manufacturing_pipeline/tests/test_xml_export.py` gemoderniseerd naar pytest-compatibele smoke-tests (zonder verouderde `PartAnalyzer`-import).
    - Resultaat: `python -m pytest -q` draait stabiel en groen.
 
 4. **Warning-cleanup**
@@ -386,7 +457,7 @@ Deploy als webservice voor analyse op afstand.
 
 ```bash
 # Start
-docker compose up -d
+docker compose -f deploy/docker-compose.yml up -d
 
 # Analyseer een bestand
 curl -X POST http://localhost:8000/api/v1/analyze \
@@ -449,7 +520,7 @@ cp .env.example .env
 echo "API_KEYS=mijn-geheime-key" >> .env
 
 # 2. Start
-docker compose up -d
+docker compose -f deploy/docker-compose.yml up -d
 
 # 3. Automatiseer vanuit je eigen systeem
 curl -X POST http://jouw-server:8000/api/v1/analyze \
@@ -497,7 +568,7 @@ python run.py -f G:\ALES\Input --batch --excel --reference G:\ALES\spaceclaim.xm
 │                 │ aag      │                                     │
 │                 └──────────┘                                     │
 │                                                                  │
-│  api/app.py ──▶ routes.py ──▶ manufacturing_pipeline (zelfde)   │
+│  manufacturing_pipeline/api/app.py ──▶ routes.py (zelfde pkg)   │
 │  file_watcher ──▶ map monitoren ──▶ manufacturing_pipeline       │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -567,7 +638,7 @@ python run.py -f G:\ALES\Input --batch --excel --reference G:\ALES\spaceclaim.xm
 cp .env.example .env
 # Bewerk .env — zet minimaal API_KEYS
 
-docker compose up -d
+docker compose -f deploy/docker-compose.yml up -d
 curl http://localhost:8000/api/v1/health
 ```
 
@@ -579,7 +650,7 @@ apt update && apt install docker.io docker-compose-v2 nginx certbot python3-cert
 git clone https://github.com/djspilot/alestest.git /opt/manufacturing-api
 cd /opt/manufacturing-api
 echo "API_KEYS=jouw-geheime-key" > .env
-docker compose up -d
+docker compose -f deploy/docker-compose.yml up -d
 
 # Nginx reverse proxy
 cp deploy/nginx.conf /etc/nginx/sites-available/manufacturing-api
@@ -654,7 +725,7 @@ v2_profile_sa_v_ratio_max = 1.2
 
 1. **Openen:** `manufacturing_pipeline/analysis/classification_variables.py`
 2. **Pas waarden aan** voor je industrie/producttype
-3. **Test:** `python scripts/export_classification_excel.py mijnbestand.stp`
+3. **Test:** `python docs/scripts/export_classification_excel.py mijnbestand.stp`
 4. **Check:** Excel output en `debug_*.py` scripts
 5. **Commit:** `git add -A && git commit -m "Tuning: aangepaste thresholds"`
 
@@ -686,20 +757,19 @@ v2_profile_sa_v_ratio_max = 1.2
 │   │   └── ...
 │   ├── data/                           # Caching, database
 │   ├── reporting/                      # PDF, Excel, XML, CLI output
-│   └── scripts/                        # AAG analyzer, ERP vergelijking
+│   ├── scripts/                        # AAG analyzer, ERP vergelijking
+│   ├── api/                            # REST API (FastAPI)
+│   └── tests/                          # Testsuite
 │
-├── profile_pipeline/                   # Cross-sectie profiel classificatie module
-├── api/                                # REST API (FastAPI)
-├── deploy/                             # Deployment (file watcher, nginx, deploy.sh)
-├── scripts/                            # Standalone analyse/validatie scripts
-├── tests/                              # Testsuite
-│   └── legacy/                        # Oudere test scripts
-├── docs/                               # Documentatie
-│   ├── archive/                       # Historische changelogs, handoffs, validatie reports
+├── deploy/                             # Deployment, Docker & configs
+├── docs/                               # Documentatie, scripts & archief
+│   ├── scripts/                       # Standalone analyse/validatie scripts
+│   ├── archive/                       # Historische changelogs, profile_pipeline, etc.
 │   └── ENGINE.md                      # Technische engine-beschrijving
 └── data/                               # Runtime data (gitignored)
     ├── input/                          # STEP-bestanden voor analyse
     ├── output/                         # Analyseresultaten
+    ├── snapshots/                      # XML status snapshots (git-tracked)
     └── db/                             # SQLite database
 ```
 
@@ -710,7 +780,7 @@ v2_profile_sa_v_ratio_max = 1.2
 ### Tests draaien
 
 ```bash
-python -m pytest tests/
+python -m pytest
 ```
 
 ### ERP-vergelijkingstool

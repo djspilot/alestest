@@ -30,7 +30,6 @@ RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Copy application code
 COPY manufacturing_pipeline/ manufacturing_pipeline/
-COPY api/ api/
 COPY run.py ./
 
 # Create necessary directories
@@ -38,4 +37,4 @@ RUN mkdir -p /tmp/manufacturing-uploads data/output data/db
 
 EXPOSE 8000
 
-CMD ["python3", "-m", "uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+CMD ["python3", "-m", "uvicorn", "manufacturing_pipeline.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import Optional, Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Dimensions(BaseModel):
@@ -51,6 +51,30 @@ class AAGDetails(BaseModel):
     bend_details: list[BendDetail] = []
 
 
+class RouteDetails(BaseModel):
+    category: Optional[str] = None
+    profile_label: Optional[str] = None
+    confidence: Optional[float] = None
+    method: Optional[str] = None
+    variant: Optional[str] = None
+    reasoning: Optional[str] = None
+
+
+class TimelineEvent(BaseModel):
+    type: str
+    stage: str
+    timestamp_ms: int = 0
+    status: Optional[str] = None
+    payload: dict = Field(default_factory=dict)
+
+
+class TimelineSummary(BaseModel):
+    total_elapsed_seconds: float = 0.0
+    event_count: int = 0
+    step_count: int = 0
+    part_name: Optional[str] = None
+
+
 class AnalysisResult(BaseModel):
     file: str
     success: bool
@@ -61,6 +85,8 @@ class AnalysisResult(BaseModel):
     flat_dimensions: Optional[FlatDimensions] = None
     production: Optional[Production] = None
     aag_details: Optional[AAGDetails] = None
+    route: Optional[RouteDetails] = None
+    timeline_summary: Optional[TimelineSummary] = None
     error: Optional[str] = None
 
 
@@ -78,6 +104,13 @@ class JobStatus(BaseModel):
     completed_at: Optional[datetime] = None
     result: Optional[AnalysisResult] = None
     error: Optional[str] = None
+
+
+class JobTimelineResponse(BaseModel):
+    job_id: str
+    status: Literal["queued", "processing", "completed", "failed"]
+    summary: Optional[TimelineSummary] = None
+    events: list[TimelineEvent] = Field(default_factory=list)
 
 
 class HealthResponse(BaseModel):

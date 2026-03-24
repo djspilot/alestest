@@ -9,8 +9,8 @@ import shutil
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
 
-from api.config import ALLOWED_EXTENSIONS, MAX_FILE_SIZE_MB, UPLOAD_DIR
-from api.schemas import (
+from manufacturing_pipeline.api.config import ALLOWED_EXTENSIONS, MAX_FILE_SIZE_MB, UPLOAD_DIR
+from manufacturing_pipeline.api.schemas import (
     AnalysisResult,
     HealthResponse,
     JobCreated,
@@ -18,9 +18,12 @@ from api.schemas import (
     JobListResponse,
     JobStats,
     JobStatus,
+    JobTimelineResponse,
+    TimelineEvent,
+    TimelineSummary,
 )
-from api.job_manager import jobs
-from api.analysis_service import run_step_analysis
+from manufacturing_pipeline.api.job_manager import jobs
+from manufacturing_pipeline.api.analysis_service import run_step_analysis
 from manufacturing_pipeline.reporting.xml_exporter import export_to_xml
 from pathlib import Path
 import tempfile
@@ -135,6 +138,35 @@ async def get_job(
         response.result = AnalysisResult(**job.result)
 
     return response
+
+
+@router.get("/jobs/{job_id}/timeline", response_model=JobTimelineResponse)
+async def get_job_timeline(job_id: str):
+    """Get replay timeline events for a completed job."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status != "completed":
+        return JobTimelineResponse(
+            job_id=job.job_id,
+            status=job.status,
+            summary=None,
+            events=[],
+        )
+
+    timeline_raw = (job.result or {}).get("timeline") or []
+    summary_raw = (job.result or {}).get("timeline_summary")
+
+    summary = TimelineSummary(**summary_raw) if summary_raw else None
+    events = [TimelineEvent(**e) for e in timeline_raw]
+
+    return JobTimelineResponse(
+        job_id=job.job_id,
+        status=job.status,
+        summary=summary,
+        events=events,
+    )
 
 
 @router.get("/health", response_model=HealthResponse)

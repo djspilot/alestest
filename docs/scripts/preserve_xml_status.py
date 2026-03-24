@@ -7,8 +7,8 @@ Goal:
 - Record git metadata for traceability
 
 Usage examples:
-    python scripts/preserve_xml_status.py --xml ..\\stepfiles\\10040878_1_generated_latest.xml
-    python scripts/preserve_xml_status.py --xml data\\output\\run.xml --tag test-run --fail-on-warning
+    python docs/scripts/preserve_xml_status.py --xml ..\\stepfiles\\10040878_1_generated_latest.xml
+    python docs/scripts/preserve_xml_status.py --xml data\\output\\run.xml --tag test-run --fail-on-warning
 """
 
 from __future__ import annotations
@@ -180,7 +180,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--xml", required=True, help="Path to generated XML file")
     parser.add_argument(
         "--snapshot-root",
-        default="snapshots/xml_status",
+        default="data/snapshots/xml_status",
         help="Snapshot root directory (relative to repo root by default)",
     )
     parser.add_argument("--tag", default="", help="Optional label for this snapshot")

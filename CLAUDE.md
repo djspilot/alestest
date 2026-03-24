@@ -12,7 +12,7 @@ The project provides three usage modes:
 |------|---------|-------------|
 | **Quick** (default) | `python run.py` | Fast AAG-based analysis with PDF reports |
 | **Full** | `python run.py --full` | Complete ISO pipeline with database storage |
-| **API** (Docker) | `docker compose up -d` | REST API for VPS deployment |
+| **API** (Docker) | `docker compose -f deploy/docker-compose.yml up -d` | REST API for VPS deployment |
 
 ## Key Commands
 
@@ -74,10 +74,10 @@ python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ 
 ### Docker / API Deployment
 ```bash
 # Start API server
-docker compose up -d
+docker compose -f deploy/docker-compose.yml up -d
 
 # Or local dev mode
-API_KEYS=your-key uvicorn api.app:app --reload --port 8000
+API_KEYS=your-key uvicorn manufacturing_pipeline.api.app:app --reload --port 8000
 
 # Use the API
 curl -X POST http://localhost:8000/api/v1/analyze \
@@ -95,7 +95,7 @@ python deploy/file_watcher_service.py --test --file path/to/file.step
 
 ### Testing
 ```bash
-python -m pytest tests/
+python -m pytest
 ```
 
 ## Project Structure
@@ -103,13 +103,10 @@ python -m pytest tests/
 ```
 /
 ├── run.py                          # Entry point (thin wrapper → cli.py)
-├── Dockerfile                      # Docker image (API deployment)
-├── docker-compose.yml              # Docker orchestration
 ├── requirements.txt                # All Python dependencies
-├── .env.example                    # Environment config template
 ├── CLAUDE.md                       # This file
 │
-├── manufacturing_pipeline/         # Core analysis package
+├── manufacturing_pipeline/         # ALL code
 │   ├── __init__.py
 │   ├── __main__.py                 # Enables: python -m manufacturing_pipeline
 │   ├── cli.py                      # Unified CLI (quick + full + batch modes)
@@ -144,34 +141,44 @@ python -m pytest tests/
 │   │   ├── excel_exporter.py       # Excel export in SpaceClaim format
 │   │   └── pdf_processing.py       # PDF parsing utilities
 │   │
-│   └── scripts/                    # Standalone analysis scripts
-│       ├── aag_analyzer.py         # AAG feature recognition
-│       └── compare_erp.py          # ERP validation tool
+│   ├── scripts/                    # Standalone analysis scripts
+│   │   ├── aag_analyzer.py         # AAG feature recognition
+│   │   └── compare_erp.py          # ERP validation tool
+│   │
+│   ├── api/                        # REST API (Docker/VPS deployment)
+│   │   ├── app.py                  # FastAPI application, middleware, CORS
+│   │   ├── routes.py               # API endpoints (analyze, jobs, health)
+│   │   ├── analysis_service.py     # Bridge to manufacturing pipeline
+│   │   ├── job_manager.py          # Job state management with SQLite
+│   │   ├── schemas.py              # Pydantic request/response models
+│   │   ├── config.py               # API configuration (env vars)
+│   │   └── static/index.html       # Web frontend
+│   │
+│   └── tests/                      # Test suite
+│       ├── test_basic.py
+│       └── test_xml_export.py
 │
-├── api/                            # REST API (Docker/VPS deployment)
-│   ├── app.py                      # FastAPI application, middleware, CORS
-│   ├── routes.py                   # API endpoints (analyze, jobs, health)
-│   ├── analysis_service.py         # Bridge to manufacturing pipeline
-│   ├── job_manager.py              # In-memory job state management
-│   ├── schemas.py                  # Pydantic request/response models
-│   ├── config.py                   # API configuration (env vars)
-│   └── static/index.html           # Web frontend
-│
-├── deploy/                         # Deployment configs
-│   ├── nginx.conf                  # Nginx reverse proxy config
+├── deploy/                         # Deployment & Docker
+│   ├── Dockerfile                  # Docker image definition
+│   ├── docker-compose.yml          # Docker orchestration
+│   ├── .env.example                # Environment config template
+│   ├── deploy.sh                   # VPS deploy script
 │   ├── install.sh                  # VPS setup script
+│   ├── nginx.conf                  # Nginx reverse proxy config
 │   ├── file_watcher_service.py     # Windows ERP file watcher service
-│   ├── install_windows_service.bat # Windows service installer (NSSM)
 │   └── requirements-watcher.txt    # File watcher dependencies
 │
-├── tests/                          # Test suite
-│   ├── test_basic.py
-│   └── test_xml_export.py
+├── docs/                           # Documentation, scripts & archive
+│   ├── *.md                        # Handovers, classificatie, workflows
+│   ├── scripts/                    # Standalone validation/analysis scripts
+│   ├── archive/                    # Archived code (profile_pipeline, etc.)
+│   └── plans/                      # Implementation plans
 │
 └── data/                           # Runtime data (gitignored)
     ├── input/                      # STEP files for analysis
     ├── output/                     # Analysis results (per-part subdirs)
     ├── parts/                      # Quick-access sample parts
+    ├── snapshots/                  # XML status snapshots (git-tracked)
     ├── config/                     # pipeline_config.json
     └── db/                         # manufacturing_data.db, pipeline_cache.json
 ```
@@ -189,7 +196,7 @@ run.py → manufacturing_pipeline/cli.py → core/utils.py functions
 
 **Docker deployment (API):**
 ```
-Dockerfile → api/app.py → api/routes.py → manufacturing_pipeline (same engine)
+deploy/Dockerfile → manufacturing_pipeline/api/app.py → api/routes.py → same engine
 ```
 
 **Windows ERP integration:**
@@ -203,7 +210,7 @@ deploy/file_watcher_service.py → monitors folder → manufacturing_pipeline �
 |-------------|---------|
 | `run.py` | Thin wrapper, delegates to `manufacturing_pipeline.cli.main()` |
 | `python -m manufacturing_pipeline` | Same as `run.py` (via `__main__.py`) |
-| `api/app.py` | FastAPI REST API (Docker/VPS) |
+| `manufacturing_pipeline/api/app.py` | FastAPI REST API (Docker/VPS) |
 | `deploy/file_watcher_service.py` | Windows folder watcher for ERP |
 
 ### Analysis Flow
@@ -413,7 +420,7 @@ File watcher dependencies (separate, in `deploy/requirements-watcher.txt`):
 ### Quick Start
 ```bash
 export API_KEYS=your-secret-key
-docker compose up -d
+docker compose -f deploy/docker-compose.yml up -d
 curl http://localhost:8000/api/v1/health
 ```
 
@@ -434,7 +441,7 @@ apt update && apt install docker.io docker-compose-v2 nginx certbot python3-cert
 git clone <repo> /opt/manufacturing-api
 cd /opt/manufacturing-api
 echo "API_KEYS=your-key" > .env
-docker compose up -d
+docker compose -f deploy/docker-compose.yml up -d
 # Configure nginx: copy deploy/nginx.conf to /etc/nginx/sites-available/
 # Add SSL: certbot --nginx -d api.example.com
 ```
@@ -456,13 +463,13 @@ docker compose up -d
 1. Add detection logic to `analysis/step_processing.py` or `analysis/sheetmetal_analysis.py`
 2. Add caching in `data/cache_manager.py` if expensive
 3. Update report in `reporting/report_generator.py`
-4. Add tests in `tests/`
+4. Add tests in `manufacturing_pipeline/tests/`
 5. Update this CLAUDE.md
 
 ### Testing Changes
 
 ```bash
-python -m pytest tests/
+python -m pytest
 python run.py -f mypart.step --analyze
 python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ -v
 ```

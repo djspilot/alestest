@@ -74,7 +74,7 @@ try {
     Write-Host "Output XML:$outputPath"
 
     $generateArgs = @(
-        "scripts/generate_xml_dxf.py",
+        "docs/scripts/generate_xml_dxf.py",
         "--step", $stepPath,
         "--output", $outputPath,
         "--material", $Material,
@@ -94,7 +94,7 @@ try {
     Write-Host ""
     Write-Host "=== XML status guard + snapshot ==="
     $guardArgs = @(
-        "scripts/preserve_xml_status.py",
+        "docs/scripts/preserve_xml_status.py",
         "--xml", $outputPath
     )
 
@@ -111,7 +111,7 @@ try {
     }
 
     Write-Host ""
-    Write-Host "[OK] Pipeline complete. XML generated and snapshot stored in snapshots/xml_status."
+    Write-Host "[OK] Pipeline complete. XML generated and snapshot stored in data/snapshots/xml_status."
 }
 finally {
     Pop-Location
