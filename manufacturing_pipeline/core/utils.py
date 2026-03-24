@@ -490,6 +490,39 @@ def run_analysis(step_file, output_dir, args):
 
     print(f"  Totaal: {total_holes}")
 
+    analysis.detected_hole_visuals = {
+        "source": "flat" if is_flat else "3d",
+        "items": [
+            {
+                "type": str(getattr(h, "type", "cylindrical") or "cylindrical"),
+                "diameter": float(getattr(h, "diameter", 0.0) or 0.0),
+                "depth": float(getattr(h, "depth", 0.0) or 0.0),
+                "position": [
+                    float(getattr(h, "position", (0.0, 0.0, 0.0))[0]),
+                    float(getattr(h, "position", (0.0, 0.0, 0.0))[1]),
+                    float(getattr(h, "position", (0.0, 0.0, 0.0))[2]),
+                ],
+                "label": f"Ø{float(getattr(h, 'diameter', 0.0) or 0.0):.1f} mm",
+                "reason": getattr(h, "reason", None) or getattr(h, "hole_type", None) or "Cylindrisch gat",
+                "axis": list(getattr(h, "axis", (1.0, 0.0, 0.0)) or (1.0, 0.0, 0.0)),
+            }
+            for h in circular_holes
+        ] + [
+            {
+                "type": str(h.get("type", "shaped")).lower(),
+                "diameter": None,
+                "depth": float(analysis.thickness or 0),
+                "position": [float(h["center"][0]), float(h["center"][1]), float(h["center"][2])],
+                "label": str(h.get("dim", h.get("type", "Shaped"))),
+                "reason": f"{h.get('type', 'Shaped')} hole",
+                "normal": list(h.get("normal") or (1.0, 0.0, 0.0)),
+                "size": str(h.get("dim", "")),
+            }
+            for h in shaped_holes
+            if h.get("center")
+        ],
+    }
+
     # ================================================================
     # STEP 7: Save results
     # ================================================================

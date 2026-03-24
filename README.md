@@ -1,9 +1,57 @@
 # ALES Manufacturing Pipeline
 
 **Laatste update:** 24 maart 2026
-**Versie:** 3.9-dev (3D Viewer in webfrontend)
+**Versie:** 3.10-dev (ALES STEP Viewer + pipeline visualisaties)
 
 > Zie [docs/TIMELINE.md](docs/TIMELINE.md) voor de volledige versiegeschiedenis.
+
+### v3.10-dev — ALES STEP Viewer + pipeline visualisaties (24 maart 2026)
+
+**Doel van deze update:** de browserviewer bruikbaar maken als echte inspectietool voor STEP-bestanden en pipeline-keuzes, in plaats van alleen een bounding box of losse statusmeldingen.
+
+**Wat is gedaan:**
+
+1. **Nieuwe React/Vite viewer toegevoegd in `viewer/`**
+   - Losse ALES STEP Viewer met drag-and-drop voor `.step`/`.stp`.
+   - Sidebar met pipeline-status, API-configuratie en klikbare stapnavigatie.
+   - `run_viewer.sh` start de lokale API en viewer samen.
+
+2. **STEP rendering in de browser werkt nu op echte geometrie**
+   - Browserloader en backend normaliseren STEP-bestanden met rommel vóór `ISO-10303-21;`.
+   - Viewer gebruikt backend-mesh wanneer beschikbaar en valt anders terug op OpenCascade WASM in de browser.
+   - Camera fit en orbit target centreren het model automatisch.
+
+3. **Viewer-weergave is rustiger en CAD-achtiger gemaakt**
+   - Geen agressieve triangulated wireframe meer als hoofdbeeld.
+   - Hoofdweergave toont een bijna transparante body met duidelijke silhouette/feature edges.
+   - Object blijft gecentreerd tijdens roteren en zoomen.
+
+4. **Pipeline-stappen zijn visueel inspecteerbaar**
+   - `Detect holes` toont harde hole-outlines in plaats van subtiele bolletjes.
+   - `Classify geometry` en `Profile Router` tonen profielcontouren op section-posities.
+   - `Unfold` schakelt, wanneer flat data bestaat, over naar de vlakke uitslagmesh in plaats van de 3D-mesh.
+   - Sidebar toont per stage events, payloads en keuze-uitleg.
+
+5. **Brongeometrie klopt nu beter per visualisatie**
+   - Hole-overlays volgen de bron (`3d` of `flat`) uit de pipeline.
+   - API geeft nu optioneel ook `flat_mesh` terug bij een geslaagde unfold.
+   - Hierdoor worden flat-holes niet langer fout op een 3D-model geprojecteerd.
+
+**Belangrijke beperking nu:**
+- De echte `Profile Router` section-debug is nog afhankelijk van `pythonocc-core` in de oude routercode. Zonder die dependency gebruikt de viewer een sterke fallback-visualisatie op basis van profieltype en globale afmetingen.
+
+**Zelf starten:**
+
+```bash
+cd /Users/ds/AIdoel/alestest
+./run_viewer.sh
+```
+
+Daarna:
+- Viewer: `http://127.0.0.1:5173`
+- API health: `http://127.0.0.1:8000/api/v1/health`
+
+---
 
 ### v3.9-dev — 3D Viewer in webfrontend (24 maart 2026)
 

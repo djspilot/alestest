@@ -94,6 +94,7 @@ class AnalysisResult(BaseModel):
     route: Optional[RouteDetails] = None
     timeline_summary: Optional[TimelineSummary] = None
     mesh: Optional[MeshData] = None
+    visuals: Optional[dict] = None
     error: Optional[str] = None
 
 

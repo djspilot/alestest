@@ -169,6 +169,20 @@ def _build_timeline(result: dict, analysis, total_holes: int, timing_data: dict 
     return events, summary
 
 
+def _serialize_analysis_reasoning(analysis) -> list[dict]:
+    serialized = []
+    for item in getattr(analysis, "reasoning", []) or []:
+        serialized.append(
+            {
+                "step": getattr(item, "step", ""),
+                "observation": getattr(item, "observation", ""),
+                "conclusion": getattr(item, "conclusion", ""),
+                "details": getattr(item, "details", {}) or {},
+            }
+        )
+    return serialized
+
+
 def run_step_analysis(step_file: str, use_aag: bool = True) -> dict:
     """Run the manufacturing analysis pipeline on a STEP file.
 
@@ -271,6 +285,32 @@ def run_step_analysis(step_file: str, use_aag: bool = True) -> dict:
                 "reasoning": route_result.reasoning,
             }
 
+        result["visuals"] = {
+            "router": {
+                **(result.get("route") or {}),
+                **(getattr(route_result, "debug", None) or {}),
+            } if route_result is not None else None,
+            "classification": {
+                "part_category": result.get("category"),
+                "part_type": result.get("part_type"),
+                "thickness": result.get("thickness"),
+                "dimensions": result.get("dimensions"),
+                "reasoning": _serialize_analysis_reasoning(analysis),
+            },
+            "holes": {
+                "total": total_holes,
+                **(getattr(analysis, "detected_hole_visuals", None) or {"items": []}),
+            },
+            "unfold": {
+                "success": bool(unfold_result and unfold_result.get("success")),
+                "flat_length": unfold_result.get("flat_length") if unfold_result else None,
+                "flat_width": unfold_result.get("flat_width") if unfold_result else None,
+                "fold_lines": unfold_result.get("fold_lines") if unfold_result else 0,
+                "fold_details": unfold_result.get("fold_details", []) if unfold_result else [],
+                "bends_logical": unfold_result.get("bends_logical", []) if unfold_result else [],
+            },
+        }
+
         # Build replay timeline from profiler + analysis outputs
         timeline_events, timeline_summary = _build_timeline(result, analysis, total_holes, timing_data)
         result["timeline"] = timeline_events
@@ -279,13 +319,25 @@ def run_step_analysis(step_file: str, use_aag: bool = True) -> dict:
         # Tessellate STEP geometry for 3D viewer
         try:
             from manufacturing_pipeline.analysis.step_processing import tessellate_shape, load_step_file
-            shape = load_step_file(step_file)
-            mesh_data = tessellate_shape(shape, deflection=0.5)
-            if mesh_data and len(mesh_data.get("vertices", [])) > 0:
-                # Round vertices to 2 decimals to reduce JSON size
+
+            def _rounded_mesh(path: str):
+                shape = load_step_file(path)
+                mesh_data = tessellate_shape(shape, deflection=0.5)
+                if not mesh_data or len(mesh_data.get("vertices", [])) == 0:
+                    return None
                 mesh_data["vertices"] = [round(v, 2) for v in mesh_data["vertices"]]
                 mesh_data["normals"] = [round(n, 4) for n in mesh_data["normals"]]
+                return mesh_data
+
+            mesh_data = _rounded_mesh(step_file)
+            if mesh_data:
                 result["mesh"] = mesh_data
+
+            flat_step_path = unfold_result.get("flat_step_path") if unfold_result else None
+            if flat_step_path and os.path.exists(flat_step_path):
+                flat_mesh_data = _rounded_mesh(flat_step_path)
+                if flat_mesh_data:
+                    result.setdefault("visuals", {}).setdefault("unfold", {})["flat_mesh"] = flat_mesh_data
         except Exception:
             pass  # Mesh is optional, don't fail the analysis
 

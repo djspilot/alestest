@@ -20,6 +20,31 @@ from manufacturing_pipeline.analysis import assembly_analysis
 import os
 import uuid
 from collections import Counter
+import tempfile
+
+STEP_HEADER = b"ISO-10303-21;"
+
+
+def _normalize_step_file(filepath: str) -> str:
+    """Return a sanitized STEP path when the file has junk before the STEP header."""
+    with open(filepath, "rb") as handle:
+        data = handle.read()
+
+    if data.startswith(STEP_HEADER):
+        return filepath
+
+    header_index = data.find(STEP_HEADER)
+    if header_index <= 0:
+        return filepath
+
+    suffix = os.path.splitext(filepath)[1] or ".stp"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    try:
+        tmp.write(data[header_index:])
+        tmp.flush()
+        return tmp.name
+    finally:
+        tmp.close()
 
 
 def _load_step_via_xcaf(filepath):
@@ -111,12 +136,14 @@ def load_step_file(filepath):
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"STEP file not found: {filepath}")
 
-    xcaf_shape = _load_step_via_xcaf(filepath)
+    normalized_path = _normalize_step_file(filepath)
+
+    xcaf_shape = _load_step_via_xcaf(normalized_path)
     if xcaf_shape is not None:
         return xcaf_shape
 
     # CadQuery importer fallback (existing behavior)
-    return cq.importers.importStep(filepath)
+    return cq.importers.importStep(normalized_path)
 
 def tessellate_shape(cq_shape, deflection=0.5, angular_deflection=0.5):
     """Tessellate a CadQuery shape into triangle mesh data for 3D rendering.

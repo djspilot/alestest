@@ -1360,6 +1360,18 @@ def classify_solid_profile(solid_shape: Any, registry: ProfileRegistry | None = 
             "confidence": 0.45,
             "reason": "te weinig geldige doorsneden",
             "axis": axis,
+            "section_positions": [float(p) for p in positions],
+            "sampled_sections": [
+                {
+                    "position": float(sec.source_position),
+                    "origin_3d": sec.origin_3d.tolist(),
+                    "area": float(sec.polygon.area),
+                    "holes": len(sec.polygon.interiors),
+                    "line_length_fraction": float(sec.line_length_fraction),
+                    "curve_length_fraction": float(sec.curve_length_fraction),
+                }
+                for sec in sections
+            ],
         }
 
     cluster = dominant_section_cluster(sections)
@@ -1369,6 +1381,18 @@ def classify_solid_profile(solid_shape: Any, registry: ProfileRegistry | None = 
             "confidence": 0.50,
             "reason": "doorsneden zijn niet stabiel genoeg langs de lengte",
             "axis": axis,
+            "section_positions": [float(p) for p in positions],
+            "sampled_sections": [
+                {
+                    "position": float(sec.source_position),
+                    "origin_3d": sec.origin_3d.tolist(),
+                    "area": float(sec.polygon.area),
+                    "holes": len(sec.polygon.interiors),
+                    "line_length_fraction": float(sec.line_length_fraction),
+                    "curve_length_fraction": float(sec.curve_length_fraction),
+                }
+                for sec in sections
+            ],
         }
 
     # medoid of dominant cluster
@@ -1388,6 +1412,18 @@ def classify_solid_profile(solid_shape: Any, registry: ProfileRegistry | None = 
             "axis": axis,
             "cluster_size": len(cluster),
             "sections_total": len(sections),
+            "section_positions": [float(p) for p in positions],
+            "sampled_sections": [
+                {
+                    "position": float(sec.source_position),
+                    "origin_3d": sec.origin_3d.tolist(),
+                    "area": float(sec.polygon.area),
+                    "holes": len(sec.polygon.interiors),
+                    "line_length_fraction": float(sec.line_length_fraction),
+                    "curve_length_fraction": float(sec.curve_length_fraction),
+                }
+                for sec in sections
+            ],
         }
     )
     return result
