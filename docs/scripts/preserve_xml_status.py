@@ -7,8 +7,8 @@ Goal:
 - Record git metadata for traceability
 
 Usage examples:
-    python scripts/preserve_xml_status.py --xml ..\\stepfiles\\10040878_1_generated_latest.xml
-    python scripts/preserve_xml_status.py --xml data\\output\\run.xml --tag test-run --fail-on-warning
+    python docs/scripts/preserve_xml_status.py --xml ..\\stepfiles\\10040878_1_generated_latest.xml
+    python docs/scripts/preserve_xml_status.py --xml data\\output\\run.xml --tag test-run --fail-on-warning
 """
 
 from __future__ import annotations

@@ -654,7 +654,7 @@ v2_profile_sa_v_ratio_max = 1.2
 
 1. **Openen:** `manufacturing_pipeline/analysis/classification_variables.py`
 2. **Pas waarden aan** voor je industrie/producttype
-3. **Test:** `python scripts/export_classification_excel.py mijnbestand.stp`
+3. **Test:** `python docs/scripts/export_classification_excel.py mijnbestand.stp`
 4. **Check:** Excel output en `debug_*.py` scripts
 5. **Commit:** `git add -A && git commit -m "Tuning: aangepaste thresholds"`
 
