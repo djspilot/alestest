@@ -293,6 +293,31 @@ Als wel plausibele tapmatch overblijft:
 
 Dus voor profiel is de thread-logica strenger dan voor plaat.
 
+### Disambiguatie-uitzondering voor kleine profielgaten
+
+Situatie:
+- zowel `tapped_matches` als `major_matches` aanwezig (ambigu)
+- voorbeeld: Ø5.0 mm matcht op M5 major (Ø5.0) én M6 tapped (tapboord Ø5.0)
+
+Actieve uitzondering (alleen profiel):
+- condities: `diameter <= 6.0 mm` AND `depth <= max(6.0, diameter × 1.5)`
+- voor elke tapped match:
+
+$$
+0.8 \le (major\_diameter - hole\_diameter) \le 1.4
+$$
+
+Als match gevonden → label = `thread`, doorgaan bij eerste treffer.
+
+Rationale:
+- voor kleine gaten in een profielwand (dunne sectie) is de kans dat een gat als tapgat is uitgevoerd groter dan als speling-gat
+- de delta-eis filtert op de typische relatie M×taphoor → M(×+1) major
+- voorbeeld M6: tapboord Ø5.0, major Ø6.0 → delta = 1.0 ✓
+- bij grotere gaten (> 6 mm) blijft de strenge regel van kracht
+
+Als geen uitzondering van toepassing is:
+- ambigu → label blijft `round`
+
 ### Samenvatting beslissing
 Een cilindrisch gat wordt alleen tapgat als ISO-diametermatching sterk genoeg is.
 
@@ -301,7 +326,6 @@ Belangrijke systeemnoot:
 - schroefdraad wordt niet direct topologisch herkend
 - dit maakt de detectie gevoelig voor ambigue diameters
 
----
 
 ## Feature 5 - Verzonken gat-herkenning (`_detect_countersunk_holes`)
 
@@ -429,13 +453,65 @@ Actieve keuzes:
 Profiel bore-filter:
 - bepaal `longest_dim` uit bounding box
 - verwijder cilindrische gaten als:
-
 $$
 hole\_depth > 0.30 \cdot longest\_dim
 $$
 
+### Profiel end-face shaped-hole filter
+
 Doel:
-- interne buisboring of lange profielboring niet als echt gat tellen
+- voorkom dat de holle profielkern op het uiteinde als vormgat wordt meegeteld
+
+Actieve criteria (alleen profiel-wrapper):
+- shaped hole normal is bijna parallel aan lengte-as: `axis_alignment >= 0.95`
+- hole center ligt dicht bij profiel-einde: `end_distance <= max(2.0, 0.05 * longest_dim)`
+- hole-afmetingen zijn groot t.o.v. doorsnede:
+   - `max_dim >= 0.60 * cross_mid_dim`
+   - `min_dim >= 0.50 * cross_small_dim`
+
+Als alle criteria waar zijn:
+- shaped hole wordt onderdrukt (niet geteld, niet gelabeld)
+
+### Aanvullende methode: inferentie via gestapelde cylinders (`_infer_profile_countersink_pairs`)
+
+**Alleen actief in de profiel-wrapper.**
+
+#### Aanleiding
+Sommige STEP-bestanden hebben geen conische face voor de verzinking.
+In dat geval is Feature 5 blind voor de countersink.
+De gestapelde-cylinder-methode detecteert dan het patroon indirect:
+- groot gat (verzonken deel) bovenop klein gat (doorgang)
+
+#### Matchcriteria paar (groot → klein)
+- diameter ratio:
+
+$$
+1.6 \le \frac{d_{groot}}{d_{klein}} \le 2.6
+$$
+
+- as-paralleliteit: `axis_dot >= 0.98`
+- radiale afstand centrum tot as: `perp <= 4.0 mm`
+- axiale afstand centrum tot centrum:
+
+$$
+5.0 \le axial \le 30.0 \text{ mm}
+$$
+
+- diepteverschil: `abs(depth_groot - depth_klein) <= 2.0 mm`
+
+#### Scorefunctie (kies beste partner)
+
+$$
+score = perp + 0.05 \cdot |axial - 15.0|
+$$
+
+#### Uitkomst
+- groot-gat index → `inferred_countersunk` set → label = `countersunk`
+- klein-gat index → `suppressed_subholes` set → wordt niet apart meegeteld
+
+#### Interactie met Feature 5
+- als Feature 5 al een cone-match heeft voor een gat, wordt dat gat niet opnieuw als kandidaat aangeboden
+- de inferentie-methode is alleen een fallback voor gaten zonder conische match
 
 Verder:
 - shaped holes blijven actief
@@ -497,12 +573,23 @@ Wordt naar `Tube_*` velden geschreven, o.a.:
 ### thread detection
 - ISO diameter tolerance: `0.20 mm`
 - plate plausibility gate: `major_diameter <= 1.35 * hole_depth`
+- profiel disambiguatie max diameter: `6.0 mm`
+- profiel disambiguatie max depth: `max(6.0, diameter × 1.5)`
+- profiel disambiguatie delta-window: `0.8 mm .. 1.4 mm` (major_diameter - hole_diameter)
 
 ### countersink detection
 - axis alignment: `axis_dot >= 0.97`
 - radial gate: `<= max(1.0, 1.25 * hole_radius)`
 - axial gate: `<= max(25.0, 6.0 * hole_radius)`
 - included angle: `55° .. 150°`
+
+### profiel countersink inferentie (`_infer_profile_countersink_pairs`)
+- diameter ratio: `1.6 .. 2.6`
+- axis alignment: `axis_dot >= 0.98`
+- perpendicular distance: `<= 4.0 mm`
+- axial distance: `5.0 mm .. 30.0 mm`
+- depth difference: `<= 2.0 mm`
+- score: `perp + 0.05 * abs(axial - 15.0)` (minimaliseren)
 
 ### standalone countersink grouping
 - axis alignment: `axis_dot >= 0.999`
@@ -514,22 +601,34 @@ Wordt naar `Tube_*` velden geschreven, o.a.:
 ### profiel-only bore post-filter
 - reject if `hole_depth > 0.30 * longest_dim`
 
+### profiel end-face shaped-hole filter
+- axis alignment with length axis: `>= 0.95`
+- end-distance gate: `<= max(2.0 mm, 0.05 * longest_dim)`
+- large opening gate (cross-section relative):
+   - `max_dim >= 0.60 * cross_mid_dim`
+   - `min_dim >= 0.50 * cross_small_dim`
+
 ---
 
 ## Bekende actuele zwakke plekken
 
 1. `detect_shaped_holes` gebruikt de aanname dat elke inner wire op een planair vlak een gat is.
-   - bij profielen kan dit valse shaped holes geven
+   - bij profielen is nu een end-face filter toegevoegd voor grote holle-kern openingen
+   - resterend risico: complexe end-features die sterk op een holle kern lijken
 
 2. Thread-detectie is diameter-gedreven.
    - bij ambigue diameters valt de beslissing snel terug naar `round`
+   - voor profiel is een disambiguatieregel toegevoegd voor kleine gaten ≤ 6 mm (zie Feature 4)
+   - voor plaat is nog geen vergelijkbare disambiguatie geïmplementeerd
 
 3. Standalone countersinks worden momenteel als `thread` geboekt en niet als `countersunk`.
+   - voor profiel is een inferentie-methode via gestapelde cylinders toegevoegd als fallback (zie Feature 5)
+   - voor plaat is geen gestapelde-cylinder-inferentie aanwezig
 
 4. Profiel-wrapper gebruikt een andere threadbeslissing dan plaat-wrapper.
    - dit kan verschillende uitkomsten geven voor vergelijkbare gaten
 
-5. Countersink-herkenning vereist een bruikbare conische representatie in STEP.
+5. Countersink-herkenning op plaat vereist een bruikbare conische representatie in STEP.
    - als de conische topologie anders is opgebouwd, wordt geen match gevonden
 
 ---

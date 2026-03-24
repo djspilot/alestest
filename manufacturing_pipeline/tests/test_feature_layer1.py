@@ -204,3 +204,30 @@ def test_profile_infers_countersink_from_stepped_pair(monkeypatch: pytest.Monkey
     assert result.countersunk_holes == 1
     assert result.threaded_holes == 0
     assert result.hole_types == ["countersunk"]
+
+
+def test_profile_filters_end_face_hollow_opening_from_shaped_holes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Large shaped contour on profile end face should be suppressed as hollow-core opening."""
+
+    monkeypatch.setattr(cut_features, "detect_holes", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        cut_features,
+        "detect_shaped_holes",
+        lambda *_a, **_k: [
+            {"type": "Rect", "dim": "34x14", "center": (49.0, 0.0, 0.0), "normal": (1.0, 0.0, 0.0)},
+            {"type": "Rect", "dim": "8x6", "center": (0.0, 19.0, 0.0), "normal": (0.0, 1.0, 0.0)},
+        ],
+    )
+    monkeypatch.setattr(cut_features, "deduplicate_holes", lambda c, _s: c)
+    monkeypatch.setattr(cut_features, "_detect_countersunk_holes", lambda *_a, **_k: {})
+    monkeypatch.setattr(cut_features, "_detect_standalone_countersunk_holes", lambda *_a, **_k: [])
+    monkeypatch.setattr(cut_features, "_infer_profile_countersink_pairs", lambda *_a, **_k: (set(), set()))
+    monkeypatch.setattr(cut_features.iso_standards, "identify_thread_from_diameter", lambda *_a, **_k: [])
+
+    test_solid = cq.Workplane("XY").box(100, 40, 20).val().wrapped
+    result = cut_features.extract_cut_features_for_profile(solid=test_solid, part_classification="profiel")
+
+    assert result is not None
+    assert result.nr_holes == 1
+    assert result.nr_shaped == 1
+    assert result.hole_types == ["hole"]

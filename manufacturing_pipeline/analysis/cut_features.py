@@ -758,6 +758,83 @@ def _parse_dimensions_from_string(dim_str: str) -> Optional[tuple]:
         return None
 
 
+def _filter_profile_end_opening_shaped_holes(
+    shaped_holes: List[Dict[str, Any]],
+    bbox_min: Tuple[float, float, float],
+    bbox_max: Tuple[float, float, float],
+) -> List[Dict[str, Any]]:
+    """Suppress profile end-face cavity openings falsely detected as shaped holes.
+
+    The false positive is typically a large inner contour on the profile end face
+    (for example RHS/SHS inner hollow like 34x14 on a 40x20 profile).
+    """
+    if not shaped_holes:
+        return shaped_holes
+
+    dims = [
+        float(bbox_max[0] - bbox_min[0]),
+        float(bbox_max[1] - bbox_min[1]),
+        float(bbox_max[2] - bbox_min[2]),
+    ]
+    longest_dim = max(dims)
+    if longest_dim <= 0:
+        return shaped_holes
+
+    axis_idx = int(max(range(3), key=lambda i: dims[i]))
+    cross_dims = sorted([dims[i] for i in range(3) if i != axis_idx])
+    if len(cross_dims) != 2 or cross_dims[0] <= 0 or cross_dims[1] <= 0:
+        return shaped_holes
+
+    axis_vector = [0.0, 0.0, 0.0]
+    axis_vector[axis_idx] = 1.0
+    axis_min = float(bbox_min[axis_idx])
+    axis_max = float(bbox_max[axis_idx])
+    end_band = max(2.0, longest_dim * 0.05)
+
+    kept: List[Dict[str, Any]] = []
+    filtered = 0
+    for shaped in shaped_holes:
+        normal = _normalize_vector(_as_point_tuple(shaped.get("normal")))
+        center = _as_point_tuple(shaped.get("center"))
+        parsed_dims = _parse_dimensions_from_string(str(shaped.get("dim", "")))
+
+        if normal is None or center is None or parsed_dims is None:
+            kept.append(shaped)
+            continue
+
+        axis_alignment = abs(_dot(tuple(axis_vector), normal))
+        if axis_alignment < 0.95:
+            kept.append(shaped)
+            continue
+
+        axis_pos = float(center[axis_idx])
+        end_distance = min(abs(axis_pos - axis_min), abs(axis_pos - axis_max))
+        if end_distance > end_band:
+            kept.append(shaped)
+            continue
+
+        dim_a, dim_b = parsed_dims
+        max_dim = max(dim_a, dim_b)
+        min_dim = min(dim_a, dim_b)
+
+        is_large_end_opening = (
+            max_dim >= cross_dims[1] * 0.60
+            and min_dim >= cross_dims[0] * 0.50
+        )
+        if is_large_end_opening:
+            filtered += 1
+            continue
+
+        kept.append(shaped)
+
+    if filtered > 0:
+        logger.info(
+            f"[CutFeatures] Profiel end-face shaped filter: {filtered} vormgat(en) verwijderd"
+        )
+
+    return kept
+
+
 # ============================================================================
 # TOEKOMSTIGE UITBREIDINGEN (Fase 2: profiel)
 # ============================================================================
@@ -826,6 +903,11 @@ def extract_cut_features_for_profile(
         logger.info("[CutFeatures] Profiel: detect vormgaten...")
         cq_workplane = cq.Workplane(obj=cq_solid)
         shaped_holes = detect_shaped_holes(cq_workplane)
+        shaped_holes = _filter_profile_end_opening_shaped_holes(
+            shaped_holes,
+            (xmin, ymin, zmin),
+            (xmax, ymax, zmax),
+        )
         logger.info(f"[CutFeatures] Profiel: {len(shaped_holes)} vormgaten")
 
         # STAP 3: Dedupliceer
