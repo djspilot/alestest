@@ -1,9 +1,44 @@
 # ALES Manufacturing Pipeline
 
-**Laatste update:** 23 maart 2026
-**Versie:** 3.7-dev (Step 0 stabilisatie + testfundament)
+**Laatste update:** 24 maart 2026
+**Versie:** 3.8-dev (Projectstructuur opgeschoond)
 
-> Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis.
+> Zie [docs/TIMELINE.md](docs/TIMELINE.md) voor de volledige versiegeschiedenis.
+
+### v3.8-dev — Projectstructuur opgeschoond (24 maart 2026)
+
+**Doel van deze update:** root directory opschonen tot een minimale, overzichtelijke structuur zonder dat paden of imports breken.
+
+**Wat is gedaan:**
+
+1. **Root directory opgeschoond (van 25 naar 9 items)**
+   - 10 losse markdown-bestanden (handovers, classificatie-docs, notities) verplaatst naar `docs/`.
+   - `scripts/` (standalone validatie/analyse) verplaatst naar `docs/scripts/`.
+   - `snapshots/` verplaatst naar `data/snapshots/`.
+   - `profile_pipeline/` gearchiveerd naar `docs/archive/` (niet actief geïntegreerd).
+
+2. **Docker-bestanden gecentraliseerd in `deploy/`**
+   - `Dockerfile`, `docker-compose.yml` en `.env.example` verplaatst van root naar `deploy/`.
+   - Alle deploy-scripts bijgewerkt met `-f deploy/docker-compose.yml` flag.
+
+3. **`api/` samengevoegd in `manufacturing_pipeline/api/`**
+   - API is nu een subpackage van het hoofdpakket.
+   - Alle imports bijgewerkt van `from api.` naar `from manufacturing_pipeline.api.`.
+   - DB_PATH-berekening gecorrigeerd voor nieuwe nesting.
+   - Dockerfile CMD bijgewerkt naar `manufacturing_pipeline.api.app:app`.
+
+4. **`tests/` samengevoegd in `manufacturing_pipeline/tests/`**
+   - Tests zijn nu een subpackage van het hoofdpakket.
+   - `pytest.ini` testpaths bijgewerkt.
+   - Alle 25 tests passen na verplaatsing.
+
+**Huidige root:**
+```
+run.py  README.md  CLAUDE.md  requirements.txt  pytest.ini
+manufacturing_pipeline/  data/  deploy/  docs/
+```
+
+---
 
 ### v3.7-dev — Step 0 stabilisatie + testfundament (23 maart 2026)
 
