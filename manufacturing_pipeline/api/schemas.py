@@ -75,6 +75,12 @@ class TimelineSummary(BaseModel):
     part_name: Optional[str] = None
 
 
+class MeshData(BaseModel):
+    vertices: list[float] = []   # flat [x,y,z, x,y,z, ...]
+    indices: list[int] = []      # flat [i0,i1,i2, ...]
+    normals: list[float] = []    # flat [nx,ny,nz, ...]
+
+
 class AnalysisResult(BaseModel):
     file: str
     success: bool
@@ -87,6 +93,7 @@ class AnalysisResult(BaseModel):
     aag_details: Optional[AAGDetails] = None
     route: Optional[RouteDetails] = None
     timeline_summary: Optional[TimelineSummary] = None
+    mesh: Optional[MeshData] = None
     error: Optional[str] = None
 
 

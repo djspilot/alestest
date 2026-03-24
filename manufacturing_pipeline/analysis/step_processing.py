@@ -118,6 +118,94 @@ def load_step_file(filepath):
     # CadQuery importer fallback (existing behavior)
     return cq.importers.importStep(filepath)
 
+def tessellate_shape(cq_shape, deflection=0.5, angular_deflection=0.5):
+    """Tessellate a CadQuery shape into triangle mesh data for 3D rendering.
+
+    Args:
+        cq_shape: CadQuery Workplane or Shape object.
+        deflection: Linear deflection for mesh quality (smaller = finer).
+        angular_deflection: Angular deflection in radians.
+
+    Returns:
+        dict with flat arrays: {"vertices": [...], "indices": [...], "normals": [...]}
+    """
+    from OCP.BRepMesh import BRepMesh_IncrementalMesh
+    from OCP.TopLoc import TopLoc_Location
+
+    # Unwrap CadQuery object to OCP shape
+    if hasattr(cq_shape, 'val'):
+        shape = cq_shape.val()
+    elif hasattr(cq_shape, 'wrapped'):
+        shape = cq_shape
+    else:
+        shape = cq_shape
+
+    ocp_shape = shape.wrapped if hasattr(shape, 'wrapped') else shape
+
+    # Tessellate
+    mesh = BRepMesh_IncrementalMesh(ocp_shape, deflection, False, angular_deflection, False)
+    mesh.Perform()
+
+    vertices = []
+    indices = []
+    normals = []
+    vertex_offset = 0
+
+    explorer = TopExp_Explorer(ocp_shape, TopAbs_FACE)
+    while explorer.More():
+        face = TopoDS.Face_s(explorer.Current())
+        location = TopLoc_Location()
+        triangulation = BRep_Tool.Triangulation_s(face, location)
+
+        if triangulation is not None:
+            transform = location.Transformation()
+            nb_nodes = triangulation.NbNodes()
+            nb_triangles = triangulation.NbTriangles()
+
+            # Extract vertices (apply location transform)
+            for i in range(1, nb_nodes + 1):
+                pt = triangulation.Node(i)
+                pt.Transform(transform)
+                vertices.extend([pt.X(), pt.Y(), pt.Z()])
+
+            # Extract normals if available, otherwise use face normal
+            has_normals = triangulation.HasNormals()
+            reversed_face = (face.Orientation() == TopAbs_REVERSED)
+
+            if has_normals:
+                for i in range(1, nb_nodes + 1):
+                    n = triangulation.Normal(i)
+                    nx, ny, nz = n.X(), n.Y(), n.Z()
+                    if reversed_face:
+                        nx, ny, nz = -nx, -ny, -nz
+                    normals.extend([nx, ny, nz])
+            else:
+                # Approximate: use (0,0,0) placeholder, will be computed client-side
+                for _ in range(nb_nodes):
+                    normals.extend([0.0, 0.0, 0.0])
+
+            # Extract triangle indices (adjust for vertex offset and face orientation)
+            for t in range(1, nb_triangles + 1):
+                tri = triangulation.Triangle(t)
+                v1 = tri.Value(1) - 1 + vertex_offset
+                v2 = tri.Value(2) - 1 + vertex_offset
+                v3 = tri.Value(3) - 1 + vertex_offset
+                if reversed_face:
+                    indices.extend([v1, v3, v2])  # Flip winding
+                else:
+                    indices.extend([v1, v2, v3])
+
+            vertex_offset += nb_nodes
+
+        explorer.Next()
+
+    return {
+        "vertices": vertices,
+        "indices": indices,
+        "normals": normals,
+    }
+
+
 def analyze_sheet_metal(solid):
     """
     Analyze a solid to determine if it's a sheet metal part.

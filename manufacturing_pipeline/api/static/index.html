@@ -898,11 +898,15 @@
                 controls.dampingFactor = 0.08;
                 controls.target.set(0, 0, 0);
 
-                scene.add(new THREE.AmbientLight(0xffffff, 0.72));
-                const light = new THREE.DirectionalLight(0xffffff, 0.85);
-                light.position.set(100, 120, 90);
+                scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+                scene.add(new THREE.HemisphereLight(0xddeeff, 0x404040, 0.4));
+                const light = new THREE.DirectionalLight(0xffffff, 0.8);
+                light.position.set(150, 200, 100);
                 scene.add(light);
-                scene.add(new THREE.GridHelper(320, 20, 0xc8ced8, 0xe5e9ef));
+                const light2 = new THREE.DirectionalLight(0xffffff, 0.3);
+                light2.position.set(-100, 50, -80);
+                scene.add(light2);
+                scene.add(new THREE.GridHelper(500, 25, 0xc8ced8, 0xe5e9ef));
 
                 threeState.scene = scene;
                 threeState.camera = camera;
@@ -937,15 +941,85 @@
             fitCanvasToContainer(viewer2dCanvas);
         }
 
+        function clearThreeMesh() {
+            if (!threeState.mesh) return;
+            threeState.scene.remove(threeState.mesh);
+            threeState.mesh.traverse(child => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) {
+                    if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+                    else child.material.dispose();
+                }
+            });
+            threeState.mesh = null;
+        }
+
+        function fitCameraToMesh(geometry) {
+            const THREE = threeState.THREE;
+            geometry.computeBoundingBox();
+            const box = geometry.boundingBox;
+            const size = new THREE.Vector3();
+            const center = new THREE.Vector3();
+            box.getSize(size);
+            box.getCenter(center);
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const dist = maxDim * 1.8;
+            threeState.camera.position.set(center.x + dist * 0.7, center.y + dist * 0.5, center.z + dist * 0.8);
+            threeState.controls.target.copy(center);
+            threeState.controls.update();
+            // Update grid size to match part
+            threeState.scene.children.forEach(c => {
+                if (c.isGridHelper) { threeState.scene.remove(c); c.dispose(); }
+            });
+            const gridSize = Math.max(500, maxDim * 3);
+            threeState.scene.add(new THREE.GridHelper(gridSize, 25, 0xc8ced8, 0xe5e9ef));
+        }
+
+        function setThreeMeshFromData(meshData) {
+            if (!threeState.ready) return;
+            const THREE = threeState.THREE;
+            clearThreeMesh();
+
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(meshData.vertices);
+            const idx = new Uint32Array(meshData.indices);
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setIndex(new THREE.BufferAttribute(idx, 1));
+
+            // Use provided normals or compute them
+            const hasNormals = meshData.normals && meshData.normals.length === meshData.vertices.length;
+            const allZero = hasNormals && meshData.normals.every(n => n === 0);
+            if (hasNormals && !allZero) {
+                geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(meshData.normals), 3));
+            } else {
+                geometry.computeVertexNormals();
+            }
+
+            // Material: industrial metallic look
+            const mat = new THREE.MeshStandardMaterial({
+                color: 0x7899aa,
+                metalness: 0.35,
+                roughness: 0.55,
+                side: THREE.DoubleSide,
+            });
+            const mesh = new THREE.Mesh(geometry, mat);
+
+            // Edge lines for CAD-style wireframe (only sharp edges)
+            const edgesGeo = new THREE.EdgesGeometry(geometry, 20);
+            const edgesMat = new THREE.LineBasicMaterial({ color: 0x2a3a4a, linewidth: 1 });
+            mesh.add(new THREE.LineSegments(edgesGeo, edgesMat));
+
+            threeState.scene.add(mesh);
+            threeState.mesh = mesh;
+            fitCameraToMesh(geometry);
+            viewer3dState.textContent = `Mesh: ${(meshData.vertices.length / 3).toLocaleString()} vertices, ${(meshData.indices.length / 3).toLocaleString()} driehoeken`;
+        }
+
         function setThreeMeshFromDims() {
             if (!threeState.ready) return;
             const THREE = threeState.THREE;
-            if (threeState.mesh) {
-                threeState.scene.remove(threeState.mesh);
-                threeState.mesh.geometry.dispose();
-                threeState.mesh.material.dispose();
-                threeState.mesh = null;
-            }
+            clearThreeMesh();
 
             const geom = new THREE.BoxGeometry(currentDims.x, currentDims.y, currentDims.z);
             const mat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.22, roughness: 0.48 });
@@ -962,6 +1036,7 @@
 
             threeState.controls.target.set(0, currentDims.y / 2, 0);
             threeState.controls.update();
+            viewer3dState.textContent = 'Viewer: bounding box (geen mesh data)';
         }
 
         function worldToScreen(x, y, z) {
@@ -1116,11 +1191,19 @@
 
             const ok = await ensureThreeViewer();
             if (ok) {
-                setThreeMeshFromDims();
+                const mesh = result.mesh;
+                if (mesh && mesh.vertices && mesh.vertices.length > 0) {
+                    setThreeMeshFromData(mesh);
+                    document.getElementById('viewerCaption').textContent =
+                        `3D STEP-geometrie — ${currentDims.x.toFixed(0)} x ${currentDims.z.toFixed(0)} x ${currentDims.y.toFixed(0)} mm`;
+                } else {
+                    setThreeMeshFromDims();
+                    document.getElementById('viewerCaption').textContent =
+                        `Bounding box (afmetingen) — ${currentDims.x.toFixed(0)} x ${currentDims.z.toFixed(0)} x ${currentDims.y.toFixed(0)} mm`;
+                }
                 draw3DOverlay();
             }
             draw2DProjection();
-            document.getElementById('viewerCaption').textContent = `3D + 2D visualisatie op basis van afmetingen: ${currentDims.x.toFixed(0)} x ${currentDims.z.toFixed(0)} x ${currentDims.y.toFixed(0)} mm`;
         }
 
         function toggleFullscreenViewer() {
@@ -1135,8 +1218,12 @@
 
         function resetViewerCamera() {
             if (!threeState.ready) return;
-            threeState.camera.position.set(140, 110, 160);
-            threeState.controls.target.set(0, currentDims.y / 2, 0);
+            if (threeState.mesh && threeState.mesh.geometry) {
+                fitCameraToMesh(threeState.mesh.geometry);
+            } else {
+                threeState.camera.position.set(140, 110, 160);
+                threeState.controls.target.set(0, currentDims.y / 2, 0);
+            }
             threeState.controls.update();
             draw3DOverlay();
         }

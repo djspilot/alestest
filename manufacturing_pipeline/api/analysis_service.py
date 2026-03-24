@@ -276,6 +276,19 @@ def run_step_analysis(step_file: str, use_aag: bool = True) -> dict:
         result["timeline"] = timeline_events
         result["timeline_summary"] = timeline_summary
 
+        # Tessellate STEP geometry for 3D viewer
+        try:
+            from manufacturing_pipeline.analysis.step_processing import tessellate_shape, load_step_file
+            shape = load_step_file(step_file)
+            mesh_data = tessellate_shape(shape, deflection=0.5)
+            if mesh_data and len(mesh_data.get("vertices", [])) > 0:
+                # Round vertices to 2 decimals to reduce JSON size
+                mesh_data["vertices"] = [round(v, 2) for v in mesh_data["vertices"]]
+                mesh_data["normals"] = [round(n, 4) for n in mesh_data["normals"]]
+                result["mesh"] = mesh_data
+        except Exception:
+            pass  # Mesh is optional, don't fail the analysis
+
         # Cleanup output dir (we don't need generated files for API mode)
         try:
             shutil.rmtree(output_dir, ignore_errors=True)
