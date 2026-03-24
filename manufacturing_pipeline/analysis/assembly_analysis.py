@@ -358,6 +358,19 @@ def identify_fastener(solid, volume: float, dims: Tuple[float, float, float]) ->
     min_dim = sorted_dims[0]
     mid_dim = sorted_dims[1]
     max_dim = sorted_dims[2]
+
+    # Hard reject: gesloten-holle profielen (buis/koker) mogen nooit fastener worden.
+    # Dit voorkomt dat rechthoekige kokers met bv. 40x20 doorsnede als M20-bout
+    # worden gelabeld op basis van alleen min/mid bbox-dimensies.
+    try:
+        step0 = classify_step0(solid)
+        step0_label = str(step0.get("label", "")).upper()
+        step0_fallthrough = bool(step0.get("fallthrough", True))
+        if (not step0_fallthrough) and step0_label in ("RECHTHOEKIGE_KOKER", "RONDE_BUIS"):
+            return None
+    except Exception:
+        # Fastener-detectie moet robuust blijven; bij fouten geen harde blokkade.
+        pass
     
     # REJECT if face analysis indicates this is a plate (most reliable check)
     # Plates have two dominant parallel faces (top/bottom) that comprise >50% of surface area

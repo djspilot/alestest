@@ -2678,7 +2678,8 @@ def _process_profiel_item(
     ET.SubElement(calc_result, 'Tube_InnerRadius').text = _format_float(inner_radius)
     ET.SubElement(calc_result, 'Tube_OuterRadius').text = _format_float(outer_radius)
     ET.SubElement(calc_result, 'Tube_Success').text = 'True' if success else 'False'
-    ET.SubElement(calc_result, 'Tube_FilePath').text = ''  # Populated later if needed
+    tube_file_path = f"{source_step_name}.step" if source_step_name else ''
+    ET.SubElement(calc_result, 'Tube_FilePath').text = tube_file_path
     ET.SubElement(calc_result, 'Tube_Weight').text = _format_float(weight * quantity)  # Total weight
 
     # Fase 2: Hole detection for profiles
