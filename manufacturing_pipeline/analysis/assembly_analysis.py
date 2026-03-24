@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field, asdict
 from collections import defaultdict
 
-from manufacturing_pipeline.core.models import RouteCategory
+from manufacturing_pipeline.analysis.classification import classify_step0
 from manufacturing_pipeline.analysis.classification_variables import (
     PLATE_FACE_TOP2_THRESHOLD_PCT,
     PLATE_FEATURE_HEAVY_TOP2_MIN_PCT,
@@ -55,6 +55,7 @@ from manufacturing_pipeline.analysis.classification_variables import (
     BENT_SHEET_VOLUME_RATIO_MIN,
     BENT_SHEET_VOLUME_RATIO_MAX,
     BENT_SHEET_TOP2_FACES_MAX_PCT,
+    BENT_SHEET_LARGE_RADIUS_MIN_MM,
     BENT_SHEET_ASPECT_RATIO_MIN,
     CROSS_SECTION_SAMPLE_FRACTIONS,
     CROSS_SECTION_MIN_VALID_SAMPLES,
@@ -151,6 +152,7 @@ class BOMItem:
     children: List["BOMItem"] = field(default_factory=list)
     level: int = 0
     classification_trace: Dict[str, Any] = field(default_factory=dict)
+    solid_index: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         result = asdict(self)
@@ -200,6 +202,7 @@ def get_solid_volume(solid) -> float:
     if not HAS_OCP:
         return 0.0
     try:
+        solid = solid.wrapped if hasattr(solid, "wrapped") else solid
         props = GProp_GProps()
         BRepGProp.VolumeProperties_s(solid, props)
         return props.Mass()
@@ -214,6 +217,7 @@ def get_solid_bounding_box(solid) -> Tuple[float, float, float]:
     try:
         from OCP.Bnd import Bnd_Box
         from OCP.BRepBndLib import BRepBndLib
+        solid = solid.wrapped if hasattr(solid, "wrapped") else solid
         box = Bnd_Box()
         BRepBndLib.Add_s(solid, box)
         xmin, ymin, zmin, xmax, ymax, zmax = box.Get()
@@ -227,6 +231,7 @@ def get_solid_topology_counts(solid) -> Tuple[int, int]:
     if not HAS_OCP:
         return (0, 0)
     try:
+        solid = solid.wrapped if hasattr(solid, "wrapped") else solid
         face_count = 0
         edge_count = 0
         face_exp = TopExp_Explorer(solid, TopAbs_FACE)
@@ -294,6 +299,7 @@ def get_solid_bbox_center(solid) -> Tuple[float, float, float]:
     try:
         from OCP.Bnd import Bnd_Box
         from OCP.BRepBndLib import BRepBndLib
+        solid = solid.wrapped if hasattr(solid, "wrapped") else solid
         
         bbox = Bnd_Box()
         BRepBndLib.Add_s(solid, bbox)
@@ -451,6 +457,7 @@ def _get_top2_parallel_planar_face_percent(solid, parallel_dot_min: float = 0.98
     try:
         if not HAS_OCP:
             return 0.0
+        solid = solid.wrapped if hasattr(solid, "wrapped") else solid
 
         from OCP.BRepAdaptor import BRepAdaptor_Surface
         from OCP.GeomAbs import GeomAbs_Plane
@@ -1273,7 +1280,7 @@ def classify_solid(solid, return_trace: bool = False):
     - 2B: Solid rectangular beam → "profiel"
     
     STEP 3: STANDARD CATALOG PARTS (moved LAST - fallback only)
-    - 3A: Hollow tube (cylindrical≥60%, vol<0.7) → "anders"
+    - 3A: Hollow tube (cylindrical≥60%, vol<0.7) → "profiel"
     - 3B: Variable thickness (I-beam, UNP) → "anders"
     
     STEP 4: DEFAULT
@@ -1305,7 +1312,7 @@ def classify_solid(solid, return_trace: bool = False):
     
     trace = {
         "mode": "legacy",
-        "version": "2.2",
+        "version": "3.6-step0",
         "features": {
             "smallest": round(smallest, 3),
             "middle": round(middle, 3),
@@ -1322,38 +1329,46 @@ def classify_solid(solid, return_trace: bool = False):
     }
     
     # ============================================================================
-    # STEP 0: HARD PROFILE SIGNATURE CHECK (v3.0 - EARLIEST!)
-    # Closed extrusion profiles have hard geometric signature
-    # Must check BEFORE plate_face_analysis to avoid false positives
-    # ============================================================================
-    is_closed_constant_profile, section_metrics = _detect_closed_constant_cross_section(solid, dims)
-    trace["features"].update(section_metrics)
-    if is_closed_constant_profile:
-        trace["rules"].append("closed_constant_section")
-        return ("profiel", trace) if return_trace else "profiel"
-    
-    # ============================================================================
-    # STEP 0B: PROFILE ROUTER CHECK (v3.1)
-    # Use cross-section profile classifier to catch profiles before plate detection
-    # misclassifies them. Only override when confidence is high enough.
+    # STEP 0: Definitieve beslisboom (v3.6)
+    # Uit classification_step_review.md
     # ============================================================================
     try:
-        from manufacturing_pipeline.analysis.router import route_solid
-        route_result = route_solid(solid)
-        trace["features"]["route_category"] = route_result.category.value
-        trace["features"]["route_label"] = route_result.profile_label
-        trace["features"]["route_confidence"] = round(route_result.confidence, 3)
-        trace["features"]["route_method"] = route_result.method
+        step0 = classify_step0(solid)
+        step0_label = str(step0.get("label", "ANDERS")).upper()
+        step0_step = str(step0.get("step", "0.x"))
+        step0_method = str(step0.get("method", ""))
+        step0_conf = float(step0.get("confidence", 0.0))
+        step0_fallthrough = bool(step0.get("fallthrough", False))
 
-        if route_result.confidence >= 0.7:
-            if route_result.category == RouteCategory.PROFIEL:
-                trace["rules"].append("router_profiel")
-                return ("profiel", trace) if return_trace else "profiel"
-            elif route_result.category == RouteCategory.ROND:
-                trace["rules"].append("router_rond")
-                return ("anders", trace) if return_trace else "anders"
+        trace["features"]["step0_label"] = step0_label
+        trace["features"]["step0_step"] = step0_step
+        trace["features"]["step0_method"] = step0_method
+        trace["features"]["step0_confidence"] = round(step0_conf, 3)
+        trace["features"]["step0_fallthrough"] = step0_fallthrough
+        if step0.get("reason"):
+            trace["features"]["step0_reason"] = str(step0.get("reason"))[:120]
+
+        # Voeg STEP 0 featuredetails toe met prefix om clashes te vermijden.
+        step0_features = step0.get("features", {}) if isinstance(step0.get("features", {}), dict) else {}
+        for key, value in step0_features.items():
+            trace["features"][f"step0_{key}"] = value
+
+        if not step0_fallthrough:
+            label_to_class = {
+                "PROFIEL": "profiel",
+                "RECHTHOEKIGE_KOKER": "profiel",
+                "PLAAT": "plaat",
+                "GEZETTE_PLAAT": "plaat",
+                "RONDE_BUIS": "profiel",
+                "ANDERS": "anders",
+            }
+            final_class = label_to_class.get(step0_label, "anders")
+            trace["rules"].append(f"step0_{step0_step}_{step0_label.lower()}")
+            return (final_class, trace) if return_trace else final_class
+
+        trace["rules"].append(f"step0_{step0_step}_fallthrough")
     except Exception as e:
-        trace["features"]["route_error"] = str(e)[:60]
+        trace["features"]["step0_error"] = str(e)[:120]
 
     # ============================================================================
     # STEP 1: PLATE DETECTION (v3.0 - CHECK FIRST!)
@@ -1419,7 +1434,7 @@ def classify_solid(solid, return_trace: bool = False):
     # Cylindrical faces ≥60%, low volume ratio (hollow), NOT bent sheet
     if _detect_hollow_tube(solid, volume, dims):
         trace["rules"].append("standard_hollow_tube")
-        return ("anders", trace) if return_trace else "anders"
+        return ("profiel", trace) if return_trace else "profiel"
     
     # 3B. Variable thickness profile (DIN 1026 UNP, I-beams, etc.)
     # Top 2 faces differ >20%, elongated
@@ -1441,6 +1456,7 @@ def _get_solid_surface_area(solid) -> float:
     try:
         from OCP.GProp import GProp_GProps
         from OCP.BRepGProp import BRepGProp
+        solid = solid.wrapped if hasattr(solid, "wrapped") else solid
         
         props = GProp_GProps()
         if hasattr(BRepGProp, "SurfaceProperties_s"):
@@ -2348,7 +2364,7 @@ def analyze_assembly(
     )
     
     # Phase 2: Group solids by their assigned STEP name
-    grouped_solids = []  # [(representative_solid, count, volume, dims, part_name)]
+    grouped_solids = []  # [(representative_solid, count, volume, dims, part_name, rep_idx)]
     part_name_to_solid = {}
     name_groups = {}  # {step_name: [solid_indices]}
     
@@ -2366,7 +2382,7 @@ def analyze_assembly(
         volume = get_solid_volume(rep_solid)
         dims = get_solid_bounding_box(rep_solid)
         count = len(indices)
-        grouped_solids.append((rep_solid, count, volume, dims, name))
+        grouped_solids.append((rep_solid, count, volume, dims, name, rep_idx))
         part_name_to_solid[name] = rep_solid
     
     # Generate BOM items
@@ -2386,7 +2402,7 @@ def analyze_assembly(
         "brass": 8500,
     }
 
-    for i, (solid, count, volume, dims, part_name) in enumerate(grouped_solids):
+    for i, (solid, count, volume, dims, part_name, rep_idx) in enumerate(grouped_solids):
         item_num = f"{i+1:03d}"
 
         # Check if fastener
@@ -2415,6 +2431,7 @@ def analyze_assembly(
                 unit_cost=fastener_info.get("unit_cost", 0.10),
                 total_cost=fastener_info.get("unit_cost", 0.10) * count,
                 level=0,
+                solid_index=rep_idx,
             )
         else:
             # Regular part
@@ -2479,6 +2496,7 @@ def analyze_assembly(
                 unit_cost=unit_cost,
                 total_cost=unit_cost * count,
                 level=0,
+                solid_index=rep_idx,
             )
 
             material_summary[default_material] += mass_per_unit * count

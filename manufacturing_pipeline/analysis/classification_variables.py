@@ -96,6 +96,7 @@ STANDARD_PROFILE_FACE_AREA_TOLERANCE = 0.20      # Top2 faces differ >20% → va
 BENT_SHEET_THICKNESS_MAX_MM = 100.0       # Relaxed: allows hollow sections with opening
 
 # Edge count - bent sheets have many edges due to bends/folds  
+BENT_SHEET_LARGE_RADIUS_MIN_MM = 1.0      # Boogstraal bochten >= 1mm (R4 fix)
 BENT_SHEET_MIN_EDGE_COUNT = 8             # >=8 edges indicates folded geometry
                                           # Flat plate: ~4 edges
                                           # U-profile: ~12-16 edges
@@ -131,3 +132,35 @@ CROSS_SECTION_PERIMETER_CV_MAX = 0.08
 
 # Topological stability across slices: max spread in edge counts
 CROSS_SECTION_EDGE_COUNT_SPAN_MAX = 2
+
+# =============================================================================
+# STEP 0.2 HOLLOW/KOKER DETECTION (Wire-Loop Fallback - March 19, 2026)
+# =============================================================================
+# When polygon hole assembly fails (e.g., self-intersecting rings from rounded
+# corners), fallback to raw wire loop polygons and validate with strict overlap.
+
+# Wire-loop fallback: minimum overlap ratio for inner hole vs outer shell
+# overlap_area = outer.intersection(inner).area
+# overlap_ratio = overlap_area / inner.area  (how much of inner is covered by outer)
+# If >= 0.90 (90%), determines inner ring is genuine nested hole, not artifact
+# Tolerance thresholds for rounded-corner rectangles in fallback path
+HOLLOW_WIRE_OVERLAP_RATIO_MIN = 0.90        # >= 90% mutual intersection → valid hole
+HOLLOW_RECT_BBOX_FILL_MIN = 0.85            # Fallback: relax to 0.85 (normal: 0.95)
+HOLLOW_RECT_CONVEXITY_MIN = 0.95            # Fallback: strict convexity check
+HOLLOW_RECT_TOLERANCE_REL = 0.05            # Fallback: allow 5% dimensional variance
+
+# =============================================================================
+# STEP 0.1 SLICE VALIDATION (Extrusion-axis stability gate)
+# =============================================================================
+# Cluster ratio threshold: minimum fraction of sections that must belong to
+# the dominant cluster (same cross-sectional shape along the extrusion axis)
+STEP0_CLUSTER_RATIO_MIN = 0.30  # >= 30% of sections in dominant cluster
+
+# Round solid shaft longitudinal check (machining detection).
+# For an unmachined round shaft, the central longitudinal slice area is close to
+# diameter * length. A significantly lower ratio indicates turned/stepped ends
+# or other machining operations, and should route to ANDERS in Step 0.1.
+ROUND_SHAFT_CORE_COMPACTNESS_MIN = 0.90
+ROUND_SHAFT_CORE_BBOX_RATIO_MIN = 0.95
+ROUND_SHAFT_MIN_LENGTH_RATIO = 3.0
+ROUND_SHAFT_AXIAL_AREA_RATIO_MIN = 0.975

@@ -1,9 +1,43 @@
 # ALES Manufacturing Pipeline
 
-**Laatste update:** 18 maart 2026
-**Versie:** 3.6-dev (Stappenplan StepFile ontwerp)
+**Laatste update:** 23 maart 2026
+**Versie:** 3.7-dev (Step 0 stabilisatie + testfundament)
 
 > Zie [TIMELINE.md](TIMELINE.md) voor de volledige versiegeschiedenis.
+
+### v3.7-dev — Step 0 stabilisatie + testfundament (23 maart 2026)
+
+**Doel van deze update:** classificatiepad robuuster maken, regressiepad stabiliseren en testbasis klaarzetten voor feature-validatie per classificatie.
+
+**Wat is gedaan:**
+
+1. **Step 0/CadQuery wrapper-fix**
+   - OCP-shape unwrapping toegevoegd voor CadQuery-solids (`shape.wrapped`) in Step 0 section tooling en assembly-geometry helpers.
+   - Effect: geen onterechte `step0=0.x` dependency-fallback meer bij CadQuery-solid input.
+
+2. **Classificatiegedrag gevalideerd op 803041-7028**
+   - Step 0: `PLAAT` op `0.4a` met `fallthrough=True`.
+   - Volledige pipeline (`classify_solid`): eindresultaat `ANDERS`.
+   - Dit bevestigt dat fallback nog steeds functioneel en gewenst is.
+
+3. **Test- en pytest-stabilisatie**
+   - `pytest.ini` toegevoegd om reguliere testdiscovery te stabiliseren en legacy script-tests uit standaardrun te houden.
+   - `tests/test_xml_export.py` gemoderniseerd naar pytest-compatibele smoke-tests (zonder verouderde `PartAnalyzer`-import).
+   - Resultaat: `python -m pytest -q` draait stabiel en groen.
+
+4. **Warning-cleanup**
+   - NumPy 2.0 deprecation in `step0_section_tools.py` opgelost (2D cross-product zonder `np.cross` op 2D vectors).
+   - Ruisende third-party deprecations gefilterd in pytest-config.
+
+**Status nu:**
+- Standaard regressierun: **22 passed**
+- Classificatieflow is stabiel genoeg om de volgende fase te starten: **feature-opbouw en feature-validatie per classificatieklasse**.
+
+**Plan voor morgen (start fase feature-tests):**
+- Featurevalidatie per klasse opzetten (`plaat`, `profiel`, `anders`) met vaste referentiesets.
+- Per solid zowel **Step 0 trace** als **final class** vastleggen.
+- Tests zo opzetten dat **fallback-invloed expliciet wordt meegenomen** (dus niet alleen eindlabel testen, maar ook pad/regels).
+- Eerste focus: `profiel` (`RONDE_BUIS` + `RECHTHOEKIGE_KOKER`) inclusief XML Tube-velden.
 
 ### v3.6-dev — Stappenplan StepFile ontwerp (18 maart 2026)
 

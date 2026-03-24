@@ -742,7 +742,8 @@ def export_bom_to_xml(
     material: str = "steel_s235",
     output_xml_path: Optional[str] = None,
     work_dir: Optional[str] = None,
-    reference_xml_path: Optional[str] = None
+    reference_xml_path: Optional[str] = None,
+    preserve_bom_identity: bool = False,
 ) -> str:
     """
     Export BOM to XML with full feature extraction (Sheet Metal focused).
@@ -766,6 +767,8 @@ def export_bom_to_xml(
         output_xml_path: Output XML filepath (default: <step_dir>/<step_name>.xml)
         work_dir: Working directory for temp files (default: same as STEP)
         reference_xml_path: Optional existing XML to copy trusted sheet values from
+        preserve_bom_identity: Keep BOM names/index mapping unchanged and prefer
+                       bom_item['solid_index'] for deterministic mapping
 
     Returns:
         Path to generated XML file
@@ -808,150 +811,150 @@ def export_bom_to_xml(
     # 3. Fallback to sequential product names
     # 4. Generate: {base_name}-p1, {base_name}-p2, etc.
     
-    # Primary naming source: XCAF product tree counts.
-    xcaf_name_counts = None
-    if HAS_XCAF_READER:
-        try:
-            xcaf_name_counts = xcaf_get_name_counts(str(step_path))
-            if xcaf_name_counts:
-                print(
-                    "  [XCAF] Name source active: "
-                    f"{len(xcaf_name_counts)} unique names"
-                )
-        except Exception:
-            xcaf_name_counts = None
-
-    step_parts = xcaf_name_counts
-    if not step_parts and HAS_ASSEMBLY_GEOM:
-        step_parts = parse_step_assembly_structure(str(step_path))
-    step_product_names = None
-    
-    if not step_parts and HAS_ASSEMBLY_GEOM:
-        step_product_names = parse_step_product_names(str(step_path))
-    
-    # Base name for generated part names
     base_name = step_path.stem
-    used_step_parts = set()
-    step_parts_list = list(step_parts.keys()) if step_parts else []
-    step_parts_seq_idx = 0
-    generated_idx = 1
-    product_name_idx = 0
-    used_product_names = set()
+    if preserve_bom_identity:
+        print("  [INFO] preserve_bom_identity=True: naming strategy skipped, BOM names/indexes preserved")
+    else:
+        # Primary naming source: XCAF product tree counts.
+        xcaf_name_counts = None
+        if HAS_XCAF_READER:
+            try:
+                xcaf_name_counts = xcaf_get_name_counts(str(step_path))
+                if xcaf_name_counts:
+                    print(
+                        "  [XCAF] Name source active: "
+                        f"{len(xcaf_name_counts)} unique names"
+                    )
+            except Exception:
+                xcaf_name_counts = None
 
-    # Cluster BOM items by (classification, quantity) to reduce cross-type swaps.
-    bom_clusters = {}
-    for bom_idx, bom_item in enumerate(bom_list):
-        cluster_key = (
-            str(bom_item.get('part_class', 'unknown') or 'unknown').strip().lower(),
-            int(bom_item.get('quantity', 1) or 1),
-        )
-        if cluster_key not in bom_clusters:
-            bom_clusters[cluster_key] = []
-        bom_clusters[cluster_key].append(bom_idx)
+        step_parts = xcaf_name_counts
+        if not step_parts and HAS_ASSEMBLY_GEOM:
+            step_parts = parse_step_assembly_structure(str(step_path))
+        step_product_names = None
 
-    # Create cluster -> candidate names map using quantity-based matching
-    # with alphabetical sorting for determinism when multiple candidates exist.
-    name_by_cluster = {}
-    if step_product_names:
-        shape_rep_counts = parse_step_shape_rep_name_counts(str(step_path))  if HAS_ASSEMBLY_GEOM else {}
-        
-        # For each cluster, find names with matching quantity
-        for cluster_key in sorted(bom_clusters.keys()):
-            part_class, quantity = cluster_key
-            cluster_size = len(bom_clusters[cluster_key])
-            
-            # Find all names with this quantity from SHAPE_REP counts
-            matching_names = [
-                name for name, count in (shape_rep_counts or {}).items()
-                if count == quantity and name not in used_product_names
-            ]
-            
-            # Sort alphabetically for deterministic assignment
-            matching_names.sort()
-            
-            # Take as many as we need for this cluster
-            names_for_cluster = matching_names[:cluster_size]
-            
-            # Mark as used
-            for name in names_for_cluster:
-                used_product_names.add(name)
-            
-            if names_for_cluster:
-                name_by_cluster[cluster_key] = names_for_cluster
-    
-    # Apply naming to each BOM item
-    for idx, bom_item in enumerate(bom_list):
-        bom_part_name = bom_item.get('part_name', '')
-        new_part_name = None
+        if not step_parts and HAS_ASSEMBLY_GEOM:
+            step_product_names = parse_step_product_names(str(step_path))
 
-        name_lower = str(bom_part_name or '').strip().lower()
-        is_generic_bom_name = (
-            not bom_part_name
-            or name_lower.startswith('part_')
-            or name_lower.startswith('plaatdeel')
-            or name_lower.startswith('profieldeel')
-            or name_lower.startswith('verspaamd deel')
-            or name_lower.startswith('vaste vorm')
-        )
-        
-        # Prefer existing meaningful BOM name (critical for reference XML name matching)
-        # Keep generated fallback only for generic/empty names.
-        if bom_part_name and not is_generic_bom_name:
-            new_part_name = bom_part_name
+        used_step_parts = set()
+        step_parts_list = list(step_parts.keys()) if step_parts else []
+        step_parts_seq_idx = 0
+        generated_idx = 1
+        product_name_idx = 0
+        used_product_names = set()
 
-
-        # If BOM names are generic, use STEP assembly structure order as authoritative mapping
-        if not new_part_name and step_parts_list and step_parts_seq_idx < len(step_parts_list):
-            candidate_name = step_parts_list[step_parts_seq_idx]
-            step_parts_seq_idx += 1
-            if candidate_name and candidate_name not in used_step_parts:
-                new_part_name = candidate_name
-                used_step_parts.add(candidate_name)
-
-        
-        if not new_part_name and step_parts and bom_part_name in step_parts and bom_part_name not in used_step_parts:
-            # Use STEP assembly structure name
-            new_part_name = bom_part_name
-            used_step_parts.add(bom_part_name)
-
-        if not new_part_name:
+        # Cluster BOM items by (classification, quantity) to reduce cross-type swaps.
+        bom_clusters = {}
+        for bom_idx, bom_item in enumerate(bom_list):
             cluster_key = (
                 str(bom_item.get('part_class', 'unknown') or 'unknown').strip().lower(),
                 int(bom_item.get('quantity', 1) or 1),
             )
-            cluster_names = name_by_cluster.get(cluster_key, [])
-            cluster_items = bom_clusters.get(cluster_key, [])
-            if cluster_names and idx in cluster_items:
-                cluster_pos = cluster_items.index(idx)
-                if cluster_pos < len(cluster_names):
-                    candidate_product_name = cluster_names[cluster_pos]
-                    if candidate_product_name and candidate_product_name.upper() != 'UNKNOWN':
+            if cluster_key not in bom_clusters:
+                bom_clusters[cluster_key] = []
+            bom_clusters[cluster_key].append(bom_idx)
+
+        # Create cluster -> candidate names map using quantity-based matching
+        # with alphabetical sorting for determinism when multiple candidates exist.
+        name_by_cluster = {}
+        if step_product_names:
+            shape_rep_counts = parse_step_shape_rep_name_counts(str(step_path)) if HAS_ASSEMBLY_GEOM else {}
+
+            # For each cluster, find names with matching quantity
+            for cluster_key in sorted(bom_clusters.keys()):
+                part_class, quantity = cluster_key
+                cluster_size = len(bom_clusters[cluster_key])
+
+                # Find all names with this quantity from SHAPE_REP counts
+                matching_names = [
+                    name for name, count in (shape_rep_counts or {}).items()
+                    if count == quantity and name not in used_product_names
+                ]
+
+                # Sort alphabetically for deterministic assignment
+                matching_names.sort()
+
+                # Take as many as we need for this cluster
+                names_for_cluster = matching_names[:cluster_size]
+
+                # Mark as used
+                for name in names_for_cluster:
+                    used_product_names.add(name)
+
+                if names_for_cluster:
+                    name_by_cluster[cluster_key] = names_for_cluster
+
+        # Apply naming to each BOM item
+        for idx, bom_item in enumerate(bom_list):
+            bom_part_name = bom_item.get('part_name', '')
+            new_part_name = None
+
+            name_lower = str(bom_part_name or '').strip().lower()
+            is_generic_bom_name = (
+                not bom_part_name
+                or name_lower.startswith('part_')
+                or name_lower.startswith('plaatdeel')
+                or name_lower.startswith('profieldeel')
+                or name_lower.startswith('verspaamd deel')
+                or name_lower.startswith('vaste vorm')
+            )
+
+            # Prefer existing meaningful BOM name (critical for reference XML name matching)
+            # Keep generated fallback only for generic/empty names.
+            if bom_part_name and not is_generic_bom_name:
+                new_part_name = bom_part_name
+
+            # If BOM names are generic, use STEP assembly structure order as authoritative mapping
+            if not new_part_name and step_parts_list and step_parts_seq_idx < len(step_parts_list):
+                candidate_name = step_parts_list[step_parts_seq_idx]
+                step_parts_seq_idx += 1
+                if candidate_name and candidate_name not in used_step_parts:
+                    new_part_name = candidate_name
+                    used_step_parts.add(candidate_name)
+
+            if not new_part_name and step_parts and bom_part_name in step_parts and bom_part_name not in used_step_parts:
+                # Use STEP assembly structure name
+                new_part_name = bom_part_name
+                used_step_parts.add(bom_part_name)
+
+            if not new_part_name:
+                cluster_key = (
+                    str(bom_item.get('part_class', 'unknown') or 'unknown').strip().lower(),
+                    int(bom_item.get('quantity', 1) or 1),
+                )
+                cluster_names = name_by_cluster.get(cluster_key, [])
+                cluster_items = bom_clusters.get(cluster_key, [])
+                if cluster_names and idx in cluster_items:
+                    cluster_pos = cluster_items.index(idx)
+                    if cluster_pos < len(cluster_names):
+                        candidate_product_name = cluster_names[cluster_pos]
+                        if candidate_product_name and candidate_product_name.upper() != 'UNKNOWN':
+                            new_part_name = candidate_product_name
+
+            if not new_part_name and step_product_names:
+                # Sequential fallback for leftovers not matched by cluster.
+                while product_name_idx < len(step_product_names):
+                    candidate_product_name = step_product_names[product_name_idx]
+                    product_name_idx += 1
+                    if (
+                        candidate_product_name
+                        and candidate_product_name.upper() != 'UNKNOWN'
+                        and candidate_product_name not in used_product_names
+                    ):
                         new_part_name = candidate_product_name
+                        used_product_names.add(candidate_product_name)
+                        break
 
-        if not new_part_name and step_product_names:
-            # Sequential fallback for leftovers not matched by cluster.
-            while product_name_idx < len(step_product_names):
-                candidate_product_name = step_product_names[product_name_idx]
-                product_name_idx += 1
-                if (
-                    candidate_product_name
-                    and candidate_product_name.upper() != 'UNKNOWN'
-                    and candidate_product_name not in used_product_names
-                ):
-                    new_part_name = candidate_product_name
-                    used_product_names.add(candidate_product_name)
-                    break
-        
-        if not new_part_name:
-            # Generate name: "Silo 2-p1", "Silo 2-p2", etc.
-            new_part_name = f"{base_name}-p{generated_idx}"
+            if not new_part_name:
+                # Generate name: "Silo 2-p1", "Silo 2-p2", etc.
+                new_part_name = f"{base_name}-p{generated_idx}"
 
-            generated_idx += 1
-        
-        # Update BOM item with proper name
-        bom_item['part_name'] = new_part_name
-    
-    print(f"  [INFO] Applied naming strategy: {len([b for b in bom_list if base_name in b.get('part_name', '')])}/{len(bom_list)} items use generated names")
+                generated_idx += 1
+
+            # Update BOM item with proper name
+            bom_item['part_name'] = new_part_name
+
+        print(f"  [INFO] Applied naming strategy: {len([b for b in bom_list if base_name in b.get('part_name', '')])}/{len(bom_list)} items use generated names")
 
     # Load STEP once
     print(f"\n[XML Export] Loading STEP: {step_path.name}")
@@ -1037,32 +1040,58 @@ def export_bom_to_xml(
         normalized_bom_name = _normalize_part_name(str(bom_item.get('part_name', '') or ''))
         selected_solid_idx = None
         if part_class in ('plaat', 'profiel'):
-            selected_solid_idx = _select_solid_index_for_bom_item(
-                bom_item=bom_item,
-                normalized_bom_name=normalized_bom_name,
-                preferred_idx=idx - 1,
-                total_solids=len(representative_solids),
-                part_name_to_solid_indices=part_name_to_solid_indices,
-                solid_volumes_mm3=solid_volumes_mm3,
-                used_indices=used_solid_indices,
-                default_material=material,
-            )
+            if preserve_bom_identity:
+                raw_idx = bom_item.get('solid_index', None)
+                forced_idx = None
+                try:
+                    if raw_idx is not None:
+                        forced_idx = int(raw_idx)
+                except Exception:
+                    forced_idx = None
 
-            if selected_solid_idx is not None:
-                used_solid_indices.add(selected_solid_idx)
-                part_solid = representative_solids[selected_solid_idx]
-
-                # Keep output naming aligned with the solid that was actually selected.
-                canonical_name = solid_index_to_name.get(selected_solid_idx)
-                if canonical_name:
-                    current_name = str(bom_item.get('part_name', '') or '').strip()
-                    current_norm = _normalize_part_name(current_name)
-                    if canonical_name != current_norm:
+                if forced_idx is not None and 0 <= forced_idx < len(representative_solids):
+                    selected_solid_idx = forced_idx
+                    if forced_idx in used_solid_indices:
                         print(
-                            f"    [INFO] Renaming by solid match: "
-                            f"{current_name or '<empty>'} -> {canonical_name}"
+                            f"    [WARN] preserve_bom_identity: solid_index {forced_idx} already used; "
+                            "reusing as requested"
                         )
-                        bom_item['part_name'] = canonical_name
+                    else:
+                        used_solid_indices.add(forced_idx)
+                    part_solid = representative_solids[forced_idx]
+                else:
+                    print(
+                        "    [WARN] preserve_bom_identity active but solid_index missing/invalid; "
+                        "falling back to name/volume mapping"
+                    )
+
+            if selected_solid_idx is None:
+                selected_solid_idx = _select_solid_index_for_bom_item(
+                    bom_item=bom_item,
+                    normalized_bom_name=normalized_bom_name,
+                    preferred_idx=idx - 1,
+                    total_solids=len(representative_solids),
+                    part_name_to_solid_indices=part_name_to_solid_indices,
+                    solid_volumes_mm3=solid_volumes_mm3,
+                    used_indices=used_solid_indices,
+                    default_material=material,
+                )
+
+                if selected_solid_idx is not None:
+                    used_solid_indices.add(selected_solid_idx)
+                    part_solid = representative_solids[selected_solid_idx]
+
+                    # Keep output naming aligned with the solid that was actually selected.
+                    canonical_name = solid_index_to_name.get(selected_solid_idx)
+                    if canonical_name and not preserve_bom_identity:
+                        current_name = str(bom_item.get('part_name', '') or '').strip()
+                        current_norm = _normalize_part_name(current_name)
+                        if canonical_name != current_norm:
+                            print(
+                                f"    [INFO] Renaming by solid match: "
+                                f"{current_name or '<empty>'} -> {canonical_name}"
+                            )
+                            bom_item['part_name'] = canonical_name
 
         if part_class in ('plaat', 'profiel') and part_solid is None:
             print(
