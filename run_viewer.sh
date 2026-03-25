@@ -15,6 +15,8 @@ VIEWER_URL="http://${VIEWER_HOST}:${VIEWER_PORT}"
 
 API_PID=""
 VIEWER_PID=""
+API_PORT_FALLBACK_RANGE="${API_PORT_FALLBACK_RANGE:-20}"
+VIEWER_PORT_FALLBACK_RANGE="${VIEWER_PORT_FALLBACK_RANGE:-20}"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -25,6 +27,27 @@ require_cmd() {
 
 port_in_use() {
   lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
+}
+
+find_free_port() {
+  local requested_port="$1"
+  local max_offset="$2"
+  local label="$3"
+  local candidate="$requested_port"
+
+  for offset in $(seq 0 "$max_offset"); do
+    candidate=$((requested_port + offset))
+    if ! port_in_use "$candidate"; then
+      if [[ "$candidate" != "$requested_port" ]]; then
+        echo "$label port $requested_port is in use, falling back to $candidate." >&2
+      fi
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  echo "No free $label port found in range ${requested_port}-$((requested_port + max_offset))." >&2
+  return 1
 }
 
 wait_for_http() {
@@ -66,15 +89,10 @@ require_cmd npm
 require_cmd curl
 require_cmd lsof
 
-if port_in_use "$API_PORT"; then
-  echo "API port $API_PORT is already in use. Stop the existing process or set API_PORT." >&2
-  exit 1
-fi
-
-if port_in_use "$VIEWER_PORT"; then
-  echo "Viewer port $VIEWER_PORT is already in use. Stop the existing process or set VIEWER_PORT." >&2
-  exit 1
-fi
+API_PORT="$(find_free_port "$API_PORT" "$API_PORT_FALLBACK_RANGE" "API")"
+VIEWER_PORT="$(find_free_port "$VIEWER_PORT" "$VIEWER_PORT_FALLBACK_RANGE" "Viewer")"
+API_URL="http://${API_HOST}:${API_PORT}"
+VIEWER_URL="http://${VIEWER_HOST}:${VIEWER_PORT}"
 
 cd "$ROOT_DIR"
 python3 -m uvicorn manufacturing_pipeline.api.app:app --host "$API_HOST" --port "$API_PORT" &

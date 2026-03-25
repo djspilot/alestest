@@ -39,6 +39,21 @@ html, body, #root {
   opacity: 0.6;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-toggle-btn {
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
 .main-content {
   display: flex;
   flex: 1;
@@ -51,6 +66,24 @@ html, body, #root {
   background: #fff;
   overflow-y: auto;
   flex-shrink: 0;
+}
+
+.details-panel {
+  width: 380px;
+  border-left: 1px solid #ddd;
+  background: #fbfcfe;
+  overflow-y: auto;
+  flex-shrink: 0;
+  padding: 16px;
+}
+
+.details-placeholder {
+  border: 1px dashed #ccd7e2;
+  background: #fff;
+  color: #5b6672;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  padding: 18px;
 }
 
 .sidebar-section {
@@ -242,6 +275,17 @@ html, body, #root {
   border-color: #bcd4f0;
 }
 
+.timeline-stage-button:disabled {
+  opacity: 0.56;
+  cursor: not-allowed;
+  background: #f7f9fb;
+}
+
+.timeline-stage-button:disabled .timeline-stage-button-title,
+.timeline-stage-button:disabled .timeline-stage-button-time {
+  color: #6f7d8d;
+}
+
 .timeline-stage-button-title {
   font-size: 0.77rem;
   font-weight: 600;
@@ -321,6 +365,75 @@ html, body, #root {
   border: 1px solid #e2e7ee;
   background: #fff;
   padding: 8px;
+}
+
+.hole-filter-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.hole-filter-btn {
+  padding: 5px 8px;
+  border: 1px solid #d7dee7;
+  background: #fff;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.hole-filter-btn.is-active {
+  background: #eef6ff;
+  border-color: #bcd4f0;
+}
+
+.hole-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.hole-list-item {
+  border: 1px solid #e2e7ee;
+  background: #fff;
+  padding: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hole-list-item.is-active {
+  background: #eef6ff;
+  border-color: #bcd4f0;
+}
+
+.hole-list-item.is-accepted {
+  border-left: 3px solid #ff6b57;
+}
+
+.hole-list-item.is-rejected {
+  border-left: 3px solid #60a5fa;
+}
+
+.hole-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.hole-status-pill.is-accepted {
+  color: #8a1f1f;
+  background: #fdeceb;
+}
+
+.hole-status-pill.is-rejected {
+  color: #1e3a5f;
+  background: #e5f0ff;
 }
 
 .timeline-payload-grid {
@@ -443,6 +556,31 @@ html, body, #root {
   background: rgba(255, 255, 255, 0.85);
   padding: 4px 8px;
   border: 1px solid #ddd;
+}
+
+@media (max-width: 1200px) {
+  .sidebar {
+    width: 280px;
+  }
+
+  .details-panel {
+    width: 320px;
+  }
+}
+
+@media (max-width: 960px) {
+  .main-content {
+    flex-direction: column;
+  }
+
+  .sidebar,
+  .details-panel {
+    width: 100%;
+    border-left: none;
+    border-right: none;
+    border-bottom: 1px solid #ddd;
+    max-height: 38vh;
+  }
 }
 
 .error-banner {

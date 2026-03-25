@@ -306,6 +306,10 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
                 "part_type": result.get("part_type"),
                 "thickness": result.get("thickness"),
                 "dimensions": result.get("dimensions"),
+                "trace": getattr(analysis, "classification_trace", {}) or {},
+                "rules": list((getattr(analysis, "classification_trace", {}) or {}).get("rules") or []),
+                "criteria": getattr(analysis, "classification_criteria", []) or [],
+                "matrix_doc": "docs/CLASSIFICATION_THRESHOLDS_MATRIX.md",
                 "reasoning": _serialize_analysis_reasoning(analysis),
             },
             "holes": {

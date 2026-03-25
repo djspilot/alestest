@@ -89,7 +89,7 @@ function disposeThreeData(threeData) {
   })
 }
 
-function StepGeometry({ buffer, mesh, onLoaded, onError, onStatus, parseMode = 'auto', renderMode = 'clean' }) {
+function StepGeometry({ buffer, mesh, onLoaded, onError, onStatus, onSurfacePick, parseMode = 'auto', renderMode = 'clean' }) {
   const [meshData, setMeshData] = useState(null)
 
   useEffect(() => {
@@ -151,7 +151,7 @@ function StepGeometry({ buffer, mesh, onLoaded, onError, onStatus, parseMode = '
       {threeData.items.map((item, i) => (
         <React.Fragment key={i}>
           {renderMode !== 'edges' && (
-            <mesh geometry={item.geometry}>
+            <mesh geometry={item.geometry} onClick={(event) => onSurfacePick?.(event.point, event)}>
               <meshStandardMaterial
                 color="#dfe6ec"
                 roughness={0.88}
@@ -174,7 +174,7 @@ function StepGeometry({ buffer, mesh, onLoaded, onError, onStatus, parseMode = '
   )
 }
 
-export default function StepModel({ buffer, mesh, onLoaded, onError, onStatus, parseMode, renderMode }) {
+export default function StepModel({ buffer, mesh, onLoaded, onError, onStatus, onSurfacePick, parseMode, renderMode }) {
   return (
     <StepGeometry
       buffer={buffer}
@@ -182,6 +182,7 @@ export default function StepModel({ buffer, mesh, onLoaded, onError, onStatus, p
       onLoaded={onLoaded}
       onError={onError}
       onStatus={onStatus}
+      onSurfacePick={onSurfacePick}
       parseMode={parseMode}
       renderMode={renderMode}
     />

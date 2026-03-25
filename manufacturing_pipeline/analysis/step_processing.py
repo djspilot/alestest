@@ -982,7 +982,7 @@ def precompute_face_properties(cq_object):
     return face_data
 
 
-def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=None, face_data=None):
+def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=None, face_data=None, return_debug=False):
     """
     Extract all holes from geometry using CadQuery selectors.
     Filters out external features (bosses) and groups split faces.
@@ -999,6 +999,28 @@ def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=
                   calling BRepAdaptor_Surface per face
     """
     candidates = []
+    debug_items = []
+    candidate_counter = 0
+
+    def make_criterion(name, value=None, threshold=None, passed=True, note=None):
+        return {
+            "name": name,
+            "value": value,
+            "threshold": threshold,
+            "passed": bool(passed),
+            "note": note,
+        }
+
+    def make_hole_debug_item(item_id, status, reason, criteria, payload):
+        return {
+            "id": item_id,
+            "status": status,
+            "type": "cylindrical",
+            "label": f"Ø{float(payload.get('diameter') or 0.0):.1f} mm",
+            "reason": reason,
+            "criteria": criteria,
+            **payload,
+        }
 
     # Get bounding box for bore filtering
     part_dims = None
@@ -1040,10 +1062,30 @@ def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=
             # Large flat-pattern cylinders can be real cut-outs, but bend artefacts
             # typically show very large depth compared to sheet thickness.
             if is_flat_pattern and radius * 2 > 100 and thickness_ref is not None:
-                if depth > max(20.0, thickness_ref * 3.0):
+                threshold = max(20.0, thickness_ref * 3.0)
+                if depth > threshold:
+                    item_id = f"hole-cyl-{candidate_counter}"
+                    candidate_counter += 1
+                    debug_items.append(make_hole_debug_item(
+                        item_id,
+                        "rejected",
+                        "Afgewezen als flat-pattern buigartefact",
+                        [
+                            make_criterion("flat_artifact_filter", round(depth, 3), round(threshold, 3), False, "Diepte te groot voor uitslaggat"),
+                            make_criterion("flat_pattern_source", "flat", None, True, None),
+                        ],
+                        {
+                            "diameter": radius * 2,
+                            "depth": depth,
+                            "position": fd['center'],
+                            "axis": fd['axis'],
+                            "source": "flat" if is_flat_pattern else "3d",
+                        }
+                    ))
                     continue
 
             candidates.append({
+                "id": f"hole-cyl-{candidate_counter}",
                 "diameter": radius * 2,
                 "depth": depth,
                 "position": fd['center'],
@@ -1051,6 +1093,7 @@ def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=
                 "axis": fd['axis'],
                 "angle": angle_deg
             })
+            candidate_counter += 1
     else:
         all_faces = cq_object.faces().vals()
 
@@ -1083,10 +1126,30 @@ def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=
                 # Large flat-pattern cylinders can be real cut-outs, but bend artefacts
                 # typically show very large depth compared to sheet thickness.
                 if is_flat_pattern and radius * 2 > 100 and thickness_ref is not None:
-                    if depth > max(20.0, thickness_ref * 3.0):
+                    threshold = max(20.0, thickness_ref * 3.0)
+                    if depth > threshold:
+                        item_id = f"hole-cyl-{candidate_counter}"
+                        candidate_counter += 1
+                        debug_items.append(make_hole_debug_item(
+                            item_id,
+                            "rejected",
+                            "Afgewezen als flat-pattern buigartefact",
+                            [
+                                make_criterion("flat_artifact_filter", round(depth, 3), round(threshold, 3), False, "Diepte te groot voor uitslaggat"),
+                                make_criterion("flat_pattern_source", "flat", None, True, None),
+                            ],
+                            {
+                                "diameter": radius * 2,
+                                "depth": depth,
+                                "position": (center.X(), center.Y(), center.Z()),
+                                "axis": (axis.X(), axis.Y(), axis.Z()),
+                                "source": "flat" if is_flat_pattern else "3d",
+                            }
+                        ))
                         continue
 
                 candidates.append({
+                    "id": f"hole-cyl-{candidate_counter}",
                     "diameter": radius * 2,
                     "depth": depth,
                     "position": (center.X(), center.Y(), center.Z()),
@@ -1094,6 +1157,7 @@ def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=
                     "axis": (axis.X(), axis.Y(), axis.Z()),
                     "angle": angle_deg
                 })
+                candidate_counter += 1
             
     # Group candidates by Axis and Diameter
     # Pre-bucket by diameter to avoid O(n²) comparisons
@@ -1204,18 +1268,70 @@ def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=
                 if max_depth > min_dim * 0.5:
                     skip_hole = True
 
+            criteria = [
+                make_criterion("angle_coverage", round(total_angle, 3), round(min_angle, 3), total_angle > min_angle, "Totale cilindrische dekking"),
+                make_criterion("bore_filter", round(max_depth, 3), round(min_dim * 0.5, 3) if filter_bores and is_turned and part_dims else None, not skip_hole, "Bore-filter voor draaistukken"),
+            ]
+
             if not skip_hole:
                 holes.append(HoleFeature(
                     diameter=diameter,
                     depth=max_depth,
                     position=first["position"],
-                    axis=hole_axis
+                    axis=hole_axis,
+                    id=first["id"],
                 ))
+                debug_items.append(make_hole_debug_item(
+                    first["id"],
+                    "accepted",
+                    "Geaccepteerd als cilindrisch gat",
+                    criteria,
+                    {
+                        "diameter": diameter,
+                        "depth": max_depth,
+                        "position": first["position"],
+                        "axis": hole_axis,
+                        "source": "flat" if is_flat_pattern else "3d",
+                    },
+                ))
+            else:
+                debug_items.append(make_hole_debug_item(
+                    first["id"],
+                    "rejected",
+                    "Afgewezen als boring in draaideel",
+                    criteria,
+                    {
+                        "diameter": diameter,
+                        "depth": max_depth,
+                        "position": first["position"],
+                        "axis": hole_axis,
+                        "source": "flat" if is_flat_pattern else "3d",
+                    },
+                ))
+        else:
+            first = group[0]
+            debug_items.append(make_hole_debug_item(
+                first["id"],
+                "rejected",
+                "Afgewezen op onvoldoende cilindrische dekking",
+                [
+                    make_criterion("angle_coverage", round(total_angle, 3), round(min_angle, 3), False, "Totale cilindrische dekking te laag"),
+                ],
+                {
+                    "diameter": first["diameter"],
+                    "depth": max(c["depth"] for c in group),
+                    "position": first["position"],
+                    "axis": first["axis"],
+                    "source": "flat" if is_flat_pattern else "3d",
+                },
+            ))
 
+    if return_debug:
+        return holes, debug_items
     return holes
 
 
-def detect_shaped_holes(shape, face_data=None):
+def detect_shaped_holes(shape, face_data=None, is_flat_pattern=False, return_debug=False):
     """
     Detect non-circular holes (slots, rectangles) by analyzing planar face contours.
     Returns a list of dicts describing the holes.
@@ -1225,6 +1341,17 @@ def detect_shaped_holes(shape, face_data=None):
         face_data: If provided, use precomputed face properties for planar face filtering
     """
     all_shaped_holes = []
+    debug_items = []
+    candidate_counter = 0
+
+    def make_criterion(name, value=None, threshold=None, passed=True, note=None):
+        return {
+            "name": name,
+            "value": value,
+            "threshold": threshold,
+            "passed": bool(passed),
+            "note": note,
+        }
 
     # Find planar faces - use precomputed data if available
     if face_data is not None:
@@ -1239,7 +1366,11 @@ def detect_shaped_holes(shape, face_data=None):
                 axis = pln.Axis().Direction()
                 planar_faces.append((face, (axis.X(), axis.Y(), axis.Z())))
 
+    source = "flat" if is_flat_pattern else "3d"
+
     if not planar_faces:
+        if return_debug:
+            return [], []
         return []
 
     for face, normal in planar_faces:
@@ -1345,11 +1476,52 @@ def detect_shaped_holes(shape, face_data=None):
                     c = w_props.CentreOfMass()
                     center = (c.X(), c.Y(), c.Z())
                     
-                    all_shaped_holes.append({
+                    item_id = f"hole-shaped-{candidate_counter}"
+                    candidate_counter += 1
+                    candidate = {
+                        "id": item_id,
                         "type": shape_type,
                         "dim": dim_str,
                         "center": center,
-                        "normal": normal
+                        "normal": normal,
+                    }
+                    all_shaped_holes.append(candidate)
+                    debug_items.append({
+                        "id": item_id,
+                        "status": "accepted",
+                        "type": str(shape_type).lower(),
+                        "label": dim_str or shape_type,
+                        "reason": f"Geaccepteerd als {shape_type}",
+                        "criteria": [
+                            make_criterion("recognized_shape", shape_type, "known", True, f"{lines} lijnen / {circles} bogen"),
+                            make_criterion("is_circle", False, False, True, "Niet door de cilindrische detector afgehandeld"),
+                        ],
+                        "position": center,
+                        "normal": normal,
+                        "size": dim_str,
+                        "source": source,
+                    })
+                else:
+                    b = Bnd_Box()
+                    BRepBndLib.Add_s(wire.wrapped, b)
+                    xmin, ymin, zmin, xmax, ymax, zmax = b.Get()
+                    c = ((xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2)
+                    item_id = f"hole-shaped-{candidate_counter}"
+                    candidate_counter += 1
+                    debug_items.append({
+                        "id": item_id,
+                        "status": "rejected",
+                        "type": "unknown",
+                        "label": "Onbekende contour",
+                        "reason": "Afgewezen omdat de contour niet als slot/rect/poly is herkend",
+                        "criteria": [
+                            make_criterion("recognized_shape", "unknown", "known", False, f"{lines} lijnen / {circles} bogen"),
+                            make_criterion("is_circle", False, False, True, "Niet door de cilindrische detector afgehandeld"),
+                        ],
+                        "position": c,
+                        "normal": normal,
+                        "size": dim_str,
+                        "source": source,
                     })
                     
     # Deduplicate - pre-group by (type, dim) to avoid O(n²)
@@ -1377,29 +1549,50 @@ def detect_shaped_holes(shape, face_data=None):
 
                 if dist_sq < 0.01:  # 0.1² = 0.01
                     processed_indices.add(j)
+                    rejected_id = h2.get("id")
+                    for item in debug_items:
+                        if item.get("id") == rejected_id:
+                            item["status"] = "rejected"
+                            item["reason"] = "Afgewezen als duplicaat van een shaped hole op hetzelfde vlak"
+                            item["criteria"].append(
+                                make_criterion("deduplicate", True, False, False, "Duplicaat op zelfde vlak")
+                            )
                 else:
                     dist = math.sqrt(dist_sq)
                     if dist > 0:
-                        vx, vy, vz = dx/dist, dy/dist, dz/dist
+                        vx, vy, vz = dx / dist, dy / dist, dz / dist
                         nx, ny, nz = h1["normal"]
-                        dot = abs(vx*nx + vy*ny + vz*nz)
+                        dot = abs(vx * nx + vy * ny + vz * nz)
                         if dot > 0.9:  # Parallel
                             processed_indices.add(j)
+                            rejected_id = h2.get("id")
+                            for item in debug_items:
+                                if item.get("id") == rejected_id:
+                                    item["status"] = "rejected"
+                                    item["reason"] = "Afgewezen als duplicaat van een shaped hole op hetzelfde vlak"
+                                    item["criteria"].append(
+                                        make_criterion("deduplicate", True, False, False, "Duplicaat op zelfde vlak")
+                                    )
 
             unique_holes.append(h1)
             processed_indices.add(i)
 
+    if return_debug:
+        return unique_holes, debug_items
     return unique_holes
 
-def deduplicate_holes(circular_holes, shaped_holes):
+def deduplicate_holes(circular_holes, shaped_holes, return_debug=False):
     """
     Remove circular holes that are part of a shaped hole (e.g. rounded corners of a rect).
     Returns filtered list of circular_holes.
     """
     if not shaped_holes:
+        if return_debug:
+            return circular_holes, []
         return circular_holes
         
     filtered_circular = []
+    rejected = []
     
     for circ in circular_holes:
         is_duplicate = False
@@ -1445,11 +1638,26 @@ def deduplicate_holes(circular_holes, shaped_holes):
 
             if dist < (max_dim * 0.8):
                 is_duplicate = True
+                rejected.append({
+                    "id": getattr(circ, "id", None),
+                    "reason": "Afgewezen als onderdeel van een shaped hole",
+                    "criteria": [
+                        {
+                            "name": "duplicate_of_shaped_hole",
+                            "value": round(dist, 3),
+                            "threshold": round(max_dim * 0.8, 3),
+                            "passed": False,
+                            "note": f"Nabij shaped hole {shaped.get('dim', shaped.get('type', 'unknown'))}",
+                        }
+                    ],
+                })
                 break
         
         if not is_duplicate:
             filtered_circular.append(circ)
             
+    if return_debug:
+        return filtered_circular, rejected
     return filtered_circular
 
 def is_turned_part(cq_object):

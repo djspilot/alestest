@@ -1,9 +1,81 @@
 # ALES Manufacturing Pipeline
 
-**Laatste update:** 24 maart 2026
-**Versie:** 3.11-dev (ALES STEP Viewer + live pipeline inspectie)
+**Laatste update:** 25 maart 2026
+**Versie:** 3.12-dev (ALES STEP Viewer + split panels + gating)
 
 > Zie [docs/TIMELINE.md](docs/TIMELINE.md) voor de volledige versiegeschiedenis.
+
+### v3.12-dev — Split panels, hole explorer en stage-gating (25 maart 2026)
+
+**Doel van deze update:** de viewer stabieler en bruikbaarder maken tijdens live pipeline-analyse, met een duidelijke scheiding tussen stage-navigatie en stage-details, plus expliciete criteria-uitleg voor classificatie en hole-detectie.
+
+**Wat is gedaan:**
+
+1. **Viewer toont lokale STEP preview al tijdens pipeline-run**
+   - De browser mag nu al een lokale STEP-preview opbouwen terwijl de backend-pipeline nog draait.
+   - Hierdoor hoef je niet meer op de volledige job te wachten om het model te zien.
+   - Backend mesh blijft de primaire bron zodra die beschikbaar is.
+
+2. **UI opgesplitst naar links/midden/rechts**
+   - Links: bestand, pipeline-configuratie en stage-lijst.
+   - Midden: 3D viewer.
+   - Rechts: detailpaneel voor de geselecteerde stage.
+   - Beide zijpanelen zijn inklapbaar via de header.
+
+3. **Stage-selectie is veiliger gemaakt**
+   - Stages zijn pas klikbaar zodra ze `Klaar`, `Overgeslagen` of `Mislukt` zijn.
+   - `Classify geometry` is extra beschermd en wordt pas selecteerbaar wanneer de volledige pipeline `completed` is, om runtime-wit-schermgevallen tijdens live processing te voorkomen.
+   - `Vorige`/`Volgende` navigeren alleen nog tussen echt selecteerbare stages.
+
+4. **Rechter detailpaneel opent automatisch**
+   - Bij stage-selectie opent het rechterpaneel vanzelf.
+   - Bij hole-selectie vanuit de lijst of vanuit de 3D-view opent het detailpaneel ook automatisch en springt de UI naar `Detect holes`.
+
+5. **Detect holes omgebouwd tot hole explorer**
+   - Niet alleen geaccepteerde holes, maar ook afgewezen kandidaten zijn zichtbaar.
+   - Per hole zie je reden, criteria en pass/fail-checks.
+   - Holes zijn aanklikbaar vanuit:
+     - de rechter hole-lijst
+     - de 3D overlay
+     - een klik op de mesh in de buurt van een hole-kandidaat
+   - Overlay-state is visueel explicieter:
+     - goud = geselecteerd
+     - rood = geaccepteerd
+     - blauw = afgewezen
+     - gedimd = niet geselecteerd
+   - In het rechterpaneel staat het `Hole Overlay` overzicht nu bovenaan de `Detect holes` detailweergave.
+
+6. **Classify geometry toont echte threshold-criteria**
+   - De viewer toont nu criteria gebaseerd op [docs/CLASSIFICATION_THRESHOLDS_MATRIX.md](docs/CLASSIFICATION_THRESHOLDS_MATRIX.md).
+   - Per criterium zie je:
+     - stap (`STEP 1A`, `STEP 1B`, enz.)
+     - actuele waarde
+     - threshold
+     - afwijking t.o.v. die threshold
+     - `Pass` of `Fail`
+   - Ook het beslispad (`rules`) uit de classificatietrace wordt nu zichtbaar gemaakt.
+
+7. **Startscripts vallen automatisch terug naar vrije poorten**
+   - `run_viewer.sh` en `run_viewer.py` stoppen niet meer direct als `8000` of `5173` bezet zijn.
+   - Ze proberen nu automatisch opvolgende poorten, bijvoorbeeld `8001` en `5174`.
+
+**Zelf starten:**
+
+macOS/Linux:
+```bash
+cd /Users/ds/AIdoel/alestest
+./run_viewer.sh
+```
+
+Cross-platform:
+```bash
+cd /Users/ds/AIdoel/alestest
+python run_viewer.py
+```
+
+Als standaardpoorten bezet zijn, kiest het script automatisch vrije fallback-poorten en print het de juiste URLs.
+
+---
 
 ### v3.11-dev — ALES STEP Viewer + live pipeline inspectie (24 maart 2026)
 

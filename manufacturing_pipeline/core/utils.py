@@ -8,6 +8,7 @@ import glob
 import subprocess
 import json
 import hashlib
+import math
 from datetime import datetime
 
 # Project paths
@@ -240,6 +241,240 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
 
     part_name = os.path.splitext(os.path.basename(step_file))[0]
 
+    def _primary_solid_for_classification(cq_shape):
+        try:
+            if hasattr(cq_shape, "solids"):
+                solids_obj = cq_shape.solids()
+                solids = solids_obj.vals() if hasattr(solids_obj, "vals") else list(solids_obj)
+                if solids:
+                    first = solids[0]
+                    return first.wrapped if hasattr(first, "wrapped") else first
+        except Exception:
+            pass
+
+        try:
+            if hasattr(cq_shape, "val"):
+                val = cq_shape.val()
+                return val.wrapped if hasattr(val, "wrapped") else val
+        except Exception:
+            pass
+
+        return cq_shape.wrapped if hasattr(cq_shape, "wrapped") else cq_shape
+
+    def _comparison_criterion(step, name, actual, threshold, operator, note=None):
+        actual_value = None if actual is None else float(actual)
+        threshold_value = None if threshold is None else float(threshold)
+        passed = None
+        deviation = None
+
+        if actual_value is not None and threshold_value is not None:
+            if operator == ">=":
+                deviation = round(actual_value - threshold_value, 3)
+                passed = actual_value >= threshold_value
+            elif operator == ">":
+                deviation = round(actual_value - threshold_value, 3)
+                passed = actual_value > threshold_value
+            elif operator == "<=":
+                deviation = round(threshold_value - actual_value, 3)
+                passed = actual_value <= threshold_value
+            elif operator == "<":
+                deviation = round(threshold_value - actual_value, 3)
+                passed = actual_value < threshold_value
+
+        return {
+            "step": step,
+            "name": name,
+            "actual": round(actual_value, 3) if actual_value is not None else None,
+            "threshold": f"{operator} {threshold_value:.3f}" if threshold_value is not None else None,
+            "deviation": deviation,
+            "passed": passed,
+            "note": note,
+        }
+
+    def _range_criterion(step, name, actual, minimum, maximum, note=None):
+        actual_value = None if actual is None else float(actual)
+        min_value = None if minimum is None else float(minimum)
+        max_value = None if maximum is None else float(maximum)
+        passed = None
+        deviation = None
+
+        if actual_value is not None and min_value is not None and max_value is not None:
+            if min_value <= actual_value <= max_value:
+                deviation = round(min(actual_value - min_value, max_value - actual_value), 3)
+                passed = True
+            elif actual_value < min_value:
+                deviation = round(actual_value - min_value, 3)
+                passed = False
+            else:
+                deviation = round(max_value - actual_value, 3)
+                passed = False
+
+        return {
+            "step": step,
+            "name": name,
+            "actual": round(actual_value, 3) if actual_value is not None else None,
+            "threshold": f"{min_value:.3f} .. {max_value:.3f}" if min_value is not None and max_value is not None else None,
+            "deviation": deviation,
+            "passed": passed,
+            "note": note,
+        }
+
+    def _boolean_criterion(step, name, actual, should_be, note=None):
+        actual_value = bool(actual)
+        return {
+            "step": step,
+            "name": name,
+            "actual": actual_value,
+            "threshold": str(bool(should_be)).lower(),
+            "deviation": None,
+            "passed": actual_value is bool(should_be),
+            "note": note,
+        }
+
+    def _compute_classification_thresholds(solid, trace):
+        if solid is None:
+            return []
+
+        from manufacturing_pipeline.analysis.assembly_analysis import get_solid_topology_counts, _get_solid_surface_area
+        from manufacturing_pipeline.analysis.classification_variables import (
+            BENT_SHEET_ASPECT_RATIO_MIN,
+            BENT_SHEET_MIN_EDGE_COUNT,
+            BENT_SHEET_THICKNESS_MAX_MM,
+            BENT_SHEET_TOP2_FACES_MAX_PCT,
+            BENT_SHEET_VOLUME_RATIO_MAX,
+            BENT_SHEET_VOLUME_RATIO_MIN,
+            PLATE_ASPECT_RATIO_MIN,
+            PLATE_FACE_TOP2_THRESHOLD_PCT,
+            PLATE_FEATURE_HEAVY_ASPECT_RATIO_MIN,
+            PLATE_FEATURE_HEAVY_EDGE_FACE_RATIO_MIN,
+            PLATE_FEATURE_HEAVY_FACE_COUNT_MIN,
+            PLATE_FEATURE_HEAVY_TOP2_MIN_PCT,
+            PLATE_FEATURE_HEAVY_VOLUME_RATIO_MAX,
+            PLATE_THICK_MAX_MM,
+            PLATE_THICKNESS_RATIO_MAX,
+            PROFILE_CROSS_RATIO_MAX,
+            PROFILE_CROSS_RATIO_MIN,
+            PROFILE_LENGTH_RATIO_MIN,
+            PROFILE_SA_V_RATIO_MAX,
+            PROFILE_SMALLEST_MIN_MM,
+            PROFILE_VOLUME_RATIO_STRONG_MIN,
+            PROFILE_VOLUME_RATIO_WEAK_MIN,
+            STANDARD_PROFILE_FACE_AREA_TOLERANCE,
+            STANDARD_PROFILE_ELONGATED_LENGTH_RATIO_MIN,
+            STANDARD_TUBE_ASPECT_MIN,
+            STANDARD_TUBE_CYLINDRICAL_MIN_PCT,
+            STANDARD_TUBE_VOLUME_RATIO_MAX,
+        )
+
+        features = dict((trace or {}).get("features") or {})
+        smallest = float(features.get("smallest") or 0.0)
+        middle = float(features.get("middle") or 0.0)
+        longest = float(features.get("longest") or 0.0)
+        top2_planar = float(features.get("top2_planar_percent") or 0.0)
+        top2_percent = float(features.get("top2_percent") or 0.0)
+        aspect_ratio = float(features.get("aspect_ratio") or 0.0)
+        thickness_ratio = float(features.get("thickness_ratio") or 0.0)
+        length_ratio = float(features.get("length_ratio") or 0.0)
+        cross_ratio = float(features.get("cross_ratio") or 0.0)
+        volume_ratio = float(features.get("volume_ratio") or 0.0)
+        bend_angle_sum = float(features.get("bend_angle_sum") or 0.0)
+        step0_confidence = float(features.get("step0_confidence") or 0.0)
+        step0_fallthrough = bool(features.get("step0_fallthrough")) if "step0_fallthrough" in features else None
+
+        face_count, edge_count = get_solid_topology_counts(solid)
+        edge_face_ratio = (edge_count / face_count) if face_count else 0.0
+        volume = volume_ratio * smallest * middle * longest if smallest and middle and longest else 0.0
+        surface_area = _get_solid_surface_area(solid)
+        sa_v_ratio = (surface_area / volume) if volume > 0 else 0.0
+
+        try:
+            from OCP.BRepAdaptor import BRepAdaptor_Surface
+            from OCP.GeomAbs import GeomAbs_Cylinder
+            from OCP.GProp import GProp_GProps
+            from OCP.BRepGProp import BRepGProp
+            from OCP.TopExp import TopExp_Explorer
+            from OCP.TopAbs import TopAbs_FACE
+            from OCP.TopoDS import TopoDS
+
+            cylindrical_area = 0.0
+            total_area = 0.0
+            face_areas = []
+            exp = TopExp_Explorer(solid, TopAbs_FACE)
+            while exp.More():
+                face = TopoDS.Face_s(exp.Current())
+                props = GProp_GProps()
+                BRepGProp.SurfaceProperties_s(face, props)
+                area = props.Mass()
+                total_area += area
+                face_areas.append(area)
+                surf = BRepAdaptor_Surface(face, True)
+                if surf.GetType() == GeomAbs_Cylinder:
+                    cylindrical_area += area
+                exp.Next()
+            cylindrical_pct = (cylindrical_area / total_area) * 100 if total_area > 0 else 0.0
+            face_areas.sort(reverse=True)
+            variable_face_diff = (
+                abs(face_areas[0] - face_areas[1]) / face_areas[0]
+                if len(face_areas) >= 2 and face_areas[0] > 0
+                else 0.0
+            )
+        except Exception:
+            cylindrical_pct = 0.0
+            variable_face_diff = 0.0
+
+        profile_length_ratio = (longest / middle) if middle > 0 else 0.0
+        profile_cross_ratio = (middle / smallest) if smallest > 0 else 0.0
+        tube_aspect = (middle / longest) if longest > 0 else 0.0
+        bent_cross_ratio = (smallest / middle) if middle > 0 else 0.0
+        rectangular_profile_exclusion = (
+            smallest >= PLATE_THICK_MAX_MM and
+            profile_length_ratio >= PROFILE_LENGTH_RATIO_MIN and
+            PROFILE_CROSS_RATIO_MIN <= profile_cross_ratio <= PROFILE_CROSS_RATIO_MAX and
+            volume_ratio <= STANDARD_TUBE_VOLUME_RATIO_MAX
+        )
+        perfect_round_or_square = abs(bent_cross_ratio - 1.0) < 0.05 if middle > 0 else False
+
+        criteria = []
+        if step0_fallthrough is not None:
+            criteria.extend([
+                _comparison_criterion("STEP 0B", "Router confidence", step0_confidence, 0.7, ">=", "ML-router profiel confidence"),
+                _boolean_criterion("STEP 0B", "Router fallthrough", step0_fallthrough, False, "False betekent early exit in STEP 0"),
+            ])
+
+        criteria.extend([
+            _comparison_criterion("STEP 1A", "Top2 planar %", top2_planar, PLATE_FACE_TOP2_THRESHOLD_PCT, ">", "Plaatdetectie via parallelle grote vlakke faces"),
+            _comparison_criterion("STEP 1B", "Thickness / smallest", smallest, BENT_SHEET_THICKNESS_MAX_MM, "<=", "Gebogen plaat moet relatief dun blijven"),
+            _comparison_criterion("STEP 1B", "Edge count", edge_count, BENT_SHEET_MIN_EDGE_COUNT, ">=", "Gebogen plaat heeft veel randen/vouwen"),
+            _range_criterion("STEP 1B", "Volume ratio", volume_ratio, BENT_SHEET_VOLUME_RATIO_MIN, BENT_SHEET_VOLUME_RATIO_MAX, "Luchtig maar niet volledig hol"),
+            _comparison_criterion("STEP 1B", "Top2 faces %", top2_percent, BENT_SHEET_TOP2_FACES_MAX_PCT, "<=", "Niet te vlak verdeeld"),
+            _comparison_criterion("STEP 1B", "Aspect ratio", aspect_ratio, BENT_SHEET_ASPECT_RATIO_MIN, ">=", "Moet uitgestrekt genoeg zijn"),
+            _boolean_criterion("STEP 1B", "Rectangular profile exclusion", rectangular_profile_exclusion, False, "False vereist voor bent-sheet"),
+            _boolean_criterion("STEP 1B", "Perfect round/square exclusion", perfect_round_or_square, False, "False vereist voor bent-sheet"),
+            _comparison_criterion("STEP 1B", "Bend angle sum", bend_angle_sum, 360.0, ">=", ">=360 betekent gesloten bent profiel"),
+            _comparison_criterion("STEP 1C", "Smallest dim", smallest, PLATE_THICK_MAX_MM, "<", "Dunne plaat fallback"),
+            _comparison_criterion("STEP 1C", "Thickness ratio", thickness_ratio, PLATE_THICKNESS_RATIO_MAX, "<", "Kleinste/middelste verhouding"),
+            _comparison_criterion("STEP 1C", "Aspect ratio", aspect_ratio, PLATE_ASPECT_RATIO_MIN, ">", "Plaat moet slank genoeg zijn"),
+            _range_criterion("STEP 1D", "Top2 planar band", top2_planar, PLATE_FEATURE_HEAVY_TOP2_MIN_PCT, PLATE_FACE_TOP2_THRESHOLD_PCT, "Perforated plate window"),
+            _comparison_criterion("STEP 1D", "Face count", face_count, PLATE_FEATURE_HEAVY_FACE_COUNT_MIN, ">=", "Veel faces door perforaties"),
+            _comparison_criterion("STEP 1D", "Edge / face ratio", edge_face_ratio, PLATE_FEATURE_HEAVY_EDGE_FACE_RATIO_MIN, ">=", "Veel randen per face"),
+            _comparison_criterion("STEP 1D", "Volume ratio", volume_ratio, PLATE_FEATURE_HEAVY_VOLUME_RATIO_MAX, "<", "Perforated plates zijn relatief luchtig"),
+            _comparison_criterion("STEP 1D", "Aspect ratio", aspect_ratio, PLATE_FEATURE_HEAVY_ASPECT_RATIO_MIN, ">=", "Nog steeds uitgestrekt"),
+            _comparison_criterion("STEP 2B", "Smallest dim", smallest, PROFILE_SMALLEST_MIN_MM, ">=", "Minimale profiel-dikte"),
+            _comparison_criterion("STEP 2B", "Length ratio", length_ratio, PROFILE_LENGTH_RATIO_MIN, ">=", "Profiel moet lang genoeg zijn"),
+            _range_criterion("STEP 2B", "Cross ratio", cross_ratio, PROFILE_CROSS_RATIO_MIN, PROFILE_CROSS_RATIO_MAX, "Rechthoekig profielvenster"),
+            _comparison_criterion("STEP 2B", "Volume ratio strong", volume_ratio, PROFILE_VOLUME_RATIO_STRONG_MIN, ">", "Sterke profiel-indicatie"),
+            _comparison_criterion("STEP 2B", "Volume ratio weak", volume_ratio, PROFILE_VOLUME_RATIO_WEAK_MIN, ">=", "Zwakkere profiel-indicatie"),
+            _comparison_criterion("STEP 2B", "Surface / volume ratio", sa_v_ratio, PROFILE_SA_V_RATIO_MAX, "<", "Tie-breaker voor massief profiel"),
+            _comparison_criterion("STEP 3A", "Cylindrical %", cylindrical_pct, STANDARD_TUBE_CYLINDRICAL_MIN_PCT, ">=", "Holle buis detectie"),
+            _comparison_criterion("STEP 3A", "Volume ratio", volume_ratio, STANDARD_TUBE_VOLUME_RATIO_MAX, "<", "Holle buis is niet te massief"),
+            _comparison_criterion("STEP 3A", "Tube aspect", tube_aspect, STANDARD_TUBE_ASPECT_MIN, ">=", "Niet te plat"),
+            _comparison_criterion("STEP 3B", "Elongated length ratio", aspect_ratio, STANDARD_PROFILE_ELONGATED_LENGTH_RATIO_MIN, ">=", "UNP/I-beam lengteverhouding"),
+            _comparison_criterion("STEP 3B", "Top2 face area diff", variable_face_diff, STANDARD_PROFILE_FACE_AREA_TOLERANCE, ">", "Verschil tussen grootste 2 faces"),
+            _boolean_criterion("STEP 3B", "Bent-sheet exclusion", rectangular_profile_exclusion or perfect_round_or_square, False, "Variable-thickness pad mag geen bent-sheet/profiel-exclusion raken"),
+        ])
+
+        return criteria
+
     # Initialize profiler
     file_size_mb = os.path.getsize(step_file) / (1024 * 1024)
     profiler = AnalysisProfiler(
@@ -274,6 +509,7 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                     "method": route_result.method,
                     "variant": route_result.variant,
                     "reasoning": route_result.reasoning,
+                    **(getattr(route_result, "debug", None) or {}),
                 },
             )
         except Exception as e:
@@ -362,57 +598,45 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
 
     source = "AAG+Standard" if aag_result.success else "Standard"
 
+    legacy_class = None
+    legacy_trace = None
+    solid_for_classification = None
+    classification_criteria = []
+
+    try:
+        from manufacturing_pipeline.analysis.assembly_analysis import classify_solid
+
+        solid_for_classification = _primary_solid_for_classification(shape)
+        legacy_class, legacy_trace = classify_solid(solid_for_classification, return_trace=True)
+        analysis.classification_trace = legacy_trace
+        classification_criteria = _compute_classification_thresholds(solid_for_classification, legacy_trace)
+    except Exception as e:
+        if args.verbose:
+            print(f"  Warning: classify_solid trace build failed ({e})")
+
     # Bugfix: quick-mode kon ONBEKEND/OVERIG tonen terwijl classify_solid al
     # een valide eindklasse had (plaat/profiel/anders).
-    if part_category == "ONBEKEND":
-        try:
-            from manufacturing_pipeline.analysis.assembly_analysis import classify_solid
+    if part_category == "ONBEKEND" and legacy_class is not None and legacy_trace is not None:
+        if legacy_class == "plaat":
+            step0_label = str(legacy_trace.get("features", {}).get("step0_label", "")).upper()
+            if step0_label == "GEZETTE_PLAAT" or analysis.bend_count_erp > 0:
+                part_category = "GEBOGEN PLAATWERK"
+                analysis.part_type = PartType.COMPLEX
+            else:
+                part_category = "PLAAT (vlak)"
+                analysis.part_type = PartType.PLAAT
+            analysis.is_sheet_metal = True
+        elif legacy_class == "profiel":
+            part_category = "PROFIEL (ingekocht)"
+            if analysis.part_type not in [PartType.BUIS, PartType.KOKER, PartType.KOKER_PROFIEL]:
+                analysis.part_type = PartType.KOKER_PROFIEL
+        elif legacy_class == "anders":
+            part_category = "ANDERS"
+            analysis.part_type = PartType.OVERIG
 
-            def _primary_solid_for_classification(cq_shape):
-                try:
-                    if hasattr(cq_shape, "solids"):
-                        solids_obj = cq_shape.solids()
-                        solids = solids_obj.vals() if hasattr(solids_obj, "vals") else list(solids_obj)
-                        if solids:
-                            first = solids[0]
-                            return first.wrapped if hasattr(first, "wrapped") else first
-                except Exception:
-                    pass
+        source = f"{source}+classify_solid"
 
-                try:
-                    if hasattr(cq_shape, "val"):
-                        val = cq_shape.val()
-                        return val.wrapped if hasattr(val, "wrapped") else val
-                except Exception:
-                    pass
-
-                return cq_shape.wrapped if hasattr(cq_shape, "wrapped") else cq_shape
-
-            solid_for_classification = _primary_solid_for_classification(shape)
-            legacy_class, legacy_trace = classify_solid(solid_for_classification, return_trace=True)
-
-            if legacy_class == "plaat":
-                step0_label = str(legacy_trace.get("features", {}).get("step0_label", "")).upper()
-                if step0_label == "GEZETTE_PLAAT" or analysis.bend_count_erp > 0:
-                    part_category = "GEBOGEN PLAATWERK"
-                    analysis.part_type = PartType.COMPLEX
-                else:
-                    part_category = "PLAAT (vlak)"
-                    analysis.part_type = PartType.PLAAT
-                analysis.is_sheet_metal = True
-            elif legacy_class == "profiel":
-                part_category = "PROFIEL (ingekocht)"
-                if analysis.part_type not in [PartType.BUIS, PartType.KOKER, PartType.KOKER_PROFIEL]:
-                    analysis.part_type = PartType.KOKER_PROFIEL
-            elif legacy_class == "anders":
-                part_category = "ANDERS"
-                analysis.part_type = PartType.OVERIG
-
-            analysis.classification_trace = legacy_trace
-            source = f"{source}+classify_solid"
-        except Exception as e:
-            if args.verbose:
-                print(f"  Warning: classify_solid fallback failed ({e})")
+    analysis.classification_criteria = classification_criteria
 
     print(f"\n--- Classificatie ({source}) ---")
     print(f"Categorie:   {part_category}")
@@ -424,14 +648,33 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
         "geometry_classified",
         "Classify geometry",
         {
+            "part_category": part_category,
             "category": part_category,
             "part_type": analysis.part_type.value if hasattr(analysis.part_type, "value") else str(analysis.part_type),
+            "dimensions": {
+                "length": round(float(analysis.length or 0), 3),
+                "width": round(float(analysis.width or 0), 3),
+                "height": round(float(analysis.height or 0), 3),
+            },
             "length": round(float(analysis.length or 0), 3),
             "width": round(float(analysis.width or 0), 3),
             "height": round(float(analysis.height or 0), 3),
             "thickness": round(float(analysis.thickness or 0), 3),
             "bends_total": int(analysis.bend_count_erp or 0),
             "source": source,
+            "trace": legacy_trace or {},
+            "rules": list((legacy_trace or {}).get("rules") or []),
+            "criteria": classification_criteria,
+            "matrix_doc": "docs/CLASSIFICATION_THRESHOLDS_MATRIX.md",
+            "reasoning": [
+                {
+                    "step": getattr(item, "step", ""),
+                    "observation": getattr(item, "observation", ""),
+                    "conclusion": getattr(item, "conclusion", ""),
+                    "details": getattr(item, "details", {}) or {},
+                }
+                for item in (getattr(analysis, "reasoning", []) or [])
+            ],
         },
     )
 
@@ -480,6 +723,8 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                 "flat_length": unfold_result.get("flat_length") if unfold_result else None,
                 "flat_width": unfold_result.get("flat_width") if unfold_result else None,
                 "fold_lines": unfold_result.get("fold_lines") if unfold_result else 0,
+                "fold_details": unfold_result.get("fold_details", []) if unfold_result else [],
+                "bends_logical": unfold_result.get("bends_logical", []) if unfold_result else [],
                 "error": unfold_result.get("error") if unfold_result else None,
             },
             status="OK" if unfold_result and unfold_result.get("success") else "FAIL",
@@ -517,18 +762,23 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
             hole_face_data = face_data  # Reuse already-computed data
 
         with profiler.sub_step("Cylindrical"):
-            circular_holes = detect_holes(
+            circular_holes, circular_debug = detect_holes(
                 analysis_shape, is_flat_pattern=is_flat,
-                is_turned=analysis.is_turned, face_data=hole_face_data
+                is_turned=analysis.is_turned, face_data=hole_face_data, return_debug=True
             )
         profiler.set_sub_count("Cylindrical", len(circular_holes))
 
         with profiler.sub_step("Shaped"):
-            shaped_holes = detect_shaped_holes(analysis_shape, face_data=hole_face_data)
+            shaped_holes, shaped_debug = detect_shaped_holes(
+                analysis_shape,
+                face_data=hole_face_data,
+                is_flat_pattern=is_flat,
+                return_debug=True,
+            )
         profiler.set_sub_count("Shaped", len(shaped_holes))
 
         with profiler.sub_step("Dedup"):
-            circular_holes = deduplicate_holes(circular_holes, shaped_holes)
+            circular_holes, dedup_rejections = deduplicate_holes(circular_holes, shaped_holes, return_debug=True)
 
         total_holes = len(circular_holes) + len(shaped_holes)
         profiler.count("holes", total_holes)
@@ -542,6 +792,54 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
         print(f"    {i+1}. {h['type']} {h['dim']} at {h['center']}")
 
     print(f"  Totaal: {total_holes}")
+    hole_debug_items = []
+    for item in circular_debug + shaped_debug:
+        normalized_item = dict(item)
+        normalized_item["source"] = "flat" if is_flat else "3d"
+        hole_debug_items.append(normalized_item)
+
+    for rejection in dedup_rejections:
+        for item in hole_debug_items:
+            if item.get("id") == rejection.get("id"):
+                item["status"] = "rejected"
+                item["reason"] = rejection.get("reason")
+                item["criteria"] = [
+                    *(item.get("criteria") or []),
+                    *(rejection.get("criteria") or []),
+                ]
+                break
+
+    accepted_hole_count = sum(1 for item in hole_debug_items if item.get("status") == "accepted")
+    rejected_hole_count = sum(1 for item in hole_debug_items if item.get("status") == "rejected")
+
+    analysis.detected_hole_visuals = {
+        "source": "flat" if is_flat else "3d",
+        "total_candidates": len(hole_debug_items),
+        "accepted_total": accepted_hole_count,
+        "rejected_total": rejected_hole_count,
+        "items": [
+            {
+                "id": str(item.get("id") or ""),
+                "status": str(item.get("status") or "accepted"),
+                "type": str(item.get("type", "hole")).lower(),
+                "diameter": float(item.get("diameter", 0.0) or 0.0) if item.get("diameter") is not None else None,
+                "depth": float(item.get("depth", 0.0) or 0.0) if item.get("depth") is not None else None,
+                "position": [
+                    float((item.get("position") or (0.0, 0.0, 0.0))[0]),
+                    float((item.get("position") or (0.0, 0.0, 0.0))[1]),
+                    float((item.get("position") or (0.0, 0.0, 0.0))[2]),
+                ],
+                "label": str(item.get("label") or item.get("type") or "Hole"),
+                "reason": str(item.get("reason") or "Geen toelichting"),
+                "axis": list(item.get("axis") or (1.0, 0.0, 0.0)),
+                "normal": list(item.get("normal") or (1.0, 0.0, 0.0)),
+                "size": str(item.get("size", "")),
+                "source": str(item.get("source") or ("flat" if is_flat else "3d")),
+                "criteria": item.get("criteria") or [],
+            }
+            for item in hole_debug_items
+        ],
+    }
     profiler.emit(
         "holes_detected",
         "Detect holes",
@@ -549,42 +847,11 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
             "total": total_holes,
             "cylindrical": len(circular_holes),
             "shaped": len(shaped_holes),
-            "source": "flat" if is_flat else "3d",
+            "accepted": accepted_hole_count,
+            "rejected": rejected_hole_count,
+            **analysis.detected_hole_visuals,
         },
     )
-
-    analysis.detected_hole_visuals = {
-        "source": "flat" if is_flat else "3d",
-        "items": [
-            {
-                "type": str(getattr(h, "type", "cylindrical") or "cylindrical"),
-                "diameter": float(getattr(h, "diameter", 0.0) or 0.0),
-                "depth": float(getattr(h, "depth", 0.0) or 0.0),
-                "position": [
-                    float(getattr(h, "position", (0.0, 0.0, 0.0))[0]),
-                    float(getattr(h, "position", (0.0, 0.0, 0.0))[1]),
-                    float(getattr(h, "position", (0.0, 0.0, 0.0))[2]),
-                ],
-                "label": f"Ø{float(getattr(h, 'diameter', 0.0) or 0.0):.1f} mm",
-                "reason": getattr(h, "reason", None) or getattr(h, "hole_type", None) or "Cylindrisch gat",
-                "axis": list(getattr(h, "axis", (1.0, 0.0, 0.0)) or (1.0, 0.0, 0.0)),
-            }
-            for h in circular_holes
-        ] + [
-            {
-                "type": str(h.get("type", "shaped")).lower(),
-                "diameter": None,
-                "depth": float(analysis.thickness or 0),
-                "position": [float(h["center"][0]), float(h["center"][1]), float(h["center"][2])],
-                "label": str(h.get("dim", h.get("type", "Shaped"))),
-                "reason": f"{h.get('type', 'Shaped')} hole",
-                "normal": list(h.get("normal") or (1.0, 0.0, 0.0)),
-                "size": str(h.get("dim", "")),
-            }
-            for h in shaped_holes
-            if h.get("center")
-        ],
-    }
 
     # ================================================================
     # STEP 7: Save results

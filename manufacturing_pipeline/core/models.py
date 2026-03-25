@@ -22,6 +22,7 @@ class HoleFeature:
     position: Tuple[float, float, float]
     axis: Tuple[float, float, float]
     type: str = "unknown" # through, blind, etc.
+    id: Optional[str] = None
 
 @dataclass
 class MatchedFeature:

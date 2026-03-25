@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react'
+import React, { useCallback, useEffect, useMemo } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
@@ -41,6 +41,34 @@ function SceneControls({ controlsRef }) {
       onChange={invalidate}
     />
   )
+}
+
+function HoleFocusController({ selectedHole, modelInfo, controlsRef }) {
+  const { camera, invalidate } = useThree()
+
+  useEffect(() => {
+    if (!selectedHole || !modelInfo?.center || !controlsRef.current) return
+
+    const target = new THREE.Vector3(
+      selectedHole.position[0] - modelInfo.center.x,
+      selectedHole.position[1] - modelInfo.center.y,
+      selectedHole.position[2] - modelInfo.center.z
+    )
+    const direction = new THREE.Vector3(...(selectedHole.axis || selectedHole.normal || [1, 0, 0])).normalize()
+    const focusSize =
+      selectedHole.diameter ||
+      Math.max(...parseHoleSize(selectedHole.size || selectedHole.label || '', 12)) ||
+      12
+    const distance = Math.max(focusSize * 6, modelInfo.boundingRadius * 0.14, 24)
+    const cameraOffset = direction.multiplyScalar(distance).add(new THREE.Vector3(distance * 0.25, distance * 0.12, distance * 0.22))
+
+    camera.position.copy(target.clone().add(cameraOffset))
+    controlsRef.current.target.copy(target)
+    controlsRef.current.update()
+    invalidate()
+  }, [camera, controlsRef, invalidate, modelInfo, selectedHole])
+
+  return null
 }
 
 function longestAxisInfo(size) {
@@ -160,12 +188,82 @@ function buildSectionContours(partType, size, thickness, axisKey) {
   return contours
 }
 
-function HoleOutline({ hole, center }) {
-  const position = [
+function holePalette(hole, isSelected, hasSelection) {
+  const dimmed = hasSelection && !isSelected
+
+  if (isSelected) {
+    return {
+      outer: '#f5c542',
+      inner: '#fff0a8',
+      leader: '#f59e0b',
+      marker: '#f59e0b',
+      outlineOpacity: 1,
+      leaderOpacity: 1,
+      fillOpacity: 0.12,
+    }
+  }
+
+  if (hole.status === 'rejected') {
+    return {
+      outer: '#315b8a',
+      inner: '#60a5fa',
+      leader: '#7dd3fc',
+      marker: '#7dd3fc',
+      outlineOpacity: dimmed ? 0.2 : 0.85,
+      leaderOpacity: dimmed ? 0.15 : 0.75,
+      fillOpacity: dimmed ? 0.0 : 0.03,
+    }
+  }
+
+  return {
+    outer: '#7f0008',
+    inner: '#ff4d3b',
+    leader: '#ff7a59',
+    marker: '#ff7a59',
+    outlineOpacity: dimmed ? 0.22 : 0.92,
+    leaderOpacity: dimmed ? 0.16 : 0.82,
+    fillOpacity: dimmed ? 0.0 : 0.04,
+  }
+}
+
+function holeCenterPosition(hole, center) {
+  return [
     hole.position[0] - center.x,
     hole.position[1] - center.y,
     hole.position[2] - center.z,
   ]
+}
+
+function holeFocusRadius(hole, modelInfo) {
+  const [width, height] = parseHoleSize(hole.size || hole.label || '', 12)
+  const featureSize = hole.diameter || Math.max(width, height) || 12
+  return Math.max(featureSize * 0.7, modelInfo?.boundingRadius * 0.018 || 0, 6)
+}
+
+function findNearestHoleByPoint(point, holes, center, modelInfo) {
+  if (!holes?.length || !center) return null
+
+  let bestHole = null
+  let bestDistance = Infinity
+  const clickedPoint = point instanceof THREE.Vector3 ? point : new THREE.Vector3(point.x, point.y, point.z)
+
+  for (const hole of holes) {
+    const position = holeCenterPosition(hole, center)
+    const holePoint = new THREE.Vector3(...position)
+    const distance = holePoint.distanceTo(clickedPoint)
+    const maxDistance = holeFocusRadius(hole, modelInfo) * 1.35
+
+    if (distance <= maxDistance && distance < bestDistance) {
+      bestHole = hole
+      bestDistance = distance
+    }
+  }
+
+  return bestHole
+}
+
+function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSelect }) {
+  const position = holeCenterPosition(hole, center)
   const cylindricalRadius = Math.max((hole.diameter || 8) / 2, 3)
   const [rectWidth, rectHeight] = parseHoleSize(hole.size || hole.label, 14)
   const outerLoop = useMemo(() => {
@@ -194,32 +292,46 @@ function HoleOutline({ hole, center }) {
       [rectWidth / 2 + 18, rectHeight * 0.35, 0],
     ])
   }, [hole.type, cylindricalRadius, rectWidth, rectHeight])
+  const palette = holePalette(hole, isSelected, hasSelection)
+  const hitRadius = holeFocusRadius(hole, modelInfo)
+  const handleSelect = useCallback((event) => {
+    event.stopPropagation()
+    onSelect?.(hole.id)
+  }, [hole.id, onSelect])
 
   if (hole.type === 'cylindrical') {
     const quaternion = quaternionFromDirection(hole.axis || [1, 0, 0])
     return (
-      <group position={position} quaternion={quaternion} renderOrder={20}>
+      <group position={position} quaternion={quaternion} renderOrder={20} onClick={handleSelect}>
+        <mesh>
+          <circleGeometry args={[Math.max(cylindricalRadius * 1.08, hitRadius * 0.9), 40]} />
+          <meshBasicMaterial color={palette.outer} transparent opacity={palette.fillOpacity} depthTest={false} depthWrite={false} side={THREE.DoubleSide} />
+        </mesh>
         <lineLoop>
           <bufferGeometry>
             <bufferAttribute attach="attributes-position" args={[outerLoop, 3]} />
           </bufferGeometry>
-          <lineBasicMaterial color="#7f0008" transparent opacity={1} depthTest={false} depthWrite={false} />
+          <lineBasicMaterial color={palette.outer} transparent opacity={palette.outlineOpacity} depthTest={false} depthWrite={false} />
         </lineLoop>
         <lineLoop position={[0, 0, 0.2]}>
           <bufferGeometry>
             <bufferAttribute attach="attributes-position" args={[innerLoop, 3]} />
           </bufferGeometry>
-          <lineBasicMaterial color="#ff3b30" transparent opacity={1} depthTest={false} depthWrite={false} />
+          <lineBasicMaterial color={palette.inner} transparent opacity={palette.outlineOpacity} depthTest={false} depthWrite={false} />
         </lineLoop>
         <lineSegments>
           <bufferGeometry>
             <bufferAttribute attach="attributes-position" args={[leaderLine, 3]} />
           </bufferGeometry>
-          <lineBasicMaterial color="#ff6b57" transparent opacity={1} depthTest={false} depthWrite={false} />
+          <lineBasicMaterial color={palette.leader} transparent opacity={palette.leaderOpacity} depthTest={false} depthWrite={false} />
         </lineSegments>
         <mesh position={[cylindricalRadius + 18, cylindricalRadius * 0.5, 0]}>
           <sphereGeometry args={[1.4, 12, 12]} />
-          <meshBasicMaterial color="#ff6b57" depthTest={false} depthWrite={false} />
+          <meshBasicMaterial color={palette.marker} transparent opacity={palette.outlineOpacity} depthTest={false} depthWrite={false} />
+        </mesh>
+        <mesh>
+          <circleGeometry args={[hitRadius, 40]} />
+          <meshBasicMaterial transparent opacity={0.01} depthTest={false} depthWrite={false} side={THREE.DoubleSide} />
         </mesh>
       </group>
     )
@@ -227,28 +339,36 @@ function HoleOutline({ hole, center }) {
 
   const quaternion = quaternionFromDirection(hole.normal || [1, 0, 0])
   return (
-    <group position={position} quaternion={quaternion} renderOrder={20}>
+    <group position={position} quaternion={quaternion} renderOrder={20} onClick={handleSelect}>
+      <mesh>
+        <planeGeometry args={[Math.max(rectWidth * 1.08, hitRadius * 1.7), Math.max(rectHeight * 1.08, hitRadius * 1.7)]} />
+        <meshBasicMaterial color={palette.outer} transparent opacity={palette.fillOpacity} depthTest={false} depthWrite={false} side={THREE.DoubleSide} />
+      </mesh>
       <lineLoop>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[outerLoop, 3]} />
         </bufferGeometry>
-        <lineBasicMaterial color="#7f0008" transparent opacity={1} depthTest={false} depthWrite={false} />
+        <lineBasicMaterial color={palette.outer} transparent opacity={palette.outlineOpacity} depthTest={false} depthWrite={false} />
       </lineLoop>
       <lineLoop position={[0, 0, 0.2]}>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[innerLoop, 3]} />
         </bufferGeometry>
-        <lineBasicMaterial color="#ff5a1f" transparent opacity={1} depthTest={false} depthWrite={false} />
+        <lineBasicMaterial color={palette.inner} transparent opacity={palette.outlineOpacity} depthTest={false} depthWrite={false} />
       </lineLoop>
         <lineSegments>
           <bufferGeometry>
             <bufferAttribute attach="attributes-position" args={[leaderLine, 3]} />
           </bufferGeometry>
-          <lineBasicMaterial color="#ff8a4d" transparent opacity={1} depthTest={false} depthWrite={false} />
+          <lineBasicMaterial color={palette.leader} transparent opacity={palette.leaderOpacity} depthTest={false} depthWrite={false} />
         </lineSegments>
       <mesh position={[rectWidth / 2 + 18, rectHeight * 0.35, 0]}>
         <sphereGeometry args={[1.4, 12, 12]} />
-        <meshBasicMaterial color="#ff8a4d" depthTest={false} depthWrite={false} />
+        <meshBasicMaterial color={palette.marker} transparent opacity={palette.outlineOpacity} depthTest={false} depthWrite={false} />
+      </mesh>
+      <mesh>
+        <planeGeometry args={[Math.max(rectWidth, hitRadius * 2), Math.max(rectHeight, hitRadius * 2)]} />
+        <meshBasicMaterial transparent opacity={0.01} depthTest={false} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
     </group>
   )
@@ -411,7 +531,7 @@ function buildFallbackSections(modelInfo) {
   })
 }
 
-function StageOverlays({ modelInfo, visuals, focusedStage }) {
+function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, onHoleSelect }) {
   const center = modelInfo?.center
   if (!center || !visuals || !focusedStage) return null
 
@@ -454,9 +574,17 @@ function StageOverlays({ modelInfo, visuals, focusedStage }) {
   }))
 
   return (
-    <group>
+      <group>
       {focusedStage === 'Detect holes' && holeVisuals.map((hole, index) => (
-        <HoleOutline key={`${hole.type}-${index}`} hole={hole} center={center} />
+        <HoleOutline
+          key={hole.id || `${hole.type}-${index}`}
+          hole={hole}
+          center={center}
+          hasSelection={Boolean(selectedHole?.id)}
+          modelInfo={modelInfo}
+          isSelected={selectedHole?.id === hole.id}
+          onSelect={onHoleSelect}
+        />
       ))}
 
       {focusedStage === 'Profile Router' && sectionVisuals.map((section, index) => (
@@ -523,10 +651,21 @@ export default function ViewerCanvas({
   modelInfo,
   backendVisuals,
   focusedStage,
+  selectedHole,
+  onHoleSelect,
   controlsRef,
   useFlatView,
 }) {
   const renderMode = 'clean'
+  const holeItems = backendVisuals?.holes?.items || []
+  const handleSurfacePick = useCallback((point, event) => {
+    if (!holeItems.length || !modelInfo?.center) return
+    event?.stopPropagation?.()
+    const nearestHole = findNearestHoleByPoint(point, holeItems, modelInfo.center, modelInfo)
+    if (nearestHole?.id) {
+      onHoleSelect?.(nearestHole.id)
+    }
+  }, [holeItems, modelInfo, onHoleSelect])
 
   return (
     <Canvas
@@ -547,12 +686,20 @@ export default function ViewerCanvas({
         onLoaded={onLoaded}
         onError={onError}
         onStatus={onStatus}
+        onSurfacePick={handleSurfacePick}
         parseMode={parseMode}
         renderMode={renderMode}
       />
 
       <CameraFitter modelInfo={modelInfo} controlsRef={controlsRef} />
-      <StageOverlays modelInfo={modelInfo} visuals={backendVisuals} focusedStage={focusedStage} />
+      <HoleFocusController selectedHole={selectedHole} modelInfo={modelInfo} controlsRef={controlsRef} />
+      <StageOverlays
+        modelInfo={modelInfo}
+        visuals={backendVisuals}
+        focusedStage={focusedStage}
+        selectedHole={selectedHole}
+        onHoleSelect={onHoleSelect}
+      />
       {!useFlatView && <gridHelper args={[500, 18, '#d4d9e1', '#edf1f5']} />}
       <SceneControls controlsRef={controlsRef} />
     </Canvas>
