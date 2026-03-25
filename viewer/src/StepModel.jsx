@@ -151,7 +151,19 @@ function StepGeometry({ buffer, mesh, onLoaded, onError, onStatus, onSurfacePick
       {threeData.items.map((item, i) => (
         <React.Fragment key={i}>
           {renderMode !== 'edges' && (
-            <mesh geometry={item.geometry} onClick={(event) => onSurfacePick?.(event.point, event)}>
+            <mesh
+              geometry={item.geometry}
+              onClick={(event) => {
+                const worldNormal = event.face?.normal?.clone?.() || null
+                if (worldNormal) {
+                  worldNormal.transformDirection(event.object.matrixWorld)
+                }
+                onSurfacePick?.({
+                  point: event.point?.clone?.() || event.point,
+                  normal: worldNormal,
+                }, event)
+              }}
+            >
               <meshStandardMaterial
                 color="#dfe6ec"
                 roughness={0.88}

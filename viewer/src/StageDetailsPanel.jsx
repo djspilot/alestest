@@ -11,6 +11,7 @@ import {
 function getHoleStatusLabel(status) {
   if (status === 'accepted') return 'Geaccepteerd'
   if (status === 'rejected') return 'Afgewezen'
+  if (status === 'probe') return 'Handmatige probe'
   return status || 'Onbekend'
 }
 
@@ -25,6 +26,7 @@ export default function StageDetailsPanel({
   onSelectEventIndex,
   selectedHoleId,
   onHoleSelect,
+  selectedProbe,
   pipelineStatus,
 }) {
   const [holeFilter, setHoleFilter] = useState('all')
@@ -39,6 +41,7 @@ export default function StageDetailsPanel({
   const unfoldVisuals = pipelineVisuals?.unfold || null
   const holeItems = holeVisuals?.items || []
   const selectedHole = holeItems.find((hole) => hole.id === selectedHoleId) || null
+  const selectedInspection = selectedHole || selectedProbe
   const visibleHoleItems = useMemo(() => {
     if (holeFilter === 'accepted') return holeItems.filter((hole) => hole.status === 'accepted')
     if (holeFilter === 'rejected') return holeItems.filter((hole) => hole.status === 'rejected')
@@ -132,7 +135,7 @@ export default function StageDetailsPanel({
                   Bron: {holeVisuals.source || '-'} | Geaccepteerd: {holeVisuals.accepted_total || 0} | Afgewezen: {holeVisuals.rejected_total || 0} | Kandidaten: {holeVisuals.total_candidates || 0}
                 </div>
                 <div className="timeline-text">
-                  Klik op een gat om exact de gedetecteerde hole-rand te highlighten en de camera erop te focussen. Afgewezen kandidaten blijven ook zichtbaar met hun criteria.
+                  Klik op een gat om exact de gedetecteerde hole-rand te highlighten en de camera erop te focussen. In `Probe mode` wordt elke klik op het model altijd een probe op exact die plek, zonder snap naar een bekende hole.
                 </div>
                 <div className="timeline-text">
                   Kleurlegenda: goud = geselecteerde hole-edge, rood = geaccepteerde hole-edge, blauw = afgewezen hole-edge, gedimd = niet geselecteerd.
@@ -158,20 +161,30 @@ export default function StageDetailsPanel({
                     </button>
                   ))}
                 </div>
-                {selectedHole && (
+                {selectedInspection && (
                   <div className="reasoning-list">
                     <div className="reasoning-card">
                       <div className="timeline-stage">
-                        {selectedHole.label || formatLabel(selectedHole.type)} | {getHoleStatusLabel(selectedHole.status)}
+                        {selectedInspection.label || formatLabel(selectedInspection.type)} | {getHoleStatusLabel(selectedInspection.status)}
                       </div>
-                      <div className="timeline-text">{selectedHole.reason || 'Geen toelichting'}</div>
-                      <pre className="timeline-payload-value">{formatDetailValue(selectedHole.position)}</pre>
+                      <div className="timeline-text">{selectedInspection.reason || 'Geen toelichting'}</div>
+                      <pre className="timeline-payload-value">{formatDetailValue(selectedInspection.position)}</pre>
+                      {selectedInspection.inferredContour && (
+                        <div className="timeline-text">
+                          Inferred contour: {selectedInspection.inferredContour.label || formatLabel(selectedInspection.inferredContour.type)}
+                        </div>
+                      )}
+                      {selectedInspection.nearestHole && (
+                        <div className="timeline-text">
+                          Dichtstbijzijnde bekende kandidaat: {selectedInspection.nearestHole.label || formatLabel(selectedInspection.nearestHole.type)} op {formatDetailValue(selectedInspection.nearestHoleDistance)} mm.
+                        </div>
+                      )}
                     </div>
                     <div className="reasoning-card">
                       <div className="timeline-title">Criteria</div>
                       <div className="timeline-payload-grid">
-                        {(selectedHole.criteria || []).map((criterion, index) => (
-                          <div className="timeline-payload-row" key={`${selectedHole.id}-criterion-${index}`}>
+                        {(selectedInspection.criteria || []).map((criterion, index) => (
+                          <div className="timeline-payload-row" key={`${selectedInspection.id}-criterion-${index}`}>
                             <div className="timeline-item-head">
                               <div className="timeline-payload-key">{formatLabel(criterion.name)}</div>
                               <span className={`hole-status-pill ${criterion.passed ? 'is-accepted' : 'is-rejected'}`}>
@@ -187,11 +200,27 @@ export default function StageDetailsPanel({
                         ))}
                       </div>
                     </div>
+                    {selectedInspection.inferredContour?.debug && (
+                      <div className="reasoning-card">
+                        <div className="timeline-title">Probe Debug</div>
+                        <div className="timeline-text">
+                          Viewer heuristic: {selectedInspection.inferredContour.debug.inferred_family} | confidence {formatDetailValue(selectedInspection.inferredContour.debug.confidence)}
+                        </div>
+                        <div className="timeline-payload-grid">
+                          {Object.entries(selectedInspection.inferredContour.debug).map(([key, value]) => (
+                            <div className="timeline-payload-row" key={`${selectedInspection.id}-debug-${key}`}>
+                              <div className="timeline-payload-key">{formatLabel(key)}</div>
+                              <pre className="timeline-payload-value">{formatDetailValue(value)}</pre>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
-                {selectedHole == null && (
+                {selectedInspection == null && (
                   <div className="timeline-text" style={{ marginTop: 8 }}>
-                    Kies een gat links om criteria en viewer-focus te zien.
+                    Kies een gat links of klik in het 3D-model om criteria en viewer-focus te zien.
                   </div>
                 )}
                 {visibleHoleItems.length === 0 && (

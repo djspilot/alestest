@@ -546,6 +546,23 @@ html, body, #root {
   border-color: #000;
 }
 
+.toolbar-btn.is-active {
+  background: #eef6ff;
+  color: #173a63;
+  border-color: #9bbde2;
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toolbar-btn:disabled:hover {
+  background: rgba(255, 255, 255, 0.92);
+  color: inherit;
+  border-color: #ccc;
+}
+
 .viewer-info {
   position: absolute;
   bottom: 12px;

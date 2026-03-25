@@ -53,6 +53,8 @@ export default function App() {
   const [pipelineState, setPipelineState] = useState(EMPTY_PIPELINE_STATE)
   const [focusedStage, setFocusedStage] = useState(null)
   const [selectedHoleId, setSelectedHoleId] = useState(null)
+  const [selectedProbe, setSelectedProbe] = useState(null)
+  const [probeMode, setProbeMode] = useState(false)
   const [selectedStageIndex, setSelectedStageIndex] = useState(0)
   const [selectedEventIndex, setSelectedEventIndex] = useState(0)
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
@@ -120,7 +122,8 @@ export default function App() {
   const selectedStage = groupedStages[selectedStageIndex] || null
   const holeSource = pipelineVisuals?.holes?.source || null
   const selectedHole = (pipelineVisuals?.holes?.items || []).find((item) => item.id === selectedHoleId) || null
-  const selectedHoleSource = selectedHole?.source || null
+  const selectedFeature = selectedHole || selectedProbe
+  const selectedHoleSource = selectedFeature?.source || null
   const useFlatView =
     Boolean(flatMesh) &&
     (
@@ -290,6 +293,8 @@ export default function App() {
     setModelInfo(null)
     setFocusedStage(null)
     setSelectedHoleId(null)
+    setSelectedProbe(null)
+    setProbeMode(false)
     setSelectedStageIndex(0)
     setSelectedEventIndex(0)
     setEngineStatus('Bestand laden...')
@@ -374,6 +379,8 @@ export default function App() {
     setModelInfo(null)
     setFocusedStage(null)
     setSelectedHoleId(null)
+    setSelectedProbe(null)
+    setProbeMode(false)
     setSelectedStageIndex(0)
     setSelectedEventIndex(0)
     setError(null)
@@ -399,6 +406,80 @@ export default function App() {
     setFocusedStage('Detect holes')
     setRightPanelOpen(true)
   }, [groupedStages, handleSelectStageIndex])
+
+  const selectHole = useCallback((holeId) => {
+    selectDetectHolesStage()
+    setSelectedHoleId(holeId)
+    setSelectedProbe(null)
+  }, [selectDetectHolesStage])
+
+  const handleSurfaceProbe = useCallback((sample) => {
+    if (!sample?.point) return
+    const inferredContour = sample.inferredContour || null
+    selectDetectHolesStage()
+    setSelectedHoleId(null)
+    setSelectedProbe({
+      id: `probe-${Date.now()}`,
+      status: 'probe',
+      source: useFlatView ? 'flat' : '3d',
+      label: 'Handmatige probe',
+      reason: inferredContour
+        ? 'Waarschijnlijke hole-edge gevonden op deze kliklocatie, maar hij bestaat niet als backend hole-candidate.'
+        : 'Geen gedetecteerde hole-candidate op deze kliklocatie binnen de detectieradius.',
+      position: inferredContour?.position || (modelInfo?.center
+        ? [
+          sample.point.x + modelInfo.center.x,
+          sample.point.y + modelInfo.center.y,
+          sample.point.z + modelInfo.center.z,
+        ]
+        : [sample.point.x, sample.point.y, sample.point.z]),
+      normal: inferredContour?.normal || (sample.normal ? [sample.normal.x, sample.normal.y, sample.normal.z] : [0, 0, 1]),
+      nearestHole: sample.nearestHole || null,
+      nearestHoleDistance: sample.nearestHoleDistance || null,
+      inferredContour,
+      criteria: [
+        {
+          name: 'detected_candidate',
+          value: false,
+          threshold: true,
+          passed: false,
+          note: 'Op deze plek is geen geaccepteerde of afgewezen hole-candidate gevonden.',
+        },
+        ...(inferredContour
+          ? [{
+            name: 'inferred_edge_contour',
+            value: inferredContour.label || inferredContour.type || 'unknown',
+            threshold: 'known candidate expected',
+            passed: false,
+            note: 'De viewer ziet wel een lokale gesloten edge-loop, maar de pipeline heeft er geen hole-candidate van gemaakt.',
+          }, {
+            name: 'inferred_edge_segments',
+            value: inferredContour.debug?.edge_segment_count ?? null,
+            threshold: '>= 5 nearby segments',
+            passed: false,
+            note: 'Aantal edge-segmenten dat rond de probe als lokale contour is meegenomen.',
+          }, {
+            name: 'probe_confidence',
+            value: inferredContour.debug?.confidence ?? null,
+            threshold: 'higher = stronger contour',
+            passed: false,
+            note: 'Heuristische confidence van de viewer op basis van local edge-shape.',
+          }]
+          : []),
+        ...(sample.nearestHole
+          ? [{
+            name: 'nearest_known_candidate_distance_mm',
+            value: Number(sample.nearestHoleDistance?.toFixed?.(2) || sample.nearestHoleDistance || 0),
+            threshold: 'inspect only',
+            passed: false,
+            note: `${sample.nearestHole.label || sample.nearestHole.type || 'Onbekend'} is de dichtstbijzijnde bekende kandidaat.`,
+          }]
+          : []),
+      ],
+    })
+  }, [modelInfo?.center, selectDetectHolesStage, useFlatView])
+
+  const canUseProbeMode = focusedStage === 'Detect holes'
 
   return (
     <div className="app">
@@ -468,6 +549,17 @@ export default function App() {
             <>
               <div className="viewer-toolbar">
                 <button className="toolbar-btn" onClick={resetCamera}>Reset View</button>
+                <button
+                  className={`toolbar-btn ${probeMode ? 'is-active' : ''}`}
+                  onClick={() => {
+                    if (!canUseProbeMode) return
+                    setProbeMode((value) => !value)
+                  }}
+                  disabled={!canUseProbeMode}
+                  title={canUseProbeMode ? 'Klik in het model om niet-herkende gaten te inspecteren' : 'Selecteer eerst Detect holes'}
+                >
+                  {probeMode ? 'Probe mode aan' : 'Probe mode'}
+                </button>
                 <button className="toolbar-btn" onClick={resetViewer}>Nieuw bestand</button>
               </div>
               <div className="viewer-info">
@@ -489,11 +581,11 @@ export default function App() {
                 modelInfo={modelInfo}
                 backendVisuals={pipelineVisuals}
                 focusedStage={focusedStage}
-                selectedHole={selectedHole}
-                onHoleSelect={(holeId) => {
-                  selectDetectHolesStage()
-                  setSelectedHoleId(holeId)
-                }}
+                selectedHole={selectedFeature}
+                onHoleSelect={selectHole}
+                onSurfaceProbe={handleSurfaceProbe}
+                selectedProbe={selectedProbe}
+                probeMode={probeMode}
                 controlsRef={controlsRef}
                 useFlatView={useFlatView}
               />
@@ -512,10 +604,8 @@ export default function App() {
             onSelectStageIndex={handleSelectStageIndex}
             onSelectEventIndex={setSelectedEventIndex}
             selectedHoleId={selectedHoleId}
-            onHoleSelect={(holeId) => {
-              selectDetectHolesStage()
-              setSelectedHoleId(holeId)
-            }}
+            onHoleSelect={selectHole}
+            selectedProbe={selectedProbe}
             pipelineStatus={pipelineState.status}
           />
         )}

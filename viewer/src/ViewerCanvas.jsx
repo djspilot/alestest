@@ -251,6 +251,16 @@ function buildSectionContours(partType, size, thickness, axisKey) {
 function holePalette(hole, isSelected, hasSelection) {
   const dimmed = hasSelection && !isSelected
 
+  if (hole.status === 'probe') {
+    return {
+      primary: isSelected ? '#ff8a1f' : '#d97706',
+      secondary: isSelected ? '#ffd27a' : '#fdba74',
+      echoOpacity: dimmed ? 0.18 : 0.68,
+      primaryOpacity: dimmed ? 0.28 : 1,
+      selectionOpacity: dimmed ? 0.2 : 0.92,
+    }
+  }
+
   if (isSelected) {
     return {
       primary: '#f5c542',
@@ -319,7 +329,7 @@ function getHoleContourPoints(hole, rectWidth, rectHeight) {
   return rectanglePoints(Math.max(rectWidth, 6), Math.max(rectHeight, 6))
 }
 
-function findNearestHoleByPoint(point, holes, center, modelInfo) {
+function findClosestHoleByPoint(point, holes, center) {
   if (!holes?.length || !center) return null
 
   let bestHole = null
@@ -330,15 +340,149 @@ function findNearestHoleByPoint(point, holes, center, modelInfo) {
     const position = holeCenterPosition(hole, center)
     const holePoint = new THREE.Vector3(...position)
     const distance = holePoint.distanceTo(clickedPoint)
-    const maxDistance = holeFocusRadius(hole, modelInfo) * 1.35
-
-    if (distance <= maxDistance && distance < bestDistance) {
+    if (distance < bestDistance) {
       bestHole = hole
       bestDistance = distance
     }
   }
 
-  return bestHole
+  if (!bestHole) return null
+
+  return {
+    hole: bestHole,
+    distance: bestDistance,
+  }
+}
+
+function pointToSegmentDistance(point, start, end) {
+  const segment = end.clone().sub(start)
+  const lengthSq = segment.lengthSq()
+  if (lengthSq === 0) return point.distanceTo(start)
+  const t = THREE.MathUtils.clamp(point.clone().sub(start).dot(segment) / lengthSq, 0, 1)
+  const projection = start.clone().add(segment.multiplyScalar(t))
+  return point.distanceTo(projection)
+}
+
+function buildProbeAxes(normalVector) {
+  const fallback = Math.abs(normalVector.z) < 0.9
+    ? new THREE.Vector3(0, 0, 1)
+    : new THREE.Vector3(0, 1, 0)
+  const axisX = new THREE.Vector3().crossVectors(normalVector, fallback).normalize()
+  const axisY = new THREE.Vector3().crossVectors(normalVector, axisX).normalize()
+  return { axisX, axisY }
+}
+
+function inferProbeContour(point, normal, mesh, center, modelInfo) {
+  const edgeBuffer = mesh?.display_edges
+  if (!edgeBuffer?.length || !center) return null
+
+  const clickedPoint = point instanceof THREE.Vector3 ? point : new THREE.Vector3(point.x, point.y, point.z)
+  const normalVector = normal instanceof THREE.Vector3
+    ? normal.clone().normalize()
+    : new THREE.Vector3(...(normal || [0, 0, 1])).normalize()
+  const searchRadius = Math.max(modelInfo?.boundingRadius * 0.032 || 0, 18)
+  const planeTolerance = Math.max(searchRadius * 0.26, 2.5)
+  const nearbyPoints = []
+  let nearbySegments = 0
+
+  for (let index = 0; index < edgeBuffer.length; index += 6) {
+    const start = new THREE.Vector3(
+      edgeBuffer[index] - center.x,
+      edgeBuffer[index + 1] - center.y,
+      edgeBuffer[index + 2] - center.z,
+    )
+    const end = new THREE.Vector3(
+      edgeBuffer[index + 3] - center.x,
+      edgeBuffer[index + 4] - center.y,
+      edgeBuffer[index + 5] - center.z,
+    )
+    const mid = start.clone().add(end).multiplyScalar(0.5)
+    const distanceToSegment = pointToSegmentDistance(clickedPoint, start, end)
+    const planeDistance = Math.abs(mid.clone().sub(clickedPoint).dot(normalVector))
+
+    if (distanceToSegment > searchRadius || planeDistance > planeTolerance) continue
+
+    nearbyPoints.push(start, end)
+    nearbySegments += 1
+  }
+
+  if (nearbyPoints.length < 10) return null
+
+  const centroid = nearbyPoints.reduce((acc, current) => acc.add(current), new THREE.Vector3()).multiplyScalar(1 / nearbyPoints.length)
+  if (centroid.distanceTo(clickedPoint) > searchRadius * 0.95) return null
+
+  const { axisX, axisY } = buildProbeAxes(normalVector)
+  const radii = nearbyPoints.map((entry) => entry.distanceTo(centroid))
+  const meanRadius = radii.reduce((sum, value) => sum + value, 0) / radii.length
+  const radiusVariance = radii.reduce((sum, value) => sum + ((value - meanRadius) ** 2), 0) / radii.length
+  const radiusStdDev = Math.sqrt(radiusVariance)
+
+  const localPoints = nearbyPoints.map((entry) => {
+    const offset = entry.clone().sub(centroid)
+    return {
+      x: offset.dot(axisX),
+      y: offset.dot(axisY),
+    }
+  })
+  const xs = localPoints.map((entry) => entry.x)
+  const ys = localPoints.map((entry) => entry.y)
+  const width = Math.max(...xs) - Math.min(...xs)
+  const height = Math.max(...ys) - Math.min(...ys)
+  const aspectRatio = Math.max(width, height) / Math.max(Math.min(width, height), 1)
+
+  const absoluteCenter = [
+    centroid.x + center.x,
+    centroid.y + center.y,
+    centroid.z + center.z,
+  ]
+  const normalArray = [normalVector.x, normalVector.y, normalVector.z]
+  const baseDebug = {
+    edge_point_count: nearbyPoints.length,
+    edge_segment_count: nearbySegments,
+    search_radius_mm: Number(searchRadius.toFixed(2)),
+    plane_tolerance_mm: Number(planeTolerance.toFixed(2)),
+    centroid_offset_mm: Number(centroid.distanceTo(clickedPoint).toFixed(2)),
+    mean_radius_mm: Number(meanRadius.toFixed(2)),
+    radius_std_dev_mm: Number(radiusStdDev.toFixed(2)),
+    circularity_ratio: meanRadius > 0 ? Number((radiusStdDev / meanRadius).toFixed(3)) : null,
+    width_mm: Number(width.toFixed(2)),
+    height_mm: Number(height.toFixed(2)),
+    aspect_ratio: Number(aspectRatio.toFixed(3)),
+  }
+
+  if (meanRadius > 2 && radiusStdDev / meanRadius < 0.28) {
+    return {
+      type: 'cylindrical',
+      label: `Probe Ø${(meanRadius * 2).toFixed(1)} mm`,
+      diameter: Number((meanRadius * 2).toFixed(2)),
+      position: absoluteCenter,
+      normal: normalArray,
+      debug: {
+        ...baseDebug,
+        inferred_family: 'circular',
+        confidence: Number(Math.max(0, 1 - ((radiusStdDev / Math.max(meanRadius, 1)) * 2.2)).toFixed(3)),
+      },
+    }
+  }
+
+  if (width > 4 && height > 4) {
+    const major = Math.max(width, height)
+    const minor = Math.min(width, height)
+    return {
+      type: aspectRatio > 1.45 ? 'slot' : 'rect (r)',
+      label: `Probe ${major.toFixed(1)}x${minor.toFixed(1)} mm`,
+      size: `${major.toFixed(1)}x${minor.toFixed(1)}`,
+      position: absoluteCenter,
+      normal: normalArray,
+      debug: {
+        ...baseDebug,
+        inferred_family: aspectRatio > 1.45 ? 'slot_like' : 'rounded_rect_like',
+        confidence: Number(Math.min(0.95, 0.52 + ((Math.min(major, minor) / Math.max(major, minor)) * 0.3) + (nearbySegments / 120)).toFixed(3)),
+      },
+    }
+  }
+
+  return null
 }
 
 function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSelect }) {
@@ -419,6 +563,45 @@ function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSele
         <planeGeometry args={[Math.max(rectWidth, hitRadius * 2), Math.max(rectHeight, hitRadius * 2)]} />
         <meshBasicMaterial transparent opacity={0.01} depthTest={false} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
+    </group>
+  )
+}
+
+function ManualProbeOverlay({ probe, center, modelInfo }) {
+  const inferredHole = probe?.inferredContour || null
+  const baseHole = inferredHole
+    ? {
+      ...inferredHole,
+      status: 'probe',
+      axis: inferredHole.normal || probe.normal,
+    }
+    : null
+
+  if (baseHole) {
+    return (
+      <HoleOutline
+        hole={baseHole}
+        center={center}
+        isSelected
+        hasSelection
+        modelInfo={modelInfo}
+      />
+    )
+  }
+
+  const radius = Math.max(modelInfo?.boundingRadius * 0.018 || 0, 6)
+  const position = holeCenterPosition(probe, center)
+  const quaternion = quaternionFromDirection(probe.normal || [0, 0, 1])
+  const loop = useMemo(() => toFloat32(circlePoints(radius, 72)), [radius])
+
+  return (
+    <group position={position} quaternion={quaternion} renderOrder={22}>
+      <lineLoop>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" args={[loop, 3]} />
+        </bufferGeometry>
+        <lineBasicMaterial color="#f5c542" transparent opacity={1} depthTest={false} depthWrite={false} />
+      </lineLoop>
     </group>
   )
 }
@@ -580,7 +763,7 @@ function buildFallbackSections(modelInfo) {
   })
 }
 
-function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, onHoleSelect }) {
+function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, selectedProbe, onHoleSelect }) {
   const center = modelInfo?.center
   if (!center || !visuals || !focusedStage) return null
 
@@ -635,6 +818,10 @@ function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, onHoleS
           onSelect={onHoleSelect}
         />
       ))}
+
+      {focusedStage === 'Detect holes' && selectedProbe && (
+        <ManualProbeOverlay probe={selectedProbe} center={center} modelInfo={modelInfo} />
+      )}
 
       {focusedStage === 'Profile Router' && sectionVisuals.map((section, index) => (
         <SectionContours
@@ -702,19 +889,29 @@ export default function ViewerCanvas({
   focusedStage,
   selectedHole,
   onHoleSelect,
+  onSurfaceProbe,
+  selectedProbe,
+  probeMode = false,
   controlsRef,
   useFlatView,
 }) {
   const renderMode = 'clean'
   const holeItems = backendVisuals?.holes?.items || []
-  const handleSurfacePick = useCallback((point, event) => {
-    if (!holeItems.length || !modelInfo?.center) return
+  const handleSurfacePick = useCallback((sample, event) => {
+    if (!probeMode) return
+    const point = sample?.point || sample
+    if (!modelInfo?.center || !point) return
     event?.stopPropagation?.()
-    const nearestHole = findNearestHoleByPoint(point, holeItems, modelInfo.center, modelInfo)
-    if (nearestHole?.id) {
-      onHoleSelect?.(nearestHole.id)
-    }
-  }, [holeItems, modelInfo, onHoleSelect])
+    const closest = findClosestHoleByPoint(point, holeItems, modelInfo.center)
+    const inferredContour = inferProbeContour(point, sample?.normal, activeMesh, modelInfo.center, modelInfo)
+    onSurfaceProbe?.({
+      point,
+      normal: sample?.normal || null,
+      nearestHole: closest?.hole || null,
+      nearestHoleDistance: closest?.distance || null,
+      inferredContour,
+    })
+  }, [activeMesh, holeItems, modelInfo, onSurfaceProbe, probeMode])
 
   return (
     <Canvas
@@ -747,6 +944,7 @@ export default function ViewerCanvas({
         visuals={backendVisuals}
         focusedStage={focusedStage}
         selectedHole={selectedHole}
+        selectedProbe={selectedProbe}
         onHoleSelect={onHoleSelect}
       />
       {!useFlatView && <gridHelper args={[500, 18, '#d4d9e1', '#edf1f5']} />}
