@@ -436,6 +436,21 @@ html, body, #root {
   background: #e5f0ff;
 }
 
+.hole-status-pill.is-warning {
+  color: #7a4a00;
+  background: #fff1d6;
+}
+
+.hole-status-pill.is-neutral {
+  color: #495566;
+  background: #edf1f5;
+}
+
+.hole-status-pill.is-winner {
+  color: #0f5132;
+  background: #dff5e6;
+}
+
 .timeline-payload-grid {
   display: flex;
   flex-direction: column;

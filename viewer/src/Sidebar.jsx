@@ -7,6 +7,8 @@ export default function Sidebar({
   onReset,
   pipelineEnabled,
   onPipelineToggle,
+  aagFallbackEnabled,
+  onAagFallbackToggle,
   pipelineApiBase,
   onPipelineApiBaseChange,
   pipelineApiKey,
@@ -67,6 +69,15 @@ export default function Sidebar({
           />
           <span>Manufacturing/Profile pipeline inschakelen</span>
         </label>
+        <label className="sidebar-toggle" style={{ marginTop: 8, opacity: pipelineEnabled ? 1 : 0.6 }}>
+          <input
+            type="checkbox"
+            checked={aagFallbackEnabled}
+            onChange={(event) => onAagFallbackToggle(event.target.checked)}
+            disabled={!pipelineEnabled}
+          />
+          <span>AAG fallback inschakelen</span>
+        </label>
 
         <div style={{ marginTop: 10 }}>
           <div className="sidebar-row" style={{ paddingBottom: 6 }}>
@@ -117,15 +128,6 @@ export default function Sidebar({
                 ? `${summary.active_stage} actief · ${formatDuration(liveActiveElapsed)}`
                 : 'Geen actieve stap'}
             </div>
-          </div>
-        )}
-        {pipelineResult?.route && (
-          <div className="timeline-card">
-            <div className="timeline-title">Classificatie keuze</div>
-            <div className="timeline-text">
-              {pipelineResult.route.category || 'onbekend'} | {pipelineResult.route.profile_label || '-'}
-            </div>
-            <div className="timeline-text">{pipelineResult.route.reasoning || 'Geen toelichting'}</div>
           </div>
         )}
         {groupedStages.length === 0 ? (

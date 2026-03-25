@@ -476,6 +476,189 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
 
         return criteria
 
+    def _json_safe(value):
+        if value is None or isinstance(value, (str, bool, int)):
+            return value
+        if isinstance(value, float):
+            if math.isnan(value) or math.isinf(value):
+                return None
+            return round(value, 6)
+        if isinstance(value, dict):
+            return {str(key): _json_safe(val) for key, val in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [_json_safe(item) for item in value]
+        if hasattr(value, "value"):
+            return _json_safe(value.value)
+        if hasattr(value, "__dict__"):
+            return _json_safe(vars(value))
+        return str(value)
+
+    def _normalize_step0_review(step0_trace):
+        if not isinstance(step0_trace, dict):
+            return None
+
+        normalized_steps = []
+        for step in step0_trace.get("steps") or []:
+            criteria = []
+            for criterion in step.get("criteria") or []:
+                criterion_pass = criterion.get("pass") if "pass" in criterion else criterion.get("passed")
+                criteria.append({
+                    "name": criterion.get("name"),
+                    "actual": _json_safe(criterion.get("value")),
+                    "threshold": _json_safe(criterion.get("expected")),
+                    "passed": _json_safe(criterion_pass),
+                })
+
+            normalized_steps.append({
+                "step": step.get("step"),
+                "name": step.get("name"),
+                "status": (step.get("verdict") or "UNKNOWN").upper(),
+                "result": step.get("result"),
+                "next": step.get("next"),
+                "note": step.get("note"),
+                "criteria": criteria,
+            })
+
+        final_result = _json_safe(step0_trace.get("final_result") or {})
+        final_step = final_result.get("step") if isinstance(final_result, dict) else None
+        fallthrough = bool(final_result.get("fallthrough")) if isinstance(final_result, dict) else False
+
+        return {
+            "doc": "docs/classification_step_review.md",
+            "final_result": final_result,
+            "steps": normalized_steps,
+            "fallthrough": fallthrough,
+            "stopped_in": f"STEP {final_step}" if final_step and not fallthrough else None,
+        }
+
+    def _build_legacy_gate_flow(legacy_trace, criteria):
+        rules = list((legacy_trace or {}).get("rules") or [])
+        criteria_by_step = {}
+        for criterion in criteria or []:
+            step_name = str(criterion.get("step") or "").upper()
+            criteria_by_step.setdefault(step_name, []).append(criterion)
+
+        gate_definitions = [
+            ("1A", "Plate detection — Face Analysis", ["plate_face"], "Twee grote parallelle vlakke faces bepalen vlak plaatwerk."),
+            ("1B", "Bent sheet", ["bent_sheet_metal", "bent_sheet_closed_profile"], "Gebogen plaatwerk of gesloten gebogen profiel."),
+            ("1C", "Thin plate fallback", ["plate_thin"], "Dunne, slanke plaat als fallback."),
+            ("1D", "Feature heavy plate", ["plate_feature_heavy"], "Geperforeerde / feature-zware plaat."),
+            ("2B", "Solid profile", ["profile_solid_strong", "profile_solid_weak_sav"], "Massief profiel op volume- en SA/V-criteria."),
+            ("3A", "Standard hollow tube", ["standard_hollow_tube"], "Kataloog holle buis op cilindrisch oppervlak."),
+            ("3B", "Variable thickness profile", ["standard_variable_thickness"], "UNP/I/L-profielen via ongelijke face-oppervlakken."),
+            ("4", "Default anders", ["default_anders"], "Geen eerdere gate won; fallback naar anders."),
+        ]
+        rule_to_gate = {
+            rule_name: gate_step
+            for gate_step, _gate_name, gate_rules, _description in gate_definitions
+            for rule_name in gate_rules
+        }
+        winner_rule = next((rule for rule in reversed(rules) if rule in rule_to_gate), None)
+        winner_gate = rule_to_gate.get(winner_rule)
+        winner_index = next((index for index, (step, *_rest) in enumerate(gate_definitions) if step == winner_gate), None)
+
+        gates = []
+        for index, (step, name, gate_rules, description) in enumerate(gate_definitions):
+            step_key = f"STEP {step}"
+            gate_criteria = criteria_by_step.get(step_key, [])
+            entered = winner_index is not None and index <= winner_index
+            if winner_gate == "4":
+                entered = True
+
+            known_passes = [item.get("passed") for item in gate_criteria if item.get("passed") is not None]
+            if step == winner_gate:
+                status = "WINNER"
+            elif not entered:
+                status = "SKIP"
+            elif known_passes and all(known_passes):
+                status = "PASS"
+            else:
+                status = "FAIL"
+
+            gates.append({
+                "step": step,
+                "name": name,
+                "status": status,
+                "entered": entered,
+                "won": step == winner_gate,
+                "rule": winner_rule if step == winner_gate else None,
+                "description": description,
+                "criteria": gate_criteria,
+            })
+
+        return {
+            "doc": "docs/CLASSIFICATION_THRESHOLDS_MATRIX.md",
+            "rules": rules,
+            "winner_gate": winner_gate,
+            "winner_rule": winner_rule,
+            "gates": gates,
+        }
+
+    def _build_classification_visuals(analysis, legacy_class, legacy_trace, classification_criteria, source, solid_for_classification, part_category):
+        step0_trace = None
+        step0_review = None
+        if solid_for_classification is not None:
+            try:
+                from manufacturing_pipeline.analysis.classification import classify_step0_detailed_trace
+                step0_trace = classify_step0_detailed_trace(solid_for_classification)
+                step0_review = _normalize_step0_review(step0_trace)
+            except Exception as e:
+                step0_review = {
+                    "doc": "docs/classification_step_review.md",
+                    "error": str(e),
+                    "steps": [],
+                    "fallthrough": True,
+                    "stopped_in": None,
+                }
+
+        legacy_flow = _build_legacy_gate_flow(legacy_trace, classification_criteria) if legacy_trace else None
+        step0_fallthrough = bool((step0_review or {}).get("fallthrough"))
+        final_step0 = (step0_review or {}).get("final_result") if isinstance((step0_review or {}).get("final_result"), dict) else {}
+
+        stopped_in = None
+        if step0_review and not step0_fallthrough and final_step0.get("step"):
+            stopped_in = f"STEP {final_step0.get('step')}"
+        elif legacy_flow and legacy_flow.get("winner_gate"):
+            stopped_in = f"STEP {legacy_flow.get('winner_gate')}"
+
+        final_decision = {
+            "classification": legacy_class,
+            "part_category": part_category,
+            "part_type": getattr(getattr(analysis, "part_type", None), "value", getattr(analysis, "part_type", None)),
+            "source": source,
+            "stopped_in": stopped_in,
+            "step0_only": bool(step0_review and not step0_fallthrough),
+        }
+
+        return {
+            "part_category": part_category,
+            "part_type": getattr(getattr(analysis, "part_type", None), "value", getattr(analysis, "part_type", None)),
+            "thickness": round(float(getattr(analysis, "thickness", 0) or 0), 3),
+            "dimensions": {
+                "length": round(float(getattr(analysis, "length", 0) or 0), 3),
+                "width": round(float(getattr(analysis, "width", 0) or 0), 3),
+                "height": round(float(getattr(analysis, "height", 0) or 0), 3),
+            },
+            "source": source,
+            "trace": legacy_trace or {},
+            "rules": list((legacy_trace or {}).get("rules") or []),
+            "criteria": classification_criteria,
+            "matrix_doc": "docs/CLASSIFICATION_THRESHOLDS_MATRIX.md",
+            "step0_doc": "docs/classification_step_review.md",
+            "final_decision": final_decision,
+            "step0_review": step0_review,
+            "legacy_classification": legacy_flow if step0_fallthrough else None,
+            "reasoning": [
+                {
+                    "step": getattr(item, "step", ""),
+                    "observation": getattr(item, "observation", ""),
+                    "conclusion": getattr(item, "conclusion", ""),
+                    "details": getattr(item, "details", {}) or {},
+                }
+                for item in (getattr(analysis, "reasoning", []) or [])
+            ],
+        }
+
     # Initialize profiler
     file_size_mb = os.path.getsize(step_file) / (1024 * 1024)
     profiler = AnalysisProfiler(
@@ -548,14 +731,19 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
     )
 
     # AAG as fallback: only run if standard analysis lacks thickness or classification
-    use_aag = args.aag  # Force AAG if --aag flag
-    if not standard_has_thickness and not standard_has_classification:
-        use_aag = True  # Auto-fallback
+    force_aag = bool(getattr(args, "aag", False))
+    allow_aag_fallback = bool(getattr(args, "aag_fallback", True))
+    use_aag = force_aag
+    if allow_aag_fallback and not standard_has_thickness and not standard_has_classification:
+        use_aag = True  # Auto-fallback only when explicitly enabled
 
     aag_result = AAGResult({"success": False})  # Default: no AAG
 
     if use_aag:
-        print("[3b/7] AAG Fallback: standard analysis incomplete, running AAG...")
+        if force_aag:
+            print("[3b/7] AAG: handmatig geforceerd, AAG analyse draaien...")
+        else:
+            print("[3b/7] AAG Fallback: standard analysis incomplete, running AAG...")
         with profiler.step("AAG Fallback", None, None):
             aag_data = run_aag_analysis(step_file)
         aag_result = AAGResult(aag_data)
@@ -565,7 +753,10 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
         else:
             print(f"  [OK] AAG: {aag_result.bend_count} bends, t={aag_result.thickness:.2f}mm")
     else:
-        print("[3b/7] AAG: Overgeslagen (standard analyse voldoende)")
+        if allow_aag_fallback:
+            print("[3b/7] AAG: Overgeslagen (standard analyse voldoende)")
+        else:
+            print("[3b/7] AAG: Uitgeschakeld via flag")
         with profiler.step("AAG Fallback", None, None) as s:
             s["status"] = "SKIP"
 
@@ -638,6 +829,16 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
         source = f"{source}+classify_solid"
 
     analysis.classification_criteria = classification_criteria
+    classification_visuals = _build_classification_visuals(
+        analysis=analysis,
+        legacy_class=legacy_class,
+        legacy_trace=legacy_trace,
+        classification_criteria=classification_criteria,
+        source=source,
+        solid_for_classification=solid_for_classification,
+        part_category=part_category,
+    )
+    analysis.classification_visuals = classification_visuals
 
     print(f"\n--- Classificatie ({source}) ---")
     print(f"Categorie:   {part_category}")
@@ -649,33 +850,13 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
         "geometry_classified",
         "Classify geometry",
         {
-            "part_category": part_category,
+            **classification_visuals,
             "category": part_category,
             "part_type": analysis.part_type.value if hasattr(analysis.part_type, "value") else str(analysis.part_type),
-            "dimensions": {
-                "length": round(float(analysis.length or 0), 3),
-                "width": round(float(analysis.width or 0), 3),
-                "height": round(float(analysis.height or 0), 3),
-            },
             "length": round(float(analysis.length or 0), 3),
             "width": round(float(analysis.width or 0), 3),
             "height": round(float(analysis.height or 0), 3),
-            "thickness": round(float(analysis.thickness or 0), 3),
             "bends_total": int(analysis.bend_count_erp or 0),
-            "source": source,
-            "trace": legacy_trace or {},
-            "rules": list((legacy_trace or {}).get("rules") or []),
-            "criteria": classification_criteria,
-            "matrix_doc": "docs/CLASSIFICATION_THRESHOLDS_MATRIX.md",
-            "reasoning": [
-                {
-                    "step": getattr(item, "step", ""),
-                    "observation": getattr(item, "observation", ""),
-                    "conclusion": getattr(item, "conclusion", ""),
-                    "details": getattr(item, "details", {}) or {},
-                }
-                for item in (getattr(analysis, "reasoning", []) or [])
-            ],
         },
     )
 

@@ -44,6 +44,10 @@ export default function App() {
   const [modelInfo, setModelInfo] = useState(null)
   const [engineStatus, setEngineStatus] = useState('Klaar')
   const [pipelineEnabled, setPipelineEnabled] = useState(true)
+  const [aagFallbackEnabled, setAagFallbackEnabled] = useState(() => {
+    const stored = window.localStorage.getItem('ales-aag-fallback-enabled')
+    return stored == null ? true : stored === 'true'
+  })
   const [pipelineApiBase, setPipelineApiBase] = useState(() => {
     return window.localStorage.getItem('ales-pipeline-api-base') || getDefaultPipelineApiBase()
   })
@@ -154,6 +158,10 @@ export default function App() {
   }, [pipelineApiKey])
 
   useEffect(() => {
+    window.localStorage.setItem('ales-aag-fallback-enabled', String(aagFallbackEnabled))
+  }, [aagFallbackEnabled])
+
+  useEffect(() => {
     if (!pipelineEnabled) {
       stopPipelineRequest()
       setPipelineState({ ...EMPTY_PIPELINE_STATE, status: 'disabled' })
@@ -247,6 +255,7 @@ export default function App() {
       const result = await runPipelineAnalysis(file, {
         apiBase: pipelineApiBase,
         apiKey: pipelineApiKey,
+        aag: aagFallbackEnabled,
         signal: controller.signal,
         onProgress: (progress) => {
           setPipelineState((prev) => ({
@@ -277,7 +286,7 @@ export default function App() {
         error: pipelineError?.message || 'Pipeline analyse mislukt',
       }))
     }
-  }, [pipelineApiBase, pipelineApiKey, pipelineEnabled, stopPipelineRequest])
+  }, [aagFallbackEnabled, pipelineApiBase, pipelineApiKey, pipelineEnabled, stopPipelineRequest])
 
   const handleFile = useCallback((file) => {
     const ext = file.name.split('.').pop().toLowerCase()
@@ -511,6 +520,8 @@ export default function App() {
             onReset={resetViewer}
             pipelineEnabled={pipelineEnabled}
             onPipelineToggle={setPipelineEnabled}
+            aagFallbackEnabled={aagFallbackEnabled}
+            onAagFallbackToggle={setAagFallbackEnabled}
             pipelineApiBase={pipelineApiBase}
             onPipelineApiBaseChange={setPipelineApiBase}
             pipelineApiKey={pipelineApiKey}

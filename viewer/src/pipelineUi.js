@@ -68,13 +68,20 @@ export function groupEventsByStage(events) {
   const map = new Map()
 
   ;(events || []).forEach((event, index) => {
-    const stageKey = event.stage || 'Onbekende stap'
+    const stageKey = event.stage === 'Profile Router'
+      ? 'Classify geometry'
+      : (event.stage || 'Onbekende stap')
     if (!map.has(stageKey)) {
       const group = { stage: stageKey, events: [], firstIndex: index }
       map.set(stageKey, group)
       order.push(group)
     }
-    map.get(stageKey).events.push({ ...event, originalIndex: index })
+    map.get(stageKey).events.push({
+      ...event,
+      stage: stageKey,
+      originalStage: event.stage || stageKey,
+      originalIndex: index,
+    })
   })
 
   return order

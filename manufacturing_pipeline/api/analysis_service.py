@@ -204,6 +204,7 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
         def __init__(self):
             self.analyze = False
             self.aag = use_aag
+            self.aag_fallback = use_aag
             self.verbose = False
             self.debug = False
             self.no_unfold = False
@@ -302,6 +303,7 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
                 **(getattr(route_result, "debug", None) or {}),
             } if route_result is not None else None,
             "classification": {
+                **(getattr(analysis, "classification_visuals", None) or {}),
                 "part_category": result.get("category"),
                 "part_type": result.get("part_type"),
                 "thickness": result.get("thickness"),
