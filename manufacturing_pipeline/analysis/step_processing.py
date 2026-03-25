@@ -1331,6 +1331,29 @@ def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=
     return holes
 
 
+def _classify_shaped_inner_wire(edge_count, lines, circles, radii, lengths, bbox_dims):
+    dims = sorted(abs(value) for value in bbox_dims)
+    dim_str = f"{dims[2]:.1f}x{dims[1]:.1f}"
+
+    if lines == 2 and circles == 2:
+        radius = sum(radii) / len(radii) if radii else 0
+        line_length = max(lengths) if lengths else 0
+        width = 2 * radius
+        total_length = line_length + (2 * radius)
+        return "Slot", f"{total_length:.1f}x{width:.1f}", "slot_like"
+
+    if lines >= 4 and circles >= 4:
+        return "Rect (R)", dim_str, "rounded_rect_like"
+
+    if lines >= 3 and circles == 0:
+        return ("Rect" if lines == 4 else "Poly"), dim_str, "polygonal"
+
+    if edge_count >= 2:
+        return "Closed contour", dim_str, "closed_contour"
+
+    return "unknown", dim_str, "unknown"
+
+
 def detect_shaped_holes(shape, face_data=None, is_flat_pattern=False, return_debug=False):
     """
     Detect non-circular holes (slots, rectangles) by analyzing planar face contours.
@@ -1435,39 +1458,20 @@ def detect_shaped_holes(shape, face_data=None, is_flat_pattern=False, return_deb
                         circles += 1
                         radii.append(curve.Circle().Radius())
                 
-                shape_type = "unknown"
-                dim_str = ""
-                
-                if lines == 2 and circles == 2:
-                    shape_type = "Slot"
-                    r = sum(radii)/len(radii) if radii else 0
-                    l = max(lengths) if lengths else 0
-                    width = 2*r
-                    total_len = l + 2*r
-                    dim_str = f"{total_len:.1f}x{width:.1f}"
-                    
-                elif lines >= 4 and circles >= 4:
-                     # Rounded Rect
-                    b = Bnd_Box()
-                    BRepBndLib.Add_s(wire.wrapped, b)
-                    xmin, ymin, zmin, xmax, ymax, zmax = b.Get()
-                    dx = xmax - xmin
-                    dy = ymax - ymin
-                    dz = zmax - zmin
-                    dims = sorted([dx, dy, dz])
-                    dim_str = f"{dims[2]:.1f}x{dims[1]:.1f}"
-                    shape_type = "Rect (R)"
-
-                elif lines >= 3 and circles == 0:
-                    shape_type = "Rect" if lines == 4 else "Poly"
-                    b = Bnd_Box()
-                    BRepBndLib.Add_s(wire.wrapped, b)
-                    xmin, ymin, zmin, xmax, ymax, zmax = b.Get()
-                    dx = xmax - xmin
-                    dy = ymax - ymin
-                    dz = zmax - zmin
-                    dims = sorted([dx, dy, dz])
-                    dim_str = f"{dims[2]:.1f}x{dims[1]:.1f}"
+                b = Bnd_Box()
+                BRepBndLib.Add_s(wire.wrapped, b)
+                xmin, ymin, zmin, xmax, ymax, zmax = b.Get()
+                dx = xmax - xmin
+                dy = ymax - ymin
+                dz = zmax - zmin
+                shape_type, dim_str, shape_family = _classify_shaped_inner_wire(
+                    len(edges),
+                    lines,
+                    circles,
+                    radii,
+                    lengths,
+                    (dx, dy, dz),
+                )
                 
                 if shape_type != "unknown":
                     # Calculate center
@@ -1489,11 +1493,17 @@ def detect_shaped_holes(shape, face_data=None, is_flat_pattern=False, return_deb
                     debug_items.append({
                         "id": item_id,
                         "status": "accepted",
-                        "type": str(shape_type).lower(),
+                        "type": str(shape_type).lower().replace(" ", "_"),
                         "label": dim_str or shape_type,
-                        "reason": f"Geaccepteerd als {shape_type}",
+                        "reason": (
+                            "Geaccepteerd als generieke gesloten contour"
+                            if shape_type == "Closed contour"
+                            else f"Geaccepteerd als {shape_type}"
+                        ),
                         "criteria": [
                             make_criterion("recognized_shape", shape_type, "known", True, f"{lines} lijnen / {circles} bogen"),
+                            make_criterion("shape_family", shape_family, "slot/rect/poly/closed_contour", True, "Inner wire op planar face"),
+                            make_criterion("closed_inner_wire", True, True, True, "Inner wire van planar face wordt als gesloten contour behandeld"),
                             make_criterion("is_circle", False, False, True, "Niet door de cilindrische detector afgehandeld"),
                         ],
                         "position": center,
