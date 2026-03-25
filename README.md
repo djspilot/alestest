@@ -75,6 +75,23 @@ python run_viewer.py
 
 Als standaardpoorten bezet zijn, kiest het script automatisch vrije fallback-poorten en print het de juiste URLs.
 
+**Windows-notitie voor `Unfold`:**
+
+- Gebruik op Windows bij voorkeur altijd `python run_viewer.py`; dat pad is nu de primaire cross-platform launcher.
+- Installeer FreeCAD inclusief de SheetMetal workbench.
+- De unfold-module probeert op Windows standaard eerst `FreeCADCmd.exe` te gebruiken in plaats van een directe FreeCAD-import in Python. Dat is robuuster bij ABI- en importproblemen.
+- Als FreeCAD niet op de standaardlocatie staat, zet dan een van deze variabelen:
+
+```powershell
+$env:FREECAD_PATH="C:\Program Files\FreeCAD 1.0"
+$env:FREECAD_CMD="C:\Program Files\FreeCAD 1.0\bin\FreeCADCmd.exe"
+python run_viewer.py
+```
+
+- `FREECAD_PATH` wijst naar de installatieroot.
+- `FREECAD_CMD` is optioneel maar aanbevolen op Windows als `Unfold` nog steeds faalt.
+- Alleen als je een afwijkende embedded interpreter wilt forceren, gebruik je `FREECAD_PYTHON`.
+
 ---
 
 ### v3.11-dev — ALES STEP Viewer + live pipeline inspectie (24 maart 2026)
@@ -811,6 +828,8 @@ certbot --nginx -d api.jouwdomein.nl
 |-----------|-----------|-------------|
 | `API_KEYS` | _(leeg)_ | Komma-gescheiden API-keys |
 | `FREECAD_PATH` | `/usr/lib/freecad` | FreeCAD-installatiepad |
+| `FREECAD_CMD` | _(auto-detect)_ | Pad naar `FreeCADCmd` voor robuuste subprocess-unfold, vooral op Windows |
+| `FREECAD_PYTHON` | _(auto-detect)_ | Optioneel expliciet FreeCAD-Python pad als je de auto-detect wilt overrulen |
 | `UPLOAD_DIR` | `/tmp/manufacturing-uploads` | Uploadmap |
 | `MAX_FILE_SIZE_MB` | `100` | Max uploadgrootte |
 | `JOB_TTL_SECONDS` | `3600` | Hoe lang resultaten bewaard blijven |
