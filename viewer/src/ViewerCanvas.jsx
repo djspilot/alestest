@@ -121,6 +121,66 @@ function rectanglePoints(width, height) {
   ]
 }
 
+function roundedRectPoints(width, height, radius = 4, cornerSegments = 10) {
+  const halfW = Math.max(width, 1) / 2
+  const halfH = Math.max(height, 1) / 2
+  const safeRadius = Math.max(Math.min(radius, halfW * 0.92, halfH * 0.92), 0.6)
+  const corners = [
+    { center: [halfW - safeRadius, halfH - safeRadius], start: 0, end: Math.PI / 2 },
+    { center: [-halfW + safeRadius, halfH - safeRadius], start: Math.PI / 2, end: Math.PI },
+    { center: [-halfW + safeRadius, -halfH + safeRadius], start: Math.PI, end: Math.PI * 1.5 },
+    { center: [halfW - safeRadius, -halfH + safeRadius], start: Math.PI * 1.5, end: Math.PI * 2 },
+  ]
+
+  return corners.flatMap((corner, cornerIndex) => {
+    const points = []
+    for (let segmentIndex = 0; segmentIndex <= cornerSegments; segmentIndex += 1) {
+      if (cornerIndex > 0 && segmentIndex === 0) continue
+      const progress = segmentIndex / cornerSegments
+      const angle = corner.start + ((corner.end - corner.start) * progress)
+      points.push([
+        corner.center[0] + (Math.cos(angle) * safeRadius),
+        corner.center[1] + (Math.sin(angle) * safeRadius),
+        0,
+      ])
+    }
+    return points
+  })
+}
+
+function capsulePoints(length, width, arcSegments = 18) {
+  const safeLength = Math.max(length, width, 2)
+  const safeWidth = Math.max(width, 2)
+  const radius = safeWidth / 2
+  const straightHalf = Math.max((safeLength / 2) - radius, 0.5)
+  const points = []
+
+  for (let index = 0; index <= arcSegments; index += 1) {
+    const angle = (-Math.PI / 2) + ((Math.PI * index) / arcSegments)
+    points.push([
+      straightHalf + (Math.cos(angle) * radius),
+      Math.sin(angle) * radius,
+      0,
+    ])
+  }
+
+  for (let index = 0; index <= arcSegments; index += 1) {
+    const angle = (Math.PI / 2) + ((Math.PI * index) / arcSegments)
+    if (index === 0) continue
+    points.push([
+      -straightHalf + (Math.cos(angle) * radius),
+      Math.sin(angle) * radius,
+      0,
+    ])
+  }
+
+  return points
+}
+
+function scalePoints(points, scaleX = 1, scaleY = 1) {
+  return points.map(([x, y, z = 0]) => [x * scaleX, y * scaleY, z])
+}
+
 function toFloat32(points) {
   return new Float32Array(points.flat())
 }
@@ -193,36 +253,30 @@ function holePalette(hole, isSelected, hasSelection) {
 
   if (isSelected) {
     return {
-      outer: '#f5c542',
-      inner: '#fff0a8',
-      leader: '#f59e0b',
-      marker: '#f59e0b',
-      outlineOpacity: 1,
-      leaderOpacity: 1,
-      fillOpacity: 0.12,
+      primary: '#f5c542',
+      secondary: '#fff0a8',
+      echoOpacity: 0.78,
+      primaryOpacity: 1,
+      selectionOpacity: 1,
     }
   }
 
   if (hole.status === 'rejected') {
     return {
-      outer: '#315b8a',
-      inner: '#60a5fa',
-      leader: '#7dd3fc',
-      marker: '#7dd3fc',
-      outlineOpacity: dimmed ? 0.2 : 0.85,
-      leaderOpacity: dimmed ? 0.15 : 0.75,
-      fillOpacity: dimmed ? 0.0 : 0.03,
+      primary: '#315b8a',
+      secondary: '#7dd3fc',
+      echoOpacity: dimmed ? 0.14 : 0.52,
+      primaryOpacity: dimmed ? 0.22 : 0.92,
+      selectionOpacity: dimmed ? 0.18 : 0.68,
     }
   }
 
   return {
-    outer: '#7f0008',
-    inner: '#ff4d3b',
-    leader: '#ff7a59',
-    marker: '#ff7a59',
-    outlineOpacity: dimmed ? 0.22 : 0.92,
-    leaderOpacity: dimmed ? 0.16 : 0.82,
-    fillOpacity: dimmed ? 0.0 : 0.04,
+    primary: '#7f0008',
+    secondary: '#ff4d3b',
+    echoOpacity: dimmed ? 0.16 : 0.56,
+    primaryOpacity: dimmed ? 0.24 : 0.95,
+    selectionOpacity: dimmed ? 0.2 : 0.72,
   }
 }
 
@@ -238,6 +292,31 @@ function holeFocusRadius(hole, modelInfo) {
   const [width, height] = parseHoleSize(hole.size || hole.label || '', 12)
   const featureSize = hole.diameter || Math.max(width, height) || 12
   return Math.max(featureSize * 0.7, modelInfo?.boundingRadius * 0.018 || 0, 6)
+}
+
+function getHoleContourPoints(hole, rectWidth, rectHeight) {
+  if (hole.type === 'cylindrical') {
+    const cylindricalRadius = Math.max((hole.diameter || 8) / 2, 3)
+    return circlePoints(cylindricalRadius, 96)
+  }
+
+  const normalizedType = String(hole.type || '').toLowerCase()
+  const major = Math.max(rectWidth, rectHeight, 6)
+  const minor = Math.max(Math.min(rectWidth, rectHeight), 4)
+
+  if (normalizedType.includes('slot')) {
+    return capsulePoints(major, minor)
+  }
+
+  if (normalizedType.includes('rect (r)') || normalizedType.includes('(r)')) {
+    return roundedRectPoints(major, minor, Math.min(minor * 0.28, 6))
+  }
+
+  if (normalizedType.includes('rect')) {
+    return roundedRectPoints(major, minor, Math.min(minor * 0.18, 3.5))
+  }
+
+  return rectanglePoints(Math.max(rectWidth, 6), Math.max(rectHeight, 6))
 }
 
 function findNearestHoleByPoint(point, holes, center, modelInfo) {
@@ -264,34 +343,20 @@ function findNearestHoleByPoint(point, holes, center, modelInfo) {
 
 function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSelect }) {
   const position = holeCenterPosition(hole, center)
-  const cylindricalRadius = Math.max((hole.diameter || 8) / 2, 3)
   const [rectWidth, rectHeight] = parseHoleSize(hole.size || hole.label, 14)
-  const outerLoop = useMemo(() => {
-    if (hole.type === 'cylindrical') {
-      return toFloat32(circlePoints(cylindricalRadius, 72))
-    }
-    return toFloat32(rectanglePoints(Math.max(rectWidth, 6), Math.max(rectHeight, 6)))
-  }, [hole.type, cylindricalRadius, rectWidth, rectHeight])
+  const contourPoints = useMemo(
+    () => getHoleContourPoints(hole, rectWidth, rectHeight),
+    [hole, rectWidth, rectHeight],
+  )
+  const primaryLoop = useMemo(() => toFloat32(contourPoints), [contourPoints])
+  const highlightLoop = useMemo(() => {
+    const scale = isSelected ? 1.08 : 1.035
+    return toFloat32(scalePoints(contourPoints, scale, scale))
+  }, [contourPoints, isSelected])
   const innerLoop = useMemo(() => {
-    if (hole.type === 'cylindrical') {
-      return toFloat32(circlePoints(Math.max(cylindricalRadius * 0.82, cylindricalRadius - 1.1), 72))
-    }
-    return toFloat32(rectanglePoints(Math.max(rectWidth * 0.86, 5), Math.max(rectHeight * 0.86, 5)))
-  }, [hole.type, cylindricalRadius, rectWidth, rectHeight])
-  const leaderLine = useMemo(() => {
-    if (hole.type === 'cylindrical') {
-      return buildLineSegments([
-        [cylindricalRadius, 0, 0],
-        [cylindricalRadius + 8, 0, 0],
-        [cylindricalRadius + 18, cylindricalRadius * 0.5, 0],
-      ])
-    }
-    return buildLineSegments([
-      [rectWidth / 2, 0, 0],
-      [rectWidth / 2 + 8, 0, 0],
-      [rectWidth / 2 + 18, rectHeight * 0.35, 0],
-    ])
-  }, [hole.type, cylindricalRadius, rectWidth, rectHeight])
+    const scale = hole.type === 'cylindrical' ? 0.95 : 0.965
+    return toFloat32(scalePoints(contourPoints, scale, scale))
+  }, [contourPoints, hole.type])
   const palette = holePalette(hole, isSelected, hasSelection)
   const hitRadius = holeFocusRadius(hole, modelInfo)
   const handleSelect = useCallback((event) => {
@@ -303,32 +368,24 @@ function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSele
     const quaternion = quaternionFromDirection(hole.axis || [1, 0, 0])
     return (
       <group position={position} quaternion={quaternion} renderOrder={20} onClick={handleSelect}>
-        <mesh>
-          <circleGeometry args={[Math.max(cylindricalRadius * 1.08, hitRadius * 0.9), 40]} />
-          <meshBasicMaterial color={palette.outer} transparent opacity={palette.fillOpacity} depthTest={false} depthWrite={false} side={THREE.DoubleSide} />
-        </mesh>
+        <lineLoop position={[0, 0, -0.26]}>
+          <bufferGeometry>
+            <bufferAttribute attach="attributes-position" args={[highlightLoop, 3]} />
+          </bufferGeometry>
+          <lineBasicMaterial color={palette.secondary} transparent opacity={palette.echoOpacity} depthTest={false} depthWrite={false} />
+        </lineLoop>
         <lineLoop>
           <bufferGeometry>
-            <bufferAttribute attach="attributes-position" args={[outerLoop, 3]} />
+            <bufferAttribute attach="attributes-position" args={[primaryLoop, 3]} />
           </bufferGeometry>
-          <lineBasicMaterial color={palette.outer} transparent opacity={palette.outlineOpacity} depthTest={false} depthWrite={false} />
+          <lineBasicMaterial color={palette.primary} transparent opacity={palette.primaryOpacity} depthTest={false} depthWrite={false} />
         </lineLoop>
-        <lineLoop position={[0, 0, 0.2]}>
+        <lineLoop position={[0, 0, 0.22]}>
           <bufferGeometry>
             <bufferAttribute attach="attributes-position" args={[innerLoop, 3]} />
           </bufferGeometry>
-          <lineBasicMaterial color={palette.inner} transparent opacity={palette.outlineOpacity} depthTest={false} depthWrite={false} />
+          <lineBasicMaterial color={palette.secondary} transparent opacity={palette.selectionOpacity} depthTest={false} depthWrite={false} />
         </lineLoop>
-        <lineSegments>
-          <bufferGeometry>
-            <bufferAttribute attach="attributes-position" args={[leaderLine, 3]} />
-          </bufferGeometry>
-          <lineBasicMaterial color={palette.leader} transparent opacity={palette.leaderOpacity} depthTest={false} depthWrite={false} />
-        </lineSegments>
-        <mesh position={[cylindricalRadius + 18, cylindricalRadius * 0.5, 0]}>
-          <sphereGeometry args={[1.4, 12, 12]} />
-          <meshBasicMaterial color={palette.marker} transparent opacity={palette.outlineOpacity} depthTest={false} depthWrite={false} />
-        </mesh>
         <mesh>
           <circleGeometry args={[hitRadius, 40]} />
           <meshBasicMaterial transparent opacity={0.01} depthTest={false} depthWrite={false} side={THREE.DoubleSide} />
@@ -340,32 +397,24 @@ function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSele
   const quaternion = quaternionFromDirection(hole.normal || [1, 0, 0])
   return (
     <group position={position} quaternion={quaternion} renderOrder={20} onClick={handleSelect}>
-      <mesh>
-        <planeGeometry args={[Math.max(rectWidth * 1.08, hitRadius * 1.7), Math.max(rectHeight * 1.08, hitRadius * 1.7)]} />
-        <meshBasicMaterial color={palette.outer} transparent opacity={palette.fillOpacity} depthTest={false} depthWrite={false} side={THREE.DoubleSide} />
-      </mesh>
+      <lineLoop position={[0, 0, -0.26]}>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" args={[highlightLoop, 3]} />
+        </bufferGeometry>
+        <lineBasicMaterial color={palette.secondary} transparent opacity={palette.echoOpacity} depthTest={false} depthWrite={false} />
+      </lineLoop>
       <lineLoop>
         <bufferGeometry>
-          <bufferAttribute attach="attributes-position" args={[outerLoop, 3]} />
+          <bufferAttribute attach="attributes-position" args={[primaryLoop, 3]} />
         </bufferGeometry>
-        <lineBasicMaterial color={palette.outer} transparent opacity={palette.outlineOpacity} depthTest={false} depthWrite={false} />
+        <lineBasicMaterial color={palette.primary} transparent opacity={palette.primaryOpacity} depthTest={false} depthWrite={false} />
       </lineLoop>
-      <lineLoop position={[0, 0, 0.2]}>
+      <lineLoop position={[0, 0, 0.22]}>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[innerLoop, 3]} />
         </bufferGeometry>
-        <lineBasicMaterial color={palette.inner} transparent opacity={palette.outlineOpacity} depthTest={false} depthWrite={false} />
+        <lineBasicMaterial color={palette.secondary} transparent opacity={palette.selectionOpacity} depthTest={false} depthWrite={false} />
       </lineLoop>
-        <lineSegments>
-          <bufferGeometry>
-            <bufferAttribute attach="attributes-position" args={[leaderLine, 3]} />
-          </bufferGeometry>
-          <lineBasicMaterial color={palette.leader} transparent opacity={palette.leaderOpacity} depthTest={false} depthWrite={false} />
-        </lineSegments>
-      <mesh position={[rectWidth / 2 + 18, rectHeight * 0.35, 0]}>
-        <sphereGeometry args={[1.4, 12, 12]} />
-        <meshBasicMaterial color={palette.marker} transparent opacity={palette.outlineOpacity} depthTest={false} depthWrite={false} />
-      </mesh>
       <mesh>
         <planeGeometry args={[Math.max(rectWidth, hitRadius * 2), Math.max(rectHeight, hitRadius * 2)]} />
         <meshBasicMaterial transparent opacity={0.01} depthTest={false} depthWrite={false} side={THREE.DoubleSide} />

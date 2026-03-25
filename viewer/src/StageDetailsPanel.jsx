@@ -132,10 +132,10 @@ export default function StageDetailsPanel({
                   Bron: {holeVisuals.source || '-'} | Geaccepteerd: {holeVisuals.accepted_total || 0} | Afgewezen: {holeVisuals.rejected_total || 0} | Kandidaten: {holeVisuals.total_candidates || 0}
                 </div>
                 <div className="timeline-text">
-                  Klik op een gat om het te highlighten en de camera erop te focussen. Afgewezen kandidaten blijven ook zichtbaar met hun criteria.
+                  Klik op een gat om exact de gedetecteerde hole-rand te highlighten en de camera erop te focussen. Afgewezen kandidaten blijven ook zichtbaar met hun criteria.
                 </div>
                 <div className="timeline-text">
-                  Kleurlegenda: goud = geselecteerd, rood = geaccepteerd, blauw = afgewezen, gedimd = niet geselecteerd.
+                  Kleurlegenda: goud = geselecteerde hole-edge, rood = geaccepteerde hole-edge, blauw = afgewezen hole-edge, gedimd = niet geselecteerd.
                 </div>
                 <div className="hole-filter-row">
                   <button className={`hole-filter-btn ${holeFilter === 'all' ? 'is-active' : ''}`} onClick={() => setHoleFilter('all')}>Alle</button>
