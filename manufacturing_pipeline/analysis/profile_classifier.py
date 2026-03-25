@@ -1335,6 +1335,34 @@ def classify_section(
 # End-to-end convenience function
 # -----------------------------------------------------------------------------
 
+# Fractions along the extrusion axis to sample: 0.03 and 0.97 give start/end sections.
+_CLASSIFY_SECTION_FRACS = (0.03, 0.20, 0.35, 0.50, 0.65, 0.80, 0.97)
+
+
+def _serialize_section_entry(sec: "Section2D", pos_to_frac: dict) -> dict:
+    """Serialize a Section2D to a JSON-safe dict including exact 2D polygon coordinates."""
+    ext_coords = [[float(c[0]), float(c[1])] for c in list(sec.polygon.exterior.coords)[:-1]]
+    int_coords = [
+        [[float(c[0]), float(c[1])] for c in list(ring.coords)[:-1]]
+        for ring in sec.polygon.interiors
+    ]
+    frac = float(pos_to_frac.get(sec.source_position, 0.5))
+    return {
+        "position": float(sec.source_position),
+        "fraction": frac,
+        "is_start": frac <= 0.10,
+        "is_end": frac >= 0.90,
+        "origin_3d": sec.origin_3d.tolist(),
+        "normal_3d": sec.normal_3d.tolist(),
+        "basis_u": sec.basis_u.tolist(),
+        "basis_v": sec.basis_v.tolist(),
+        "area": float(sec.polygon.area),
+        "holes": len(sec.polygon.interiors),
+        "line_length_fraction": float(sec.line_length_fraction),
+        "curve_length_fraction": float(sec.curve_length_fraction),
+        "polygon_exterior": ext_coords,
+        "polygon_interiors": int_coords,
+    }
 
 
 def classify_solid_profile(solid_shape: Any, registry: ProfileRegistry | None = None) -> dict[str, Any]:
@@ -1347,7 +1375,9 @@ def classify_solid_profile(solid_shape: Any, registry: ProfileRegistry | None = 
         }
 
     vertices = solid_vertices_np(solid_shape)
-    positions = section_plane_positions_from_vertices(vertices, axis.direction, (0.20, 0.35, 0.50, 0.65, 0.80))
+    fracs = _CLASSIFY_SECTION_FRACS
+    positions = section_plane_positions_from_vertices(vertices, axis.direction, fracs)
+    pos_to_frac = dict(zip(positions, fracs))
     sections: list[Section2D] = []
     for s in positions:
         sec = slice_solid_to_section(solid_shape, plane_origin=axis.direction * s, plane_normal=axis.direction, section_position=s)
@@ -1361,17 +1391,7 @@ def classify_solid_profile(solid_shape: Any, registry: ProfileRegistry | None = 
             "reason": "te weinig geldige doorsneden",
             "axis": axis,
             "section_positions": [float(p) for p in positions],
-            "sampled_sections": [
-                {
-                    "position": float(sec.source_position),
-                    "origin_3d": sec.origin_3d.tolist(),
-                    "area": float(sec.polygon.area),
-                    "holes": len(sec.polygon.interiors),
-                    "line_length_fraction": float(sec.line_length_fraction),
-                    "curve_length_fraction": float(sec.curve_length_fraction),
-                }
-                for sec in sections
-            ],
+            "sampled_sections": [_serialize_section_entry(sec, pos_to_frac) for sec in sections],
         }
 
     cluster = dominant_section_cluster(sections)
@@ -1382,17 +1402,7 @@ def classify_solid_profile(solid_shape: Any, registry: ProfileRegistry | None = 
             "reason": "doorsneden zijn niet stabiel genoeg langs de lengte",
             "axis": axis,
             "section_positions": [float(p) for p in positions],
-            "sampled_sections": [
-                {
-                    "position": float(sec.source_position),
-                    "origin_3d": sec.origin_3d.tolist(),
-                    "area": float(sec.polygon.area),
-                    "holes": len(sec.polygon.interiors),
-                    "line_length_fraction": float(sec.line_length_fraction),
-                    "curve_length_fraction": float(sec.curve_length_fraction),
-                }
-                for sec in sections
-            ],
+            "sampled_sections": [_serialize_section_entry(sec, pos_to_frac) for sec in sections],
         }
 
     # medoid of dominant cluster
@@ -1413,17 +1423,7 @@ def classify_solid_profile(solid_shape: Any, registry: ProfileRegistry | None = 
             "cluster_size": len(cluster),
             "sections_total": len(sections),
             "section_positions": [float(p) for p in positions],
-            "sampled_sections": [
-                {
-                    "position": float(sec.source_position),
-                    "origin_3d": sec.origin_3d.tolist(),
-                    "area": float(sec.polygon.area),
-                    "holes": len(sec.polygon.interiors),
-                    "line_length_fraction": float(sec.line_length_fraction),
-                    "curve_length_fraction": float(sec.curve_length_fraction),
-                }
-                for sec in sections
-            ],
+            "sampled_sections": [_serialize_section_entry(sec, pos_to_frac) for sec in sections],
         }
     )
     return result

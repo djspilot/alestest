@@ -625,6 +625,39 @@ function SectionContour({ points, position, quaternion, color }) {
   )
 }
 
+// Renders a cross-section polygon using exact 3D world-space coordinates from the backend.
+// polygonLines is an array of rings, each ring is an array of [x,y,z] world-space points.
+function PolygonOutline3D({ polygonLines, color, isEndMarker = false }) {
+  const rings = useMemo(() => polygonLines.map((ring) => {
+    const closed = [...ring, ring[0]]
+    return new Float32Array(closed.flatMap((p) => p))
+  }), [polygonLines])
+
+  return (
+    <group renderOrder={15}>
+      {rings.map((pts, i) => (
+        <lineLoop key={i} renderOrder={15}>
+          <bufferGeometry>
+            <bufferAttribute attach="attributes-position" args={[pts, 3]} />
+          </bufferGeometry>
+          <lineBasicMaterial
+            color={color}
+            transparent
+            opacity={isEndMarker ? 1 : 0.72}
+            linewidth={isEndMarker ? 2 : 1}
+            depthTest={false}
+            depthWrite={false}
+          />
+        </lineLoop>
+      ))}
+      <mesh>
+        <circleGeometry args={[2.4, 24]} />
+        <meshBasicMaterial color={color} transparent opacity={0.98} depthTest={false} depthWrite={false} />
+      </mesh>
+    </group>
+  )
+}
+
 function SectionContours({ position, quaternion, contours, color }) {
   const identityQuaternion = useMemo(() => new THREE.Quaternion(), [])
 
@@ -791,10 +824,33 @@ function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, selecte
   const contourPartType = classificationVisuals?.part_type || routerVisuals?.profile_label || ''
   const contourThickness = classificationVisuals?.thickness || 0
   const contours = buildSectionContours(contourPartType, size, contourThickness, fallbackAxis.key)
-  const routerSections = (routerVisuals?.sampled_sections || []).map((section) => ({
-    position: makePosition(section.origin_3d),
-    quaternion: planeQuaternion,
-  }))
+
+  // Build router sections — prefer exact polygon coords from backend when available
+  const routerSections = (routerVisuals?.sampled_sections || []).map((section) => {
+    const hasPolygon = Array.isArray(section.polygon_exterior) && section.polygon_exterior.length > 0
+    let polygonLines3d = null
+    if (hasPolygon) {
+      const [ox, oy, oz] = section.origin_3d
+      const [bux, buy, buz] = section.basis_u
+      const [bvx, bvy, bvz] = section.basis_v
+      const to3d = ([px, py]) => [
+        ox + bux * px + bvx * py - center.x,
+        oy + buy * px + bvy * py - center.y,
+        oz + buz * px + bvz * py - center.z,
+      ]
+      polygonLines3d = [
+        section.polygon_exterior.map(to3d),
+        ...(section.polygon_interiors || []).map((ring) => ring.map(to3d)),
+      ]
+    }
+    return {
+      position: makePosition(section.origin_3d),
+      quaternion: planeQuaternion,
+      isStart: section.is_start === true,
+      isEnd: section.is_end === true,
+      polygonLines3d,
+    }
+  })
   const fallbackSections = buildFallbackSections(modelInfo).map((position) => ({
     position,
     quaternion: fallbackQuaternion,
@@ -824,23 +880,37 @@ function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, selecte
       )}
 
       {focusedStage === 'Profile Router' && sectionVisuals.map((section, index) => (
-        <SectionContours
-          key={`router-section-${index}`}
-          position={section.position}
-          quaternion={section.quaternion}
-          contours={contours}
-          color="#8f0008"
-        />
+        section.polygonLines3d
+          ? <PolygonOutline3D
+              key={`router-section-${index}`}
+              polygonLines={section.polygonLines3d}
+              color={section.isStart || section.isEnd ? '#ff6b35' : '#8f0008'}
+              isEndMarker={section.isStart || section.isEnd}
+            />
+          : <SectionContours
+              key={`router-section-${index}`}
+              position={section.position}
+              quaternion={section.quaternion}
+              contours={contours}
+              color="#8f0008"
+            />
       ))}
 
       {focusedStage === 'Classify geometry' && sectionVisuals.map((section, index) => (
-        <SectionContours
-          key={`classify-section-${index}`}
-          position={section.position}
-          quaternion={section.quaternion}
-          contours={contours}
-          color="#6f0010"
-        />
+        section.polygonLines3d
+          ? <PolygonOutline3D
+              key={`classify-section-${index}`}
+              polygonLines={section.polygonLines3d}
+              color={section.isStart || section.isEnd ? '#ff6b35' : '#6f0010'}
+              isEndMarker={section.isStart || section.isEnd}
+            />
+          : <SectionContours
+              key={`classify-section-${index}`}
+              position={section.position}
+              quaternion={section.quaternion}
+              contours={contours}
+              color="#6f0010"
+            />
       ))}
 
       {focusedStage === 'Classify geometry' && (
