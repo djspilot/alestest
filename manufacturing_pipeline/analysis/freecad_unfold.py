@@ -29,6 +29,7 @@ def _candidate_freecad_paths():
     freecad_path = os.getenv('FREECAD_PATH')
     if freecad_path:
         candidates.append(freecad_path)
+        candidates.append(os.path.join(freecad_path, 'bin'))
         candidates.append(os.path.join(freecad_path, 'lib'))
         candidates.append(os.path.join(freecad_path, 'Mod'))
 
@@ -71,6 +72,16 @@ def _candidate_freecad_paths():
     ])
 
     return candidates
+
+
+def _should_prefer_freecadcmd() -> bool:
+    """Prefer the external FreeCADCmd path on platforms where direct import is fragile."""
+    mode = os.getenv("FREECAD_UNFOLD_MODE", "auto").strip().lower()
+    if mode == "subprocess":
+        return True
+    if mode == "direct":
+        return False
+    return sys.platform.startswith("win")
 
 
 def _ensure_freecad_imported() -> bool:
@@ -852,31 +863,33 @@ def unfold_sheet_metal(
         'used_face_idx': None
     }
 
-    if not _ensure_freecad_imported():
-        print(f"[INFO] Using subprocess fallback (FreeCAD not directly importable)")
-        
-        # If solid_object provided, write to temp STEP file first
+    prefer_subprocess = _should_prefer_freecadcmd()
+    freecadcmd = _find_freecadcmd_executable()
+
+    def _run_subprocess_fallback():
+        print("[INFO] Using subprocess fallback (FreeCADCmd)")
+
         temp_step = None
+        fallback_step_path = step_path
+
         if solid_object is not None:
             try:
-                import tempfile
                 temp_step = tempfile.NamedTemporaryFile(suffix='.step', delete=False).name
                 print(f"[INFO] Writing solid to temp STEP: {temp_step}")
-                
-                # Write solid to STEP file using OCP directly
+
                 try:
                     from OCP.STEPControl import STEPControl_Writer, STEPControl_AsIs
                     from OCP.IFSelect import IFSelect_RetDone
-                    
+
                     writer = STEPControl_Writer()
                     writer.Transfer(solid_object, STEPControl_AsIs)
                     status = writer.Write(temp_step)
-                    
+
                     if status != IFSelect_RetDone:
                         raise Exception(f"STEP write failed with status: {status}")
-                    
-                    step_path = temp_step
-                    print(f"[INFO] Solid exported to temp STEP successfully")
+
+                    fallback_step_path = temp_step
+                    print("[INFO] Solid exported to temp STEP successfully")
                 except Exception as e:
                     print(f"[WARN] Could not write solid to temp STEP: {e}")
                     result['error'] = f"Cannot use solid object with subprocess fallback: {e}"
@@ -884,9 +897,9 @@ def unfold_sheet_metal(
             except Exception as e:
                 result['error'] = f"Failed to create temp STEP for solid: {e}"
                 return result
-        
+
         try:
-            fallback_result = _unfold_via_freecadcmd(step_path, output_dxf, k_factor, max_attempts, max_bends)
+            fallback_result = _unfold_via_freecadcmd(fallback_step_path, output_dxf, k_factor, max_attempts, max_bends)
             if fallback_result.get('success'):
                 return fallback_result
             result['error'] = fallback_result.get('error') or f"FreeCAD niet beschikbaar: {_FREECAD_IMPORT_ERROR or 'onbekende importfout'}"
@@ -894,12 +907,21 @@ def unfold_sheet_metal(
             result['error_details'] = fallback_result.get('error_details', [])
             return result
         finally:
-            # Clean up temp file
             if temp_step and os.path.exists(temp_step):
                 try:
                     os.remove(temp_step)
-                except:
+                except Exception:
                     pass
+
+    if prefer_subprocess and freecadcmd:
+        return _run_subprocess_fallback()
+
+    if not _ensure_freecad_imported():
+        if freecadcmd:
+            return _run_subprocess_fallback()
+        print("[INFO] Using subprocess fallback (FreeCAD not directly importable)")
+        result['error'] = f"FreeCAD niet beschikbaar: {_FREECAD_IMPORT_ERROR or 'onbekende importfout'}"
+        return result
 
     try:
         # Import STEP or use provided solid
@@ -1387,4 +1409,3 @@ if __name__ == "__main__":
         else:
             print(f"\n✗ Ontbuigen mislukt: {result['error']}")
             sys.exit(1)
-

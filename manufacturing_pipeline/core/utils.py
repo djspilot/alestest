@@ -27,6 +27,7 @@ SCRIPTS_DIR = os.path.join(PIPELINE_DIR, "scripts")
 # FreeCAD Python path
 from manufacturing_pipeline.core.config import SystemConfig
 FREECAD_PYTHON = SystemConfig.from_env().freecad_python
+HOST_PYTHON = sys.executable
 
 
 # Add pipeline and scripts to path
@@ -1156,14 +1157,9 @@ print("UNFOLD_RESULT:" + json.dumps(result))
 
 def run_unfold(step_file, output_dir, part_name, analysis):
     """Run FreeCAD unfold via subprocess, with theoretical fallback (legacy)."""
-    unfold_script = os.path.join(PIPELINE_DIR, "freecad_unfold.py")
+    unfold_script = os.path.join(PIPELINE_DIR, "analysis", "freecad_unfold.py")
     dxf_output = os.path.join(output_dir, f"{part_name}_flat.dxf")
     unfold_result = {'success': False, 'error_details': []}
-
-    if not os.path.exists(FREECAD_PYTHON):
-        print(f"  ⚠ FreeCAD Python not found at {FREECAD_PYTHON}")
-        print("  Skipping unfold...")
-        return unfold_result
 
     if not os.path.exists(unfold_script):
         print(f"  ⚠ Unfold script not found: {unfold_script}")
@@ -1171,7 +1167,7 @@ def run_unfold(step_file, output_dir, part_name, analysis):
 
     try:
         result = subprocess.run(
-            [FREECAD_PYTHON, unfold_script, step_file, "-o", dxf_output],
+            [HOST_PYTHON, unfold_script, step_file, "-o", dxf_output],
             capture_output=True,
             text=True,
             timeout=180  # Increased timeout for multiple attempts

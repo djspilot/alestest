@@ -5,42 +5,146 @@ Maakt in- en uitschakelen van analysemodule(s) mogelijk via CLI of configbestand
 """
 
 from dataclasses import dataclass, field, asdict
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import json
 import os
 import sys
 
 
+def _freecad_root_candidates(platform: Optional[str] = None) -> List[str]:
+    """Return likely FreeCAD installation roots for the current platform."""
+    platform = platform or sys.platform
+    env_path = os.environ.get("FREECAD_PATH")
+    candidates: List[str] = []
+
+    if env_path:
+        candidates.append(env_path)
+
+    if platform.startswith("win"):
+        program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+        program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        for base in (program_files, program_files_x86):
+            if not base:
+                continue
+            candidates.extend([
+                os.path.join(base, "FreeCAD 1.0"),
+                os.path.join(base, "FreeCAD"),
+                os.path.join(base, "FreeCAD 0.21"),
+            ])
+    elif platform == "darwin":
+        candidates.extend([
+            "/Applications/FreeCAD.app",
+            "/opt/homebrew/Caskroom/freecad/1.0.2/FreeCAD.app",
+        ])
+    else:
+        candidates.extend([
+            "/usr/lib/freecad",
+            "/usr/local/lib/freecad",
+            "/snap/freecad/current/usr/lib/freecad",
+        ])
+
+    return candidates
+
+
+def _default_freecad_path(platform: Optional[str] = None) -> str:
+    """Pick the first existing FreeCAD root, else return the primary platform default."""
+    candidates = _freecad_root_candidates(platform=platform)
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return candidates[0] if candidates else ""
+
+
 @dataclass
 class SystemConfig:
     """Systeemconfiguratie (paden, omgeving)."""
-    freecad_path: str = "/opt/homebrew/Caskroom/freecad/1.0.2/FreeCAD.app"
+    freecad_path: str = field(default_factory=_default_freecad_path)
+
+    def _resource_root(self) -> str:
+        path = self.freecad_path
+        if sys.platform == 'darwin':
+            if path.endswith(".app"):
+                return os.path.join(path, "Contents", "Resources")
+            if path.endswith(os.path.join("Contents", "Resources")):
+                return path
+        return path
+
+    def _path_candidates(self, *parts: str) -> List[str]:
+        root = self._resource_root()
+        install_root = self.freecad_path
+        candidates: List[str] = []
+
+        if root:
+            candidates.append(os.path.join(root, *parts))
+        if install_root and install_root != root:
+            candidates.append(os.path.join(install_root, *parts))
+        return candidates
+
+    def _resolve_existing(self, candidates: List[str]) -> str:
+        for candidate in candidates:
+            if candidate and os.path.exists(candidate):
+                return candidate
+        return candidates[0] if candidates else ""
 
     @property
     def freecad_python(self) -> str:
-        """Pad naar de Python executable van FreeCAD."""
-        # Mac OS specifieke padopbouw
+        """Pad naar een FreeCAD-capable interpreter of command."""
+        env_python = os.environ.get("FREECAD_PYTHON")
+        if env_python and os.path.exists(env_python):
+            return env_python
+
         if sys.platform == 'darwin':
-            return os.path.join(self.freecad_path, "Contents/Resources/bin/python")
+            candidates = self._path_candidates("bin", "python3") + self._path_candidates("bin", "python")
+        elif sys.platform.startswith('win'):
+            candidates = (
+                self._path_candidates("bin", "python.exe") +
+                self._path_candidates("bin", "python") +
+                self._path_candidates("bin", "FreeCADCmd.exe") +
+                self._path_candidates("bin", "freecadcmd.exe")
+            )
         else:
-            # Linux/Windows aanname (kan worden verfijnd)
-            return os.path.join(self.freecad_path, "bin", "python")
+            candidates = (
+                self._path_candidates("bin", "python3") +
+                self._path_candidates("bin", "python") +
+                ["/usr/bin/freecadcmd", "/usr/local/bin/freecadcmd"]
+            )
+
+        return self._resolve_existing(candidates)
+
+    @property
+    def freecad_cmd(self) -> str:
+        """Pad naar FreeCADCmd voor robuuste subprocess-runs."""
+        env_cmd = os.environ.get("FREECAD_CMD")
+        if env_cmd and os.path.exists(env_cmd):
+            return env_cmd
+
+        if sys.platform.startswith('win'):
+            candidates = self._path_candidates("bin", "FreeCADCmd.exe") + self._path_candidates("bin", "freecadcmd.exe")
+        elif sys.platform == 'darwin':
+            if self.freecad_path.endswith(".app"):
+                candidates = [os.path.join(self.freecad_path, "Contents", "MacOS", "FreeCADCmd")]
+            else:
+                candidates = self._path_candidates("bin", "freecadcmd")
+            candidates.append("/Applications/FreeCAD.app/Contents/MacOS/FreeCADCmd")
+        else:
+            candidates = self._path_candidates("bin", "freecadcmd") + ["/usr/bin/freecadcmd", "/usr/local/bin/freecadcmd"]
+
+        return self._resolve_existing(candidates)
 
     @property
     def freecad_lib(self) -> str:
         """Pad naar de bibliotheek van FreeCAD."""
-        if sys.platform == 'darwin':
-            return os.path.join(self.freecad_path, "Contents/Resources/lib")
+        if sys.platform.startswith('win'):
+            candidates = self._path_candidates("bin") + self._path_candidates("lib")
         else:
-            return os.path.join(self.freecad_path, "lib")
+            candidates = self._path_candidates("lib")
+        return self._resolve_existing(candidates)
 
     @property
     def freecad_mod(self) -> str:
         """Pad naar de Mod-map van FreeCAD."""
-        if sys.platform == 'darwin':
-            return os.path.join(self.freecad_path, "Contents/Resources/Mod")
-        else:
-            return os.path.join(self.freecad_path, "Mod")
+        candidates = self._path_candidates("Mod")
+        return self._resolve_existing(candidates)
 
     @classmethod
     def from_env(cls) -> "SystemConfig":
@@ -51,11 +155,11 @@ class SystemConfig:
         return cls()
 
     def to_dict(self) -> Dict[str, str]:
-        return {"freecad_path": self.freecad_path}
+        return {"freecad_path": self.freecad_path, "freecad_cmd": self.freecad_cmd}
 
     @classmethod
     def from_dict(cls, data: Dict[str, str]) -> "SystemConfig":
-        return cls(freecad_path=data.get("freecad_path", "/opt/homebrew/Caskroom/freecad/1.0.2/FreeCAD.app"))
+        return cls(freecad_path=data.get("freecad_path", _default_freecad_path()))
 
 
 @dataclass
