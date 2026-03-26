@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
+import { OrbitControls, Text } from '@react-three/drei'
 import * as THREE from 'three'
 import StepModel from './StepModel'
 
@@ -948,7 +948,7 @@ function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, selecte
   )
 }
 
-function UnfoldSketch({ unfoldVisuals, selectedFoldId, onFoldSelect }) {
+function UnfoldFoldOverlay({ unfoldVisuals, selectedFoldId, onFoldSelect, drawPlate = false }) {
   const length = Math.max(Number(unfoldVisuals?.flat_length) || 0, 40)
   const width = Math.max(Number(unfoldVisuals?.flat_width) || 0, 20)
   const bends = unfoldVisuals?.bends_logical || []
@@ -987,25 +987,29 @@ function UnfoldSketch({ unfoldVisuals, selectedFoldId, onFoldSelect }) {
 
   return (
     <group renderOrder={25}>
-      <mesh>
-        <planeGeometry args={[length, width]} />
-        <meshBasicMaterial color="#eef4fb" transparent opacity={0.95} side={THREE.DoubleSide} depthTest={false} depthWrite={false} />
-      </mesh>
+      {drawPlate && (
+        <>
+          <mesh>
+            <planeGeometry args={[length, width]} />
+            <meshBasicMaterial color="#eef4fb" transparent opacity={0.95} side={THREE.DoubleSide} depthTest={false} depthWrite={false} />
+          </mesh>
 
-      <lineLoop renderOrder={26}>
-        <bufferGeometry>
-          <bufferAttribute
-            attach="attributes-position"
-            args={[new Float32Array([
-              -length / 2, -width / 2, 0.2,
-              length / 2, -width / 2, 0.2,
-              length / 2, width / 2, 0.2,
-              -length / 2, width / 2, 0.2,
-            ]), 3]}
-          />
-        </bufferGeometry>
-        <lineBasicMaterial color="#6b7280" transparent opacity={0.9} depthTest={false} depthWrite={false} />
-      </lineLoop>
+          <lineLoop renderOrder={26}>
+            <bufferGeometry>
+              <bufferAttribute
+                attach="attributes-position"
+                args={[new Float32Array([
+                  -length / 2, -width / 2, 0.2,
+                  length / 2, -width / 2, 0.2,
+                  length / 2, width / 2, 0.2,
+                  -length / 2, width / 2, 0.2,
+                ]), 3]}
+              />
+            </bufferGeometry>
+            <lineBasicMaterial color="#6b7280" transparent opacity={0.9} depthTest={false} depthWrite={false} />
+          </lineLoop>
+        </>
+      )}
 
       {foldRows.map((row, index) => {
         const selected = selectedFoldId === row.id
@@ -1020,7 +1024,7 @@ function UnfoldSketch({ unfoldVisuals, selectedFoldId, onFoldSelect }) {
         return (
           <group
             key={`flat-fold-${row.id}-${index}`}
-            position={[row.xPos, 0, 0.35]}
+            position={[row.xPos, 0, drawPlate ? 0.35 : 0.6]}
             onClick={(event) => {
               event.stopPropagation()
               onFoldSelect?.(row.id)
@@ -1030,6 +1034,16 @@ function UnfoldSketch({ unfoldVisuals, selectedFoldId, onFoldSelect }) {
               <planeGeometry args={[2.2, width * 0.95]} />
               <meshBasicMaterial color={color} transparent opacity={selected ? 1 : 0.78} side={THREE.DoubleSide} depthTest={false} depthWrite={false} />
             </mesh>
+            <Text
+              position={[0, (width * 0.52), 0.2]}
+              fontSize={Math.max(width * 0.04, 5)}
+              color={color}
+              anchorX="center"
+              anchorY="middle"
+              depthTest={false}
+            >
+              {row.id}{bends[index]?.angle != null ? ` | ${Math.round(Math.abs(bends[index].angle))}°` : ''}
+            </Text>
           </group>
         )
       })}
@@ -1103,10 +1117,20 @@ export default function ViewerCanvas({
       )}
 
       {showUnfoldSketch && focusedStage === 'Unfold' && backendVisuals?.unfold?.success && (
-        <UnfoldSketch
+        <UnfoldFoldOverlay
           unfoldVisuals={backendVisuals.unfold}
           selectedFoldId={selectedFoldId}
           onFoldSelect={onFoldSelect}
+          drawPlate
+        />
+      )}
+
+      {!showUnfoldSketch && useFlatView && focusedStage === 'Unfold' && backendVisuals?.unfold?.success && (
+        <UnfoldFoldOverlay
+          unfoldVisuals={backendVisuals.unfold}
+          selectedFoldId={selectedFoldId}
+          onFoldSelect={onFoldSelect}
+          drawPlate={false}
         />
       )}
 
