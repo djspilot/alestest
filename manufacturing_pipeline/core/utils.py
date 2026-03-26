@@ -994,11 +994,33 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
     accepted_hole_count = sum(1 for item in hole_debug_items if item.get("status") == "accepted")
     rejected_hole_count = sum(1 for item in hole_debug_items if item.get("status") == "rejected")
 
+    hole_thresholds = {
+        "source": "flat" if is_flat else "3d",
+        "cylindrical": {
+            "min_total_angle_deg": 160 if is_flat else 270,
+            "min_total_angle_large_flat_deg": 300 if is_flat else None,
+            "large_flat_diameter_mm": 100 if is_flat else None,
+            "flat_artifact_depth_gate": "depth <= max(20.0, 3.0 * thickness_ref)" if is_flat else None,
+            "orientation_required": "TopAbs_REVERSED" if not is_flat else "relaxed",
+        },
+        "dedup": {
+            "axis_alignment_dot_min": 0.7,
+            "small_independent_circle_guard": "circ_diam < 0.25 * min_dim",
+            "duplicate_distance": "dist < 0.8 * max_dim",
+        },
+        "shaped": {
+            "center_dedup_dist_sq_max": 0.01,
+            "normal_alignment_dot_min": 0.9,
+        },
+    }
+
     analysis.detected_hole_visuals = {
         "source": "flat" if is_flat else "3d",
         "total_candidates": len(hole_debug_items),
         "accepted_total": accepted_hole_count,
         "rejected_total": rejected_hole_count,
+        "thresholds": hole_thresholds,
+        "criteria_note": "Per kandidaat staan criteria inclusief threshold en pass/fail in de lijst hieronder.",
         "items": [
             {
                 "id": str(item.get("id") or ""),

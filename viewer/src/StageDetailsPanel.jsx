@@ -155,6 +155,24 @@ export default function StageDetailsPanel({
                 <div className="timeline-text">
                   Bron: {holeVisuals.source || '-'} | Geaccepteerd: {holeVisuals.accepted_total || 0} | Afgewezen: {holeVisuals.rejected_total || 0} | Kandidaten: {holeVisuals.total_candidates || 0}
                 </div>
+                {holeVisuals.criteria_note && (
+                  <div className="timeline-text">{holeVisuals.criteria_note}</div>
+                )}
+                {holeVisuals.thresholds && (
+                  <div className="reasoning-list" style={{ marginTop: 8 }}>
+                    <div className="reasoning-card">
+                      <div className="timeline-title">Thresholds</div>
+                      <div className="timeline-payload-grid">
+                        {Object.entries(holeVisuals.thresholds).map(([key, value]) => (
+                          <div className="timeline-payload-row" key={`hole-threshold-${key}`}>
+                            <div className="timeline-payload-key">{formatLabel(key)}</div>
+                            <pre className="timeline-payload-value">{formatDetailValue(value)}</pre>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div className="timeline-text">
                   Klik op een gat om exact de gedetecteerde hole-rand te highlighten en de camera erop te focussen. In `Probe mode` wordt elke klik op het model altijd een probe op exact die plek, zonder snap naar een bekende hole.
                 </div>

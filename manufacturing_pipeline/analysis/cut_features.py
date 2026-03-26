@@ -162,6 +162,8 @@ def extract_cut_features_for_sheet(
         # Convert naar CadQuery object voor detect_holes()
         cq_solid = cq.Solid(analysis_shape)
         cq_object = cq.Workplane("XY").newObject([cq_solid])
+        closed_contours = _detect_closed_inner_contours(analysis_shape) if analysis_shape else []
+        logger.info(f"[CutFeatures] Gesloten binnencontouren: {len(closed_contours)}")
         
         # STAP 2: Detect cylindrische gaten
         # ==================================
@@ -314,6 +316,11 @@ def extract_cut_features_for_sheet(
         
         # STAP 7: Totale snijlengte
         # ==========================
+        if closed_contours:
+            hole_contours = [float(item["perimeter"]) for item in closed_contours]
+            hole_types = ["hole"] * len(closed_contours)
+            hole_radii = []
+
         total_contour = sum(hole_contours) + outer_contour
         logger.info(f"[CutFeatures] Totale snijlengte: {total_contour:.2f} mm")
         
@@ -326,7 +333,7 @@ def extract_cut_features_for_sheet(
         
         # STAP 9: Return resultaat
         # =========================
-        total_holes = len(hole_types)
+        total_holes = len(closed_contours) if closed_contours else len(hole_types)
         result = CutFeatures(
             nr_holes=total_holes,
             hole_contours=hole_contours,
@@ -709,6 +716,120 @@ def _get_outer_contour_length(shape: TopoDS_Shape) -> float:
         return 0.0
 
 
+def _detect_closed_inner_contours(shape: TopoDS_Shape) -> List[Dict[str, Any]]:
+    """Detecteer unieke gesloten binnencontouren exclusief de buitencontour."""
+    try:
+        from collections import defaultdict
+        from OCP.Bnd import Bnd_Box
+        from OCP.BRepBndLib import BRepBndLib
+        from OCP.TopExp import TopExp_Explorer
+        from OCP.TopAbs import TopAbs_FACE, TopAbs_WIRE
+        from OCP.TopoDS import TopoDS
+
+        contour_candidates: List[Dict[str, Any]] = []
+        exp = TopExp_Explorer(shape, TopAbs_FACE)
+        while exp.More():
+            face = TopoDS.Face_s(exp.Current())
+            surf = BRepAdaptor_Surface(face, True)
+
+            normal = None
+            if surf.GetType() == GeomAbs_Plane:
+                axis = surf.Plane().Axis().Direction()
+                normal = (axis.X(), axis.Y(), axis.Z())
+
+            outer_wire = BRepTools.OuterWire_s(face)
+            wire_exp = TopExp_Explorer(face, TopAbs_WIRE)
+            while wire_exp.More():
+                wire = TopoDS.Wire_s(wire_exp.Current())
+                wire_exp.Next()
+
+                if wire.IsSame(outer_wire):
+                    continue
+
+                props = GProp_GProps()
+                BRepGProp.LinearProperties_s(wire, props)
+                perimeter = float(props.Mass())
+                if perimeter <= 1e-6:
+                    continue
+
+                center = props.CentreOfMass()
+                bbox = Bnd_Box()
+                BRepBndLib.Add_s(wire, bbox)
+                xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
+                dims = sorted([
+                    float(xmax - xmin),
+                    float(ymax - ymin),
+                    float(zmax - zmin),
+                ], reverse=True)
+                major = dims[0] if dims else 0.0
+                minor = dims[1] if len(dims) > 1 else 0.0
+
+                contour_candidates.append({
+                    "perimeter": perimeter,
+                    "center": (center.X(), center.Y(), center.Z()),
+                    "normal": normal,
+                    "dim": f"{major:.1f}x{minor:.1f}",
+                })
+
+            exp.Next()
+
+        if not contour_candidates:
+            return []
+
+        buckets = defaultdict(list)
+        for idx, contour in enumerate(contour_candidates):
+            buckets[(round(float(contour["perimeter"]), 2), contour["dim"])].append((idx, contour))
+
+        unique_contours: List[Dict[str, Any]] = []
+        processed_indices = set()
+        for bucket in buckets.values():
+            for i, contour_a in bucket:
+                if i in processed_indices:
+                    continue
+
+                processed_indices.add(i)
+                unique_contours.append(contour_a)
+
+                center_a = _as_point_tuple(contour_a.get("center"))
+                normal_a = _normalize_vector(_as_point_tuple(contour_a.get("normal")))
+                if center_a is None:
+                    continue
+
+                for j, contour_b in bucket:
+                    if j in processed_indices or i == j:
+                        continue
+
+                    center_b = _as_point_tuple(contour_b.get("center"))
+                    if center_b is None:
+                        continue
+
+                    dx = center_b[0] - center_a[0]
+                    dy = center_b[1] - center_a[1]
+                    dz = center_b[2] - center_a[2]
+                    dist_sq = dx * dx + dy * dy + dz * dz
+                    if dist_sq < 0.01:
+                        processed_indices.add(j)
+                        continue
+
+                    if normal_a is None:
+                        continue
+
+                    dist = math.sqrt(dist_sq)
+                    if dist <= 1e-9:
+                        processed_indices.add(j)
+                        continue
+
+                    direction = (dx / dist, dy / dist, dz / dist)
+                    if abs(_dot(direction, normal_a)) > 0.9:
+                        processed_indices.add(j)
+
+        return unique_contours
+
+    except Exception as e:
+        logger.debug(f"[CutFeatures] Closed contour detectie mislukt: {e}")
+        return []
+
+
 def _get_bounding_box(shape: TopoDS_Shape) -> Dict[str, float]:
     """
     Bereken bounding box dimensions.
@@ -869,6 +990,7 @@ def extract_cut_features_for_profile(
         # Convert naar CadQuery object
         cq_solid = cq.Solid(solid)
         cq_object = cq.Workplane("XY").newObject([cq_solid])
+        closed_contours = _detect_closed_inner_contours(solid) if solid else []
 
         # STAP 1: Detect cylindrische gaten
         # filter_bores=False: we doen een eigen post-filter op depth ratio
@@ -908,6 +1030,12 @@ def extract_cut_features_for_profile(
             (xmin, ymin, zmin),
             (xmax, ymax, zmax),
         )
+        closed_contours = _filter_profile_end_opening_shaped_holes(
+            closed_contours,
+            (xmin, ymin, zmin),
+            (xmax, ymax, zmax),
+        )
+        logger.info(f"[CutFeatures] Profiel: {len(closed_contours)} gesloten binnencontouren")
         logger.info(f"[CutFeatures] Profiel: {len(shaped_holes)} vormgaten")
 
         # STAP 3: Dedupliceer
@@ -1016,9 +1144,13 @@ def extract_cut_features_for_profile(
 
         # Profiel: geen buitencontour (ingekocht profiel)
         outer_contour = 0.0
+        if closed_contours:
+            hole_contours = [float(item["perimeter"]) for item in closed_contours]
+            hole_types = ["hole"] * len(closed_contours)
+            hole_radii = []
         total_contour = sum(hole_contours)
 
-        total_holes = len(hole_types)
+        total_holes = len(closed_contours) if closed_contours else len(hole_types)
         logger.info(f"[CutFeatures] Profiel: {total_holes} gaten, snijlengte={total_contour:.2f} mm")
 
         result = CutFeatures(

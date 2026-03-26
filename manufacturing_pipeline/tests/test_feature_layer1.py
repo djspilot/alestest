@@ -140,6 +140,69 @@ def test_layer1_shaped_hole_types_and_contours(monkeypatch: pytest.MonkeyPatch) 
     assert result.hole_contours[1] == pytest.approx(18.0, rel=1e-6)
 
 
+def test_sheet_closed_contours_override_count_and_perimeters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Closed inner contours should become the primary hole count and contour source."""
+
+    _stub_cq(monkeypatch)
+    _stub_sheet_geometry(monkeypatch)
+
+    holes = [_hole(10.0, 3.0)]
+
+    monkeypatch.setattr(cut_features, "detect_holes", lambda *_a, **_k: holes)
+    monkeypatch.setattr(cut_features, "detect_shaped_holes", lambda *_a, **_k: [])
+    monkeypatch.setattr(cut_features, "deduplicate_holes", lambda c, _s: c)
+    monkeypatch.setattr(cut_features, "_detect_countersunk_holes", lambda *_a, **_k: {})
+    monkeypatch.setattr(cut_features, "_detect_standalone_countersunk_holes", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        cut_features,
+        "_detect_closed_inner_contours",
+        lambda *_a, **_k: [
+            {"perimeter": 31.4, "center": (0.0, 0.0, 0.0), "normal": (0.0, 0.0, 1.0), "dim": "10.0x10.0"},
+            {"perimeter": 20.0, "center": (20.0, 0.0, 0.0), "normal": (0.0, 0.0, 1.0), "dim": "5.0x5.0"},
+        ],
+    )
+    monkeypatch.setattr(cut_features.iso_standards, "identify_thread_from_diameter", lambda *_a, **_k: [])
+
+    result = cut_features.extract_cut_features_for_sheet(solid=object(), unfold_result=None, part_classification="plaat")
+
+    assert result is not None
+    assert result.nr_holes == 2
+    assert result.hole_contours == [31.4, 20.0]
+    assert result.hole_types == ["hole", "hole"]
+    assert result.total_contour == pytest.approx(151.4, rel=1e-6)
+
+
+def test_profile_closed_contours_override_count_and_apply_end_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Profile flow should use closed contours and still suppress hollow end openings."""
+
+    holes = [_hole(10.0, 3.0)]
+
+    monkeypatch.setattr(cut_features, "detect_holes", lambda *_a, **_k: holes)
+    monkeypatch.setattr(cut_features, "detect_shaped_holes", lambda *_a, **_k: [])
+    monkeypatch.setattr(cut_features, "deduplicate_holes", lambda c, _s: c)
+    monkeypatch.setattr(cut_features, "_detect_countersunk_holes", lambda *_a, **_k: {})
+    monkeypatch.setattr(cut_features, "_detect_standalone_countersunk_holes", lambda *_a, **_k: [])
+    monkeypatch.setattr(cut_features, "_infer_profile_countersink_pairs", lambda *_a, **_k: (set(), set()))
+    monkeypatch.setattr(
+        cut_features,
+        "_detect_closed_inner_contours",
+        lambda *_a, **_k: [
+            {"perimeter": 96.0, "center": (49.0, 0.0, 0.0), "normal": (1.0, 0.0, 0.0), "dim": "34.0x14.0"},
+            {"perimeter": 28.0, "center": (0.0, 19.0, 0.0), "normal": (0.0, 1.0, 0.0), "dim": "8.0x6.0"},
+        ],
+    )
+    monkeypatch.setattr(cut_features.iso_standards, "identify_thread_from_diameter", lambda *_a, **_k: [])
+
+    test_solid = cq.Workplane("XY").box(100, 40, 20).val().wrapped
+    result = cut_features.extract_cut_features_for_profile(solid=test_solid, part_classification="profiel")
+
+    assert result is not None
+    assert result.nr_holes == 1
+    assert result.hole_contours == [28.0]
+    assert result.hole_types == ["hole"]
+    assert result.total_contour == pytest.approx(28.0, rel=1e-6)
+
+
 def test_profile_thread_disambiguation_prefers_tapped_for_small_ambiguous(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ambiguous small profile holes should map to thread when matching tap-drill pattern."""
 
