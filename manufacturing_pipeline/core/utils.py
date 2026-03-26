@@ -230,6 +230,7 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
     7. Generate report
     """
     from manufacturing_pipeline.analysis.step_processing import load_step_file, detect_holes, detect_shaped_holes, deduplicate_holes, precompute_face_properties
+    from manufacturing_pipeline.analysis.cut_features import _detect_closed_inner_contours
     from manufacturing_pipeline.analysis.part_analyzer import analyze_part_geometry, format_analysis_report, PartType
     from manufacturing_pipeline.core.profiler import AnalysisProfiler
 
@@ -962,7 +963,10 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
         with profiler.sub_step("Dedup"):
             circular_holes, dedup_rejections = deduplicate_holes(circular_holes, shaped_holes, return_debug=True)
 
-        total_holes = len(circular_holes) + len(shaped_holes)
+        contour_shape = _primary_solid_for_classification(analysis_shape)
+        closed_contours = _detect_closed_inner_contours(contour_shape) if contour_shape is not None else []
+
+        total_holes = len(closed_contours) if closed_contours else (len(circular_holes) + len(shaped_holes))
         profiler.count("holes", total_holes)
 
     print(f"  Cilindrische gaten: {len(circular_holes)}")
@@ -991,6 +995,33 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                 ]
                 break
 
+    if closed_contours:
+        contour_items = []
+        for idx, contour in enumerate(closed_contours):
+            contour_items.append({
+                "id": f"hole-closed-{idx}",
+                "status": "accepted",
+                "type": "closed_contour",
+                "label": f"Closed contour #{idx + 1}",
+                "reason": "Geaccepteerd via contour-first detectie (binnencontour, buitencontour uitgesloten)",
+                "criteria": [
+                    {
+                        "name": "closed_inner_contour",
+                        "value": True,
+                        "threshold": True,
+                        "passed": True,
+                        "note": "Inner wire op face, buitencontour uitgesloten",
+                    }
+                ],
+                "position": contour.get("center") or (0.0, 0.0, 0.0),
+                "axis": (1.0, 0.0, 0.0),
+                "normal": contour.get("normal") or (1.0, 0.0, 0.0),
+                "size": str(contour.get("dim") or ""),
+                "source": "flat" if is_flat else "3d",
+                "perimeter": float(contour.get("perimeter") or 0.0),
+            })
+        hole_debug_items = contour_items
+
     accepted_hole_count = sum(1 for item in hole_debug_items if item.get("status") == "accepted")
     rejected_hole_count = sum(1 for item in hole_debug_items if item.get("status") == "rejected")
 
@@ -1016,6 +1047,8 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
 
     analysis.detected_hole_visuals = {
         "source": "flat" if is_flat else "3d",
+        "counting_mode": "closed_contours" if closed_contours else "cylindrical_plus_shaped",
+        "closed_contours_total": len(closed_contours),
         "total_candidates": len(hole_debug_items),
         "accepted_total": accepted_hole_count,
         "rejected_total": rejected_hole_count,
@@ -1051,6 +1084,7 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
             "total": total_holes,
             "cylindrical": len(circular_holes),
             "shaped": len(shaped_holes),
+            "closed_contours": len(closed_contours),
             "accepted": accepted_hole_count,
             "rejected": rejected_hole_count,
             **analysis.detected_hole_visuals,
