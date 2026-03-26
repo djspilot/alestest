@@ -218,7 +218,7 @@ export default function App() {
   useEffect(() => {
     const foldIds = new Set([
       ...(pipelineVisuals?.unfold?.fold_details || []).map((fold, idx) => normalizeFoldId(fold?.id ?? (idx + 1))),
-      ...(pipelineVisuals?.unfold?.bends_3d || []).map((bend, idx) => normalizeFoldId(bend?.id ?? (idx + 1))),
+      ...(pipelineVisuals?.unfold?.bends_logical || []).map((bend, idx) => normalizeFoldId(bend?.id ?? (idx + 1))),
     ].filter((id) => id != null))
     if (selectedFoldId != null && !foldIds.has(normalizeFoldId(selectedFoldId))) {
       setSelectedFoldId(null)

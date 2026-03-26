@@ -70,10 +70,31 @@ export default function StageDetailsPanel({
   const holeVisuals = pipelineVisuals?.holes || null
   const unfoldVisuals = pipelineVisuals?.unfold || null
   const holeItems = holeVisuals?.items || []
-  const bend3dItems = unfoldVisuals?.bends_3d || []
+  const foldRows = useMemo(() => {
+    const bends = unfoldVisuals?.bends_logical || []
+    const foldDetails = unfoldVisuals?.fold_details || []
+    const rowCount = Math.max(bends.length, foldDetails.length)
+    return Array.from({ length: rowCount }, (_, i) => {
+      const bend = bends[i] || {}
+      const detail = foldDetails[i] || {}
+      const id = normalizeFoldId(detail.id || bend.id || (i + 1))
+      return {
+        id,
+        direction: bend.type || '–',
+        angle: bend.angle ?? null,
+        radius: bend.radius ?? null,
+        length: detail.length ?? null,
+        center: detail.center ?? null,
+        axis: detail.axis ?? null,
+        start: detail.start ?? null,
+        end: detail.end ?? null,
+        segmentIndices: detail.segment_indices || [],
+      }
+    })
+  }, [unfoldVisuals])
   const selectedHole = holeItems.find((hole) => hole.id === selectedHoleId) || null
   const normalizedSelectedFoldId = normalizeFoldId(selectedFoldId)
-  const selectedFold = bend3dItems.find((bend) => normalizeFoldId(bend.id) === normalizedSelectedFoldId) || null
+  const selectedFold = foldRows.find((row) => row.id === normalizedSelectedFoldId) || null
   const selectedInspection = selectedHole || selectedProbe
   const visibleHoleItems = useMemo(() => {
     if (holeFilter === 'accepted') return holeItems.filter((hole) => hole.status === 'accepted')
@@ -555,7 +576,7 @@ export default function StageDetailsPanel({
                       </tbody>
                     </table>
                     <div className="timeline-text" style={{ marginTop: 8 }}>
-                      Klik op een zetlijn in de tabel of in het 3D-model om die lijn te markeren en erop te focussen.
+                      Klik op een zetlijn in de tabel of in de viewer om die lijn te markeren.
                     </div>
                   </div>
                 )}
@@ -586,15 +607,11 @@ export default function StageDetailsPanel({
 
                 {/* ── Zetlijnen tabel ── */}
                 {unfoldVisuals?.success && (() => {
-                  const bends = unfoldVisuals.bends_logical || []
-                  const foldDetails = unfoldVisuals.fold_details || []
-                  // Merge bends_logical (angle/dir) with fold_details (length/center) by index
-                  const rows = Math.max(bends.length, foldDetails.length, bend3dItems.length)
-                  if (rows === 0) return null
+                  if (foldRows.length === 0) return null
                   return (
                     <div style={{ marginTop: 12 }}>
                       <div className="timeline-stage" style={{ marginBottom: 6 }}>
-                        Zetlijnen ({rows} gevonden)
+                        Zetlijnen ({foldRows.length} gevonden)
                       </div>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                         <thead>
@@ -607,27 +624,23 @@ export default function StageDetailsPanel({
                           </tr>
                         </thead>
                         <tbody>
-                          {Array.from({ length: rows }, (_, i) => {
-                            const bend = bends[i] || {}
-                            const detail = foldDetails[i] || {}
-                            const bend3d = bend3dItems[i] || {}
-                            const id = normalizeFoldId(detail.id || bend3d.id || (i + 1))
-                            const dir = bend.type || bend3d.direction || '–'
-                            const angle = bend.angle != null ? Math.round(bend.angle * 10) / 10 : '–'
-                            const radius = bend.radius != null ? Math.round(bend.radius * 10) / 10 : (bend3d.radius != null ? Math.round(bend3d.radius * 10) / 10 : '–')
-                            const length = detail.length != null ? Math.round(detail.length * 10) / 10 : (bend3d.length != null ? Math.round(bend3d.length * 10) / 10 : '–')
+                          {foldRows.map((row, i) => {
+                            const dir = row.direction || '–'
+                            const angle = row.angle != null ? Math.round(row.angle * 10) / 10 : '–'
+                            const radius = row.radius != null ? Math.round(row.radius * 10) / 10 : '–'
+                            const length = row.length != null ? Math.round(row.length * 10) / 10 : '–'
                             const dirColor = dir === 'up' ? '#81c784' : dir === 'down' ? '#e57373' : '#aaa'
                             return (
                               <tr
-                                key={i}
+                                key={row.id ?? i}
                                 style={{
                                   borderBottom: '1px solid #222',
                                   cursor: 'pointer',
-                                  background: normalizedSelectedFoldId === id ? 'rgba(255, 59, 48, 0.15)' : 'transparent',
+                                  background: normalizedSelectedFoldId === row.id ? 'rgba(255, 59, 48, 0.15)' : 'transparent',
                                 }}
-                                onClick={() => onFoldSelect?.(id)}
+                                onClick={() => onFoldSelect?.(row.id)}
                               >
-                                <td style={{ padding: '3px 6px 3px 0', color: '#888' }}>{id}</td>
+                                <td style={{ padding: '3px 6px 3px 0', color: '#888' }}>{row.id}</td>
                                 <td style={{ padding: '3px 6px 3px 0', fontWeight: 600, color: dirColor }}>
                                   {dir === 'up' ? '▲ Op' : dir === 'down' ? '▼ Neer' : dir}
                                 </td>
@@ -654,8 +667,11 @@ export default function StageDetailsPanel({
                         Lengte: {selectedFold.length != null ? `${Math.round(selectedFold.length * 10) / 10} mm` : '–'}
                       </div>
                       <pre className="timeline-payload-value">{formatDetailValue({
-                        position: selectedFold.position,
+                        center: selectedFold.center,
                         axis: selectedFold.axis,
+                        start: selectedFold.start,
+                        end: selectedFold.end,
+                        segment_indices: selectedFold.segmentIndices,
                       })}</pre>
                     </div>
                   </div>

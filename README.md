@@ -1,9 +1,69 @@
 # ALES Manufacturing Pipeline
 
-**Laatste update:** 25 maart 2026
-**Versie:** 3.12-dev (ALES STEP Viewer + split panels + gating)
+**Laatste update:** 26 maart 2026
+**Versie:** 3.14-dev (unfold/detect-holes viewer merge + grouped bend lines)
 
 > Zie [docs/TIMELINE.md](docs/TIMELINE.md) voor de volledige versiegeschiedenis.
+
+### v3.14-dev — Unfold/Detect holes viewer merge + grouped bend lines (26 maart 2026)
+
+**Doel van deze update:** de gecombineerde viewer-stap voor plaatwerk logisch en bruikbaar maken: unfold en hole-detectie in één stage, zetlijnen zichtbaar op de uitslag, en gesplitste zetsegmenten op dezelfde hartlijn tellen als één zetting.
+
+**Wat is gedaan:**
+
+1. **Nieuwe gecombineerde viewer-stage**
+   - `Unfold` en `Detect holes` worden in de viewer als één stage behandeld: `Unfold / Detect holes`.
+   - De viewer blijft in deze stage op de uitslagweergave wanneer flat-data beschikbaar is.
+   - Het rechterpaneel toont binnen dezelfde stage zowel hole-data als unfold-data.
+
+2. **Zetlijnen direct zichtbaar op de unfold-plaat**
+   - Zetlijnen worden standaard als overlay op de vlakke uitslag getekend, zonder eerst te hoeven klikken.
+   - Selectie vanuit de tabel highlight alleen de gekozen lijn in plaats van van view te wisselen.
+   - De flat overlay gebruikt start/eindpunten en centerdata uit de unfold-output in plaats van alleen synthetische viewer-posities.
+
+3. **Segmenten op dezelfde lijn samengevoegd**
+   - In de FreeCAD unfold-route worden collineaire zetsegmenten op dezelfde lijn nu geometrisch gegroepeerd.
+   - `fold_lines`, `fold_details` en `bends_logical` worden voor de viewer teruggegeven als gegroepeerde zetlijnen.
+   - Daardoor telt een zetlijn die door gaten of uitsparingen in meerdere stukken is geknipt nog maar als één fysieke zetting.
+
+4. **Viewer-selectie op gegroepeerde zetlijnen**
+   - De tabel in het rechterpaneel gebruikt nu de gegroepeerde unfold-lijnen in plaats van losse 3D bend-items.
+   - De geselecteerde regel toont center, axis, start/eindpunten en welke ruwe segmenten erbij horen.
+   - De viewer-validatie voor fold-selectie volgt nu dezelfde ids als de gegroepeerde unfold-data.
+
+---
+
+### v3.13-dev — Optimized utils.py + enhanced API/UI integration (26 maart 2026)
+
+**Doel van deze update:** de manufacturing-pipeline orchestration verbeteren en de viewer-API integratie sterker maken voor betere responsiviteit en hole-detection-nauwkeurigheid, met behoud van closed-contour primaire hole-detectiemethode.
+
+**Wat is gedaan:**
+
+1. **utils.py geoptimaliseerd tegen closed-contour architectuur (1da26f8)**
+   - Hersteld uit commit f9aea66ec6c2583217e0281cb6282a27e83a8fcc voor compatibiliteit en performance.
+   - Werkt naadloos met closed-inner-contour detectie uit pipeline 1da26f8.
+   - Verbeterde unfold-to-result maping en fallback-paden bij FreeCAD-onbeschikbaarheid.
+
+2. **API analysis_service.py uitgebreid**
+   - Betere stage-status-tracking voor live viewer-updates.
+   - Verbeterde job-queue-verwerking en error-handling.
+   - Meer gedetailleerde stage-output voor viewer-rechterpaneel.
+
+3. **Viewer UI-componenten geoptimaliseerd**
+   - Sidebar: snellere stage-navigatie en refresh-logica.
+   - StageDetailsPanel: bredere ondersteunging voor alle stage-output-formaten (hole-overlay, criteria-checks, etc.).
+   - ViewerCanvas: betere mesh-rendering-performance met lokale STEP-preview.
+   - App.jsx: veiliger state-management en error-boundaries.
+   - pipelineUi.js: gedetailleerdere klassificatie- en hole-criteria in real-time.
+
+4. **FreeCAD fallback-paden geverbeterd (macOS)**
+   - Error-normalisatie: macOS ABI-mismatches en missing-module-errors tonen nu schone Nederlandse berichten.
+   - Globale Homebrew-path-detectie: `glob` gebruiken in plaats van hardcoded versienummers.
+   - Graceful degradation: pipeline blijft doorlopen met 3D hole-detectie zelfs als FreeCAD niet beschikbaar is.
+
+**Git-commit:** `a36dbc1` (26 maart 2026)
+
+---
 
 ### v3.12-dev — Split panels, hole explorer en stage-gating (25 maart 2026)
 

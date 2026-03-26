@@ -887,10 +887,9 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
   const length = Math.max(Number(unfoldVisuals?.flat_length) || 0, 40)
   const width = Math.max(Number(unfoldVisuals?.flat_width) || 0, 20)
   const bends = unfoldVisuals?.bends_logical || []
-  const bend3d = unfoldVisuals?.bends_3d || []
   const foldDetails = unfoldVisuals?.fold_details || []
   const bendSegments = unfoldVisuals?.bend_line_segments || []
-  const foldCount = Math.max(unfoldVisuals?.fold_lines || 0, bends.length, foldDetails.length, bend3d.length)
+  const foldCount = Math.max(unfoldVisuals?.fold_lines || 0, bends.length, foldDetails.length)
 
   const foldRows = useMemo(() => {
     if (foldCount <= 0) return []
@@ -913,9 +912,8 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
     return Array.from({ length: foldCount }, (_, idx) => {
       const detail = foldDetails[idx] || {}
       const logical = bends[idx] || {}
-      const bend = bend3d[idx] || {}
       const segment = bendSegments[idx] || {}
-      const id = normalizeFoldId(detail.id || bend.id || (idx + 1))
+      const id = normalizeFoldId(detail.id || logical.id || (idx + 1))
       const detailCenter = Array.isArray(detail.center) && detail.center.length >= 3
         ? detail.center
         : [0, 0, 0]
@@ -953,11 +951,11 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
         localStart,
         localEnd,
         lineLength: requestedLength,
-        angle: logical.angle ?? bend.angle ?? null,
-        direction: logical.type || bend.direction || null,
+        angle: logical.angle ?? null,
+        direction: logical.type || null,
       }
     })
-  }, [bend3d, bendSegments, bends, foldCount, foldDetails, length, modelInfo, width])
+  }, [bendSegments, bends, foldCount, foldDetails, length, modelInfo, width])
 
   return (
     <group renderOrder={25}>
@@ -1181,7 +1179,9 @@ export default function ViewerCanvas({
   const holeItems = backendVisuals?.holes?.items || []
   const bend3dItems = backendVisuals?.unfold?.bends_3d || []
   const normalizedSelectedFoldId = normalizeFoldId(selectedFoldId)
-  const selectedFold = bend3dItems.find((bend) => normalizeFoldId(bend.id) === normalizedSelectedFoldId) || null
+  const selectedFold = useFlatView
+    ? null
+    : bend3dItems.find((bend) => normalizeFoldId(bend.id) === normalizedSelectedFoldId) || null
   const handleSurfacePick = useCallback((sample, event) => {
     if (!probeMode) return
     const point = sample?.point || sample
