@@ -10,6 +10,8 @@ export const STATUS_LABELS = {
   auth_required: 'API-key nodig',
 }
 
+export const MERGED_HOLES_STAGE = 'Unfold / Detect holes'
+
 export function summarizePayload(payload) {
   if (!payload || typeof payload !== 'object') return ''
 
@@ -63,14 +65,18 @@ export function formatDeviation(value) {
   return `${value > 0 ? '+' : ''}${value.toFixed(3)}`
 }
 
+export function normalizeStageName(stage) {
+  if (stage === 'Profile Router') return 'Classify geometry'
+  if (stage === 'Detect holes' || stage === 'Unfold') return MERGED_HOLES_STAGE
+  return stage || 'Onbekende stap'
+}
+
 export function groupEventsByStage(events) {
   const order = []
   const map = new Map()
 
   ;(events || []).forEach((event, index) => {
-    const stageKey = event.stage === 'Profile Router'
-      ? 'Classify geometry'
-      : (event.stage || 'Onbekende stap')
+    const stageKey = normalizeStageName(event.stage)
     if (!map.has(stageKey)) {
       const group = { stage: stageKey, events: [], firstIndex: index }
       map.set(stageKey, group)
@@ -107,7 +113,7 @@ export function getStageMeta(group, summary, liveActiveElapsed, pipelineStatus =
     }
   }
 
-  if (summary?.active_stage === group?.stage) {
+  if (normalizeStageName(summary?.active_stage) === group?.stage) {
     return {
       stateLabel: 'Bezig',
       elapsed: liveActiveElapsed,

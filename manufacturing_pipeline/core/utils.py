@@ -230,7 +230,6 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
     7. Generate report
     """
     from manufacturing_pipeline.analysis.step_processing import load_step_file, detect_holes, detect_shaped_holes, deduplicate_holes, precompute_face_properties
-    from manufacturing_pipeline.analysis.cut_features import _detect_closed_inner_contours
     from manufacturing_pipeline.analysis.part_analyzer import analyze_part_geometry, format_analysis_report, PartType
     from manufacturing_pipeline.core.profiler import AnalysisProfiler
 
@@ -908,9 +907,6 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                 "fold_lines": unfold_result.get("fold_lines") if unfold_result else 0,
                 "fold_details": unfold_result.get("fold_details", []) if unfold_result else [],
                 "bends_logical": unfold_result.get("bends_logical", []) if unfold_result else [],
-                "attempts": unfold_result.get("attempts") if unfold_result else 0,
-                "used_face_idx": unfold_result.get("used_face_idx") if unfold_result else None,
-                "error_details": unfold_result.get("error_details", []) if unfold_result else [],
                 "error": unfold_result.get("error") if unfold_result else None,
             },
             status="OK" if unfold_result and unfold_result.get("success") else "FAIL",
@@ -966,10 +962,7 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
         with profiler.sub_step("Dedup"):
             circular_holes, dedup_rejections = deduplicate_holes(circular_holes, shaped_holes, return_debug=True)
 
-        contour_shape = _primary_solid_for_classification(analysis_shape)
-        closed_contours = _detect_closed_inner_contours(contour_shape) if contour_shape is not None else []
-
-        total_holes = len(closed_contours) if closed_contours else (len(circular_holes) + len(shaped_holes))
+        total_holes = len(circular_holes) + len(shaped_holes)
         profiler.count("holes", total_holes)
 
     print(f"  Cilindrische gaten: {len(circular_holes)}")
@@ -998,65 +991,14 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                 ]
                 break
 
-    if closed_contours:
-        contour_items = []
-        for idx, contour in enumerate(closed_contours):
-            contour_items.append({
-                "id": f"hole-closed-{idx}",
-                "status": "accepted",
-                "type": "closed_contour",
-                "label": f"Closed contour #{idx + 1}",
-                "reason": "Geaccepteerd via contour-first detectie (binnencontour, buitencontour uitgesloten)",
-                "criteria": [
-                    {
-                        "name": "closed_inner_contour",
-                        "value": True,
-                        "threshold": True,
-                        "passed": True,
-                        "note": "Inner wire op face, buitencontour uitgesloten",
-                    }
-                ],
-                "position": contour.get("center") or (0.0, 0.0, 0.0),
-                "axis": (1.0, 0.0, 0.0),
-                "normal": contour.get("normal") or (1.0, 0.0, 0.0),
-                "size": str(contour.get("dim") or ""),
-                "source": "flat" if is_flat else "3d",
-                "perimeter": float(contour.get("perimeter") or 0.0),
-            })
-        hole_debug_items = contour_items
-
     accepted_hole_count = sum(1 for item in hole_debug_items if item.get("status") == "accepted")
     rejected_hole_count = sum(1 for item in hole_debug_items if item.get("status") == "rejected")
 
-    hole_thresholds = {
-        "source": "flat" if is_flat else "3d",
-        "cylindrical": {
-            "min_total_angle_deg": 160 if is_flat else 270,
-            "min_total_angle_large_flat_deg": 300 if is_flat else None,
-            "large_flat_diameter_mm": 100 if is_flat else None,
-            "flat_artifact_depth_gate": "depth <= max(20.0, 3.0 * thickness_ref)" if is_flat else None,
-            "orientation_required": "TopAbs_REVERSED" if not is_flat else "relaxed",
-        },
-        "dedup": {
-            "axis_alignment_dot_min": 0.7,
-            "small_independent_circle_guard": "circ_diam < 0.25 * min_dim",
-            "duplicate_distance": "dist < 0.8 * max_dim",
-        },
-        "shaped": {
-            "center_dedup_dist_sq_max": 0.01,
-            "normal_alignment_dot_min": 0.9,
-        },
-    }
-
     analysis.detected_hole_visuals = {
         "source": "flat" if is_flat else "3d",
-        "counting_mode": "closed_contours" if closed_contours else "cylindrical_plus_shaped",
-        "closed_contours_total": len(closed_contours),
         "total_candidates": len(hole_debug_items),
         "accepted_total": accepted_hole_count,
         "rejected_total": rejected_hole_count,
-        "thresholds": hole_thresholds,
-        "criteria_note": "Per kandidaat staan criteria inclusief threshold en pass/fail in de lijst hieronder.",
         "items": [
             {
                 "id": str(item.get("id") or ""),
@@ -1087,7 +1029,6 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
             "total": total_holes,
             "cylindrical": len(circular_holes),
             "shaped": len(shaped_holes),
-            "closed_contours": len(closed_contours),
             "accepted": accepted_hole_count,
             "rejected": rejected_hole_count,
             **analysis.detected_hole_visuals,
@@ -1158,104 +1099,282 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
 
 
 def run_unfold_to_step(step_file, output_dir, part_name, analysis):
-    """Unfold een sheet metal STEP bestand via freecad_unfold.unfold_sheet_metal.
+    """Run FreeCAD unfold and export both DXF and STEP of flat pattern.
 
-    Returns dict met:
+    Returns dict with:
     - success: bool
-    - flat_step_path: pad naar flat STEP (indien geexporteerd)
-    - flat_length, flat_width: maten in mm
-    - fold_lines: aantal bends
-    - thickness: plaatdikte (0 als onbekend)
-    - fold_details: lijst van fold line info
-    - bends_logical: lijst van {type, angle, radius} per bend
-    - error: foutmelding indien mislukt
+    - flat_step_path: path to flat STEP file
+    - flat_length, flat_width: dimensions
+    - fold_lines: number of bends
     """
-    from manufacturing_pipeline.analysis.freecad_unfold import unfold_sheet_metal
+    # Get system config for paths
+    sys_config = SystemConfig.from_env()
+    fc_lib = sys_config.freecad_lib
+    fc_mod = sys_config.freecad_mod
 
-    dxf_path = os.path.join(output_dir, f"{part_name}_flat.dxf")
-    r = unfold_sheet_metal(step_path=step_file, output_dxf=dxf_path)
+    # Build unfold script that exports STEP
+    unfold_script = f'''
+import sys
+import os
+import platform
+import json
 
-    if not r.get('success'):
-        return {
-            'success': False,
-            'error': r.get('error', 'Unfold gefaald'),
-            'attempts': r.get('attempts', 0),
-            'used_face_idx': r.get('used_face_idx'),
-            'error_details': r.get('error_details', []),
-        }
+# FreeCAD paths
+freecad_lib = "{fc_lib}"
+freecad_mod = "{fc_mod}"
 
-    # Map fields naar het formaat dat run_analysis verwacht
-    bend_angles = r.get('bend_angles', [])
-    bend_radii = r.get('bend_radii', [])
-    bends_logical = [
-        {
-            'type': 'down' if a < 0 else 'up',
-            'angle': abs(a),
-            'radius': bend_radii[i] if i < len(bend_radii) else 0,
-        }
-        for i, a in enumerate(bend_angles)
-    ]
+if platform.system() == "Darwin":
+    freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
+else:
+    freecad_user_mod = os.path.expanduser("~/.local/share/FreeCAD/Mod")
 
-    fold_details = []
-    # Prefer merged geometric groups from pipeline if available.
-    for g in r.get('bend_line_groups', []) or []:
-        fold_details.append({
-            'id': g.get('id'),
-            'length': None,
-            'center': None,
-            'pos_along_length': g.get('pos_along_length'),
-            'segment_count': g.get('segment_count'),
-        })
+sys.path.insert(0, freecad_lib)
+sys.path.insert(0, freecad_mod)
+sys.path.insert(0, freecad_user_mod)
+sys.path.insert(0, os.path.join(freecad_user_mod, "sheetmetal"))
 
-    # Fallback: build from raw bend line edges (direct FreeCAD route).
-    if not fold_details:
-        flat_length_val = r.get('flat_length', 0)
-        flat_shape = r.get('flat_shape')
-        flat_bbox_long_min = None
-        use_x_for_long = True
-        if flat_shape is not None:
+# Mock GUI with proper Selection that returns an object with Refine attribute
+class MockObject:
+    Refine = True
+
+class MockSelection:
+    _selection = [MockObject()]
+
+    @staticmethod
+    def getSelection():
+        return MockSelection._selection
+
+    @staticmethod
+    def addSelection(*args):
+        pass
+
+class MockGui:
+    Selection = MockSelection()
+
+sys.modules["FreeCADGui"] = MockGui()
+
+import FreeCAD
+import Part
+import SheetMetalUnfolder
+
+# Load STEP
+step_path = "{step_file}"
+shape = Part.Shape()
+shape.read(step_path)
+
+# K-factor lookup
+kFactorLookup = {{t: 0.44 for t in [0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 15.0, 20.0]}}
+
+def get_thickness_from_solid(solid):
+    try:
+        # Strategy: Find largest planar face, then find opposite face
+        faces = [f for f in solid.Faces if "Plane" in f.Surface.TypeId]
+        if not faces:
+            return 0.0
+            
+        # Sort by area
+        faces.sort(key=lambda f: f.Area, reverse=True)
+        main_face = faces[0]
+        main_normal = main_face.Surface.Axis
+        
+        # Find opposite face (parallel, normal dot product approx -1)
+        # We check the top 5 largest faces to find the matching back face
+        for f in faces[1:10]:
+            # Check if normals are opposite
+            if f.Surface.Axis.dot(main_normal) < -0.9:
+                # Measure distance
+                dist = main_face.distToShape(f)[0]
+                if dist > 0:
+                    return dist
+        return 0.0
+    except:
+        return 0.0
+
+result = {{"success": False}}
+best_score = -1
+
+# Get solids
+solids = shape.Solids if shape.Solids else [shape]
+sorted_solids = sorted(solids, key=lambda s: s.Volume, reverse=True)
+
+for solid in sorted_solids[:3]:  # Try top 3 by volume
+    # Calculate thickness first
+    detected_thickness = get_thickness_from_solid(solid)
+
+    # Find planar faces for base
+    planar_faces = []
+    for i, face in enumerate(solid.Faces):
+        try:
+            if "Plane" in face.Surface.TypeId:
+                planar_faces.append({{"index": i, "area": face.Area}})
+        except:
+            pass
+    planar_faces.sort(key=lambda x: x["area"], reverse=True)
+
+    # Try top 10 largest faces to find the best base for unfolding
+    for base_info in planar_faces[:10]:
+        base_idx = base_info["index"]
+        try:
+            doc = FreeCAD.newDocument("UnfoldDoc")
+            obj = doc.addObject("Part::Feature", "SheetPart")
+            obj.Shape = solid
+            doc.recompute()
+
+            unfold_tree = SheetMetalUnfolder.SheetTree(solid, base_idx, kFactorLookup)
+            if unfold_tree.error_code:
+                FreeCAD.closeDocument("UnfoldDoc")
+                continue
+
+            unfold_tree.Bend_analysis(base_idx, None)
+            if unfold_tree.error_code:
+                FreeCAD.closeDocument("UnfoldDoc")
+                continue
+
+            if hasattr(unfold_tree, "root") and unfold_tree.root:
+                theFaceList, foldLines = unfold_tree.unfold_tree2(unfold_tree.root)
+
+                if not unfold_tree.error_code and theFaceList:
+                    # Create flat shape - use FULL faces to preserve inner wires (holes)
+                    flat_faces = [f for f in theFaceList if f.isValid()]
+                    if flat_faces:
+                        flat_compound = Part.Compound(flat_faces)
+
+                        # Calculate score: number of fold lines (primary) + area (secondary)
+                        num_folds = len(foldLines)
+                        area = flat_compound.Area
+                        # Weight folds heavily to prefer complete unfolds
+                        score = (num_folds * 1000000) + area
+                        
+                        if score > best_score:
+                            best_score = score
+                            
+                            # Get dimensions
+                            bbox = flat_compound.BoundBox
+                            dims = sorted([bbox.XLength, bbox.YLength, bbox.ZLength], reverse=True)
+
+                            # Export STEP
+                            flat_step_path = "{output_dir}/{part_name}_flat.step"
+                            flat_compound.exportStep(flat_step_path)
+
+                            # Export DXF
+                            dxf_path = "{output_dir}/{part_name}_flat.dxf"
+                            import importDXF
+                            importDXF.export([flat_compound], dxf_path)
+
+                            # Extract fold details from geometry
+                            fold_details = []
+                            bend_line_segments = []
+                            for i, line in enumerate(foldLines):
+                                try:
+                                    bb = line.BoundBox
+                                    center = bb.Center
+                                    length = line.Length
+                                    start_pt = None
+                                    end_pt = None
+                                    try:
+                                        vertices = getattr(line, "Vertexes", None) or []
+                                        if len(vertices) >= 2:
+                                            start_pt = vertices[0].Point
+                                            end_pt = vertices[-1].Point
+                                    except:
+                                        start_pt = None
+                                        end_pt = None
+                                    x_len = bb.XLength
+                                    y_len = bb.YLength
+                                    seg_axis = "x" if x_len >= y_len else "y"
+                                    if start_pt is not None and end_pt is not None:
+                                        dx = abs(float(end_pt.x) - float(start_pt.x))
+                                        dy = abs(float(end_pt.y) - float(start_pt.y))
+                                        if dy > dx:
+                                            seg_axis = "y"
+                                        else:
+                                            seg_axis = "x"
+                                    axis_span = (
+                                        (bb.XMin, bb.XMax)
+                                        if seg_axis == "x"
+                                        else (bb.YMin, bb.YMax)
+                                    )
+                                    fold_details.append({{
+                                        "id": i+1,
+                                        "length": length,
+                                        "center": (center.x, center.y, center.z),
+                                        "axis": seg_axis,
+                                        "axis_span": axis_span,
+                                        "start": (start_pt.x, start_pt.y, start_pt.z) if start_pt is not None else None,
+                                        "end": (end_pt.x, end_pt.y, end_pt.z) if end_pt is not None else None
+                                    }})
+                                    bend_line_segments.append({{
+                                        "index": i,
+                                        "axis": seg_axis.upper(),
+                                        "center": (center.x, center.y, center.z),
+                                        "length": length,
+                                        "axis_span": axis_span,
+                                        "start": (start_pt.x, start_pt.y, start_pt.z) if start_pt is not None else None,
+                                        "end": (end_pt.x, end_pt.y, end_pt.z) if end_pt is not None else None
+                                    }})
+                                except:
+                                    pass
+
+                            # Extract logical bend info from tree (Up/Down)
+                            bends_logical = []
+                            def traverse_bends(node):
+                                if hasattr(node, "node_type") and node.node_type == "Bend":
+                                    import math
+                                    angle_deg = math.degrees(node.bend_angle) if node.bend_angle else 0
+                                    bends_logical.append({{
+                                        "type": node.bend_dir, # 'up' or 'down'
+                                        "angle": angle_deg,
+                                        "radius": node.innerRadius
+                                    }})
+                                
+                                if hasattr(node, "child_list"):
+                                    for child in node.child_list:
+                                        traverse_bends(child)
+                            
+                            traverse_bends(unfold_tree.root)
+
+                            result = {{
+                                "success": True,
+                                "flat_step_path": flat_step_path,
+                                "flat_length": dims[0],
+                                "flat_width": dims[1],
+                                "fold_lines": num_folds,
+                                "thickness": detected_thickness,
+                                "fold_details": fold_details,
+                                "bend_line_segments": bend_line_segments,
+                                "bends_logical": bends_logical
+                            }}
+                            
+            FreeCAD.closeDocument("UnfoldDoc")
+        except Exception as e:
             try:
-                fbbox = flat_shape.BoundBox
-                use_x_for_long = fbbox.XLength >= fbbox.YLength
-                flat_bbox_long_min = float(fbbox.XMin if use_x_for_long else fbbox.YMin)
-            except Exception:
+                FreeCAD.closeDocument("UnfoldDoc")
+            except:
                 pass
+            continue
 
-        for i, line in enumerate(r.get('bend_lines', [])):
-            try:
-                center = line.BoundBox.Center
-                cx = round(center.x, 2)
-                cy = round(center.y, 2)
-                cz = round(center.z, 2)
-                # Position along the long axis relative to the plate center
-                if flat_bbox_long_min is not None:
-                    raw_long = center.x if use_x_for_long else center.y
-                    pos_along_length = round(float(raw_long) - flat_bbox_long_min - flat_length_val / 2.0, 2)
-                else:
-                    pos_along_length = None
-                fold_details.append({
-                    'id': i + 1,
-                    'length': round(line.Length, 2),
-                    'center': (cx, cy, cz),
-                    'pos_along_length': pos_along_length,
-                })
-            except Exception:
-                pass
+print("UNFOLD_RESULT:" + json.dumps(result))
+'''
 
-    return {
-        'success': True,
-        'flat_step_path': None,      # geen STEP export nodig (DXF volstaat)
-        'flat_length': r.get('flat_length', 0),
-        'flat_width': r.get('flat_width', 0),
-        'fold_lines': r.get('bend_count', 0),
-        'thickness': 0,              # dikte uit analyse zelf is betrouwbaarder
-        'fold_details': fold_details,
-        'bends_logical': bends_logical,
-        'attempts': r.get('attempts', 0),
-        'used_face_idx': r.get('used_face_idx'),
-        'error_details': r.get('error_details', []),
-        'error': None,
-    }
+    try:
+        proc = subprocess.run(
+            [FREECAD_PYTHON, "-c", unfold_script],
+            capture_output=True,
+            text=True,
+            timeout=180
+        )
+
+        # Parse result
+        for line in proc.stdout.split('\n'):
+            if line.startswith('UNFOLD_RESULT:'):
+                return json.loads(line[len('UNFOLD_RESULT:'):])
+
+        return {"success": False, "error": "No result returned"}
+
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Timeout (>180s)"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 def run_unfold(step_file, output_dir, part_name, analysis):

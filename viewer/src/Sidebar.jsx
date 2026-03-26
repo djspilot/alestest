@@ -1,5 +1,5 @@
 import React from 'react'
-import { STATUS_LABELS, formatDuration, getStageMeta } from './pipelineUi'
+import { normalizeStageName, STATUS_LABELS, formatDuration, getStageMeta } from './pipelineUi'
 
 export default function Sidebar({
   modelInfo,
@@ -125,7 +125,7 @@ export default function Sidebar({
             <div>{formatDuration(liveTotalElapsed)}</div>
             <div>
               {summary.active_stage
-                ? `${summary.active_stage} actief · ${formatDuration(liveActiveElapsed)}`
+                ? `${normalizeStageName(summary.active_stage)} actief · ${formatDuration(liveActiveElapsed)}`
                 : 'Geen actieve stap'}
             </div>
           </div>

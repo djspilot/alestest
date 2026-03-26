@@ -13,6 +13,47 @@ from manufacturing_pipeline.core.utils import (
 )
 
 
+def _serialize_3d_bends(step_file: str, thickness: float | None = None) -> list[dict]:
+    """Best-effort 3D bend extraction for viewer overlays."""
+    try:
+        from manufacturing_pipeline.analysis.step_processing import load_step_file
+        from manufacturing_pipeline.analysis import sheetmetal_analysis
+
+        cq_shape = load_step_file(step_file)
+        if hasattr(cq_shape, "val"):
+            solid = cq_shape.val().wrapped
+        elif hasattr(cq_shape, "wrapped"):
+            solid = cq_shape.wrapped
+        else:
+            solid = cq_shape
+
+        sm_result = sheetmetal_analysis.analyze_sheet_metal_geometry(
+            solid,
+            thickness=thickness if isinstance(thickness, (int, float)) and thickness > 0 else None,
+        )
+
+        serialized = []
+        for index, bend in enumerate(sm_result.get("bends") or [], start=1):
+            raw_direction = getattr(bend, "direction", 0)
+            direction = "up" if raw_direction > 0 else "down" if raw_direction < 0 else None
+            position = getattr(bend, "position", None) or (0.0, 0.0, 0.0)
+            axis = getattr(bend, "bend_axis", None) or (1.0, 0.0, 0.0)
+            serialized.append(
+                {
+                    "id": int(getattr(bend, "bend_id", index) or index),
+                    "angle": float(getattr(bend, "angle", 0.0) or 0.0),
+                    "radius": float(getattr(bend, "inner_radius", 0.0) or 0.0),
+                    "length": float(getattr(bend, "bend_length", 0.0) or 0.0),
+                    "direction": direction,
+                    "position": [float(position[0]), float(position[1]), float(position[2])],
+                    "axis": [float(axis[0]), float(axis[1]), float(axis[2])],
+                }
+            )
+        return serialized
+    except Exception:
+        return []
+
+
 def _load_timing_json(output_dir: str, step_file: str) -> dict | None:
     """Load profiler timing JSON from output dir when available."""
     stem = os.path.splitext(os.path.basename(step_file))[0]
@@ -325,6 +366,9 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
                 "fold_lines": unfold_result.get("fold_lines") if unfold_result else 0,
                 "fold_details": unfold_result.get("fold_details", []) if unfold_result else [],
                 "bends_logical": unfold_result.get("bends_logical", []) if unfold_result else [],
+                "bend_line_segments": unfold_result.get("bend_line_segments", []) if unfold_result else [],
+                "bend_line_groups": unfold_result.get("bend_line_groups", []) if unfold_result else [],
+                "bends_3d": _serialize_3d_bends(step_file, result.get("thickness")),
             },
         }
 

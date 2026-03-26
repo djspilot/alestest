@@ -5,6 +5,7 @@ import {
   formatDuration,
   formatLabel,
   getStageMeta,
+  MERGED_HOLES_STAGE,
   summarizePayload,
 } from './pipelineUi'
 
@@ -31,6 +32,12 @@ function getClassificationStatusClass(status) {
   if (status === 'FAIL') return 'is-rejected'
   if (status === 'FALLTHROUGH') return 'is-warning'
   return 'is-neutral'
+}
+
+function normalizeFoldId(value) {
+  if (value === null || value === undefined || value === '') return null
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : String(value)
 }
 
 export default function StageDetailsPanel({
@@ -63,7 +70,10 @@ export default function StageDetailsPanel({
   const holeVisuals = pipelineVisuals?.holes || null
   const unfoldVisuals = pipelineVisuals?.unfold || null
   const holeItems = holeVisuals?.items || []
+  const bend3dItems = unfoldVisuals?.bends_3d || []
   const selectedHole = holeItems.find((hole) => hole.id === selectedHoleId) || null
+  const normalizedSelectedFoldId = normalizeFoldId(selectedFoldId)
+  const selectedFold = bend3dItems.find((bend) => normalizeFoldId(bend.id) === normalizedSelectedFoldId) || null
   const selectedInspection = selectedHole || selectedProbe
   const visibleHoleItems = useMemo(() => {
     if (holeFilter === 'accepted') return holeItems.filter((hole) => hole.status === 'accepted')
@@ -151,7 +161,7 @@ export default function StageDetailsPanel({
 
         {selectedEvent && (
           <div className="timeline-payload">
-            {selectedStage.stage === 'Detect holes' && holeVisuals && (
+            {selectedStage.stage === MERGED_HOLES_STAGE && holeVisuals && (
               <div className="visual-stage-card" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none' }}>
                 <div className="timeline-title">Hole Overlay</div>
                 <div className="timeline-text">
@@ -506,9 +516,9 @@ export default function StageDetailsPanel({
               </div>
             )}
 
-            {selectedStage.stage === 'Unfold' && (
+            {selectedStage.stage === MERGED_HOLES_STAGE && (
               <div className="visual-stage-card">
-                <div className="timeline-title">Unfold</div>
+                <div className="timeline-title">Unfold data</div>
 
                 {/* ── Status ── */}
                 {unfoldVisuals ? (
@@ -544,6 +554,9 @@ export default function StageDetailsPanel({
                         </tr>
                       </tbody>
                     </table>
+                    <div className="timeline-text" style={{ marginTop: 8 }}>
+                      Klik op een zetlijn in de tabel of in het 3D-model om die lijn te markeren en erop te focussen.
+                    </div>
                   </div>
                 )}
 
@@ -576,7 +589,7 @@ export default function StageDetailsPanel({
                   const bends = unfoldVisuals.bends_logical || []
                   const foldDetails = unfoldVisuals.fold_details || []
                   // Merge bends_logical (angle/dir) with fold_details (length/center) by index
-                  const rows = Math.max(bends.length, foldDetails.length)
+                  const rows = Math.max(bends.length, foldDetails.length, bend3dItems.length)
                   if (rows === 0) return null
                   return (
                     <div style={{ marginTop: 12 }}>
@@ -597,10 +610,12 @@ export default function StageDetailsPanel({
                           {Array.from({ length: rows }, (_, i) => {
                             const bend = bends[i] || {}
                             const detail = foldDetails[i] || {}
-                            const dir = bend.type || '–'
+                            const bend3d = bend3dItems[i] || {}
+                            const id = normalizeFoldId(detail.id || bend3d.id || (i + 1))
+                            const dir = bend.type || bend3d.direction || '–'
                             const angle = bend.angle != null ? Math.round(bend.angle * 10) / 10 : '–'
-                            const radius = bend.radius != null ? Math.round(bend.radius * 10) / 10 : '–'
-                            const length = detail.length != null ? Math.round(detail.length * 10) / 10 : '–'
+                            const radius = bend.radius != null ? Math.round(bend.radius * 10) / 10 : (bend3d.radius != null ? Math.round(bend3d.radius * 10) / 10 : '–')
+                            const length = detail.length != null ? Math.round(detail.length * 10) / 10 : (bend3d.length != null ? Math.round(bend3d.length * 10) / 10 : '–')
                             const dirColor = dir === 'up' ? '#81c784' : dir === 'down' ? '#e57373' : '#aaa'
                             return (
                               <tr
@@ -608,11 +623,11 @@ export default function StageDetailsPanel({
                                 style={{
                                   borderBottom: '1px solid #222',
                                   cursor: 'pointer',
-                                  background: selectedFoldId === (detail.id || (i + 1)) ? 'rgba(255, 59, 48, 0.15)' : 'transparent',
+                                  background: normalizedSelectedFoldId === id ? 'rgba(255, 59, 48, 0.15)' : 'transparent',
                                 }}
-                                onClick={() => onFoldSelect?.(detail.id || (i + 1))}
+                                onClick={() => onFoldSelect?.(id)}
                               >
-                                <td style={{ padding: '3px 6px 3px 0', color: '#888' }}>{i + 1}</td>
+                                <td style={{ padding: '3px 6px 3px 0', color: '#888' }}>{id}</td>
                                 <td style={{ padding: '3px 6px 3px 0', fontWeight: 600, color: dirColor }}>
                                   {dir === 'up' ? '▲ Op' : dir === 'down' ? '▼ Neer' : dir}
                                 </td>
@@ -627,6 +642,24 @@ export default function StageDetailsPanel({
                     </div>
                   )
                 })()}
+
+                {selectedFold && (
+                  <div className="reasoning-list" style={{ marginTop: 12 }}>
+                    <div className="reasoning-card">
+                      <div className="timeline-stage">Geselecteerde zetlijn #{selectedFold.id}</div>
+                      <div className="timeline-text">
+                        Richting: {selectedFold.direction || 'onbekend'} | Hoek: {selectedFold.angle != null ? `${Math.round(selectedFold.angle * 10) / 10}°` : '–'} | Radius: {selectedFold.radius != null ? `${Math.round(selectedFold.radius * 10) / 10} mm` : '–'}
+                      </div>
+                      <div className="timeline-text">
+                        Lengte: {selectedFold.length != null ? `${Math.round(selectedFold.length * 10) / 10} mm` : '–'}
+                      </div>
+                      <pre className="timeline-payload-value">{formatDetailValue({
+                        position: selectedFold.position,
+                        axis: selectedFold.axis,
+                      })}</pre>
+                    </div>
+                  </div>
+                )}
 
                 {/* ── Error handling codes ── */}
                 <div style={{ marginTop: 12 }}>

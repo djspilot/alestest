@@ -3,7 +3,7 @@ import Dropzone from './Dropzone'
 import Sidebar from './Sidebar'
 import StageDetailsPanel from './StageDetailsPanel'
 import { checkPipelineConnection, getDefaultPipelineApiBase, runPipelineAnalysis } from './pipelineClient'
-import { groupEventsByStage, parseIsoToMs } from './pipelineUi'
+import { groupEventsByStage, MERGED_HOLES_STAGE, normalizeStageName, parseIsoToMs } from './pipelineUi'
 
 const ViewerCanvas = lazy(() => import('./ViewerCanvas'))
 
@@ -35,6 +35,12 @@ function readFileAsArrayBuffer(file) {
     reader.onerror = () => reject(new Error('Bestand lezen mislukt.'))
     reader.readAsArrayBuffer(file)
   })
+}
+
+function normalizeFoldId(value) {
+  if (value === null || value === undefined || value === '') return null
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : String(value)
 }
 
 export default function App() {
@@ -132,15 +138,10 @@ export default function App() {
   const selectedHole = (pipelineVisuals?.holes?.items || []).find((item) => item.id === selectedHoleId) || null
   const selectedFeature = selectedHole || selectedProbe
   const selectedHoleSource = selectedFeature?.source || null
-  // Always use synthetic unfold sketch in Unfold stage so bend lines/angles are visible,
-  // independent of flat mesh orientation or missing fold center metadata.
-  const showUnfoldSketch = focusedStage === 'Unfold' && unfoldSuccess
   const useFlatView =
-    (
-      focusedStage === 'Unfold' ||
-      (focusedStage === 'Detect holes' && (selectedHoleSource === 'flat' || (!selectedHoleSource && holeSource === 'flat')))
-    )
-    && (Boolean(flatMesh) || showUnfoldSketch)
+    focusedStage === MERGED_HOLES_STAGE
+    && (unfoldSuccess || selectedHoleSource === 'flat' || (!selectedHoleSource && holeSource === 'flat'))
+    && Boolean(flatMesh)
   const activeMesh = useFlatView ? flatMesh : backendMesh
   const shouldWaitForBackendMesh =
     pipelineEnabled &&
@@ -215,8 +216,11 @@ export default function App() {
   }, [pipelineVisuals, selectedHoleId])
 
   useEffect(() => {
-    const foldIds = new Set((pipelineVisuals?.unfold?.fold_details || []).map((fold, idx) => fold?.id ?? (idx + 1)))
-    if (selectedFoldId != null && !foldIds.has(selectedFoldId)) {
+    const foldIds = new Set([
+      ...(pipelineVisuals?.unfold?.fold_details || []).map((fold, idx) => normalizeFoldId(fold?.id ?? (idx + 1))),
+      ...(pipelineVisuals?.unfold?.bends_3d || []).map((bend, idx) => normalizeFoldId(bend?.id ?? (idx + 1))),
+    ].filter((id) => id != null))
+    if (selectedFoldId != null && !foldIds.has(normalizeFoldId(selectedFoldId))) {
       setSelectedFoldId(null)
     }
   }, [pipelineVisuals, selectedFoldId])
@@ -224,7 +228,7 @@ export default function App() {
   useEffect(() => {
     if (pipelineState.status === 'processing') {
       if (pipelineState.summary?.active_stage) {
-        setEngineStatus(`Pipeline: ${pipelineState.summary.active_stage}`)
+        setEngineStatus(`Pipeline: ${normalizeStageName(pipelineState.summary.active_stage)}`)
       } else {
         setEngineStatus('Pipeline analyseren...')
       }
@@ -424,24 +428,36 @@ export default function App() {
   }, [])
 
   const selectDetectHolesStage = useCallback(() => {
-    const detectStageIndex = groupedStages.findIndex((group) => group.stage === 'Detect holes')
+    const detectStageIndex = groupedStages.findIndex((group) => group.stage === MERGED_HOLES_STAGE)
     if (detectStageIndex >= 0) {
       handleSelectStageIndex(detectStageIndex)
     }
-    setFocusedStage('Detect holes')
+    setFocusedStage(MERGED_HOLES_STAGE)
     setRightPanelOpen(true)
   }, [groupedStages, handleSelectStageIndex])
 
   const selectHole = useCallback((holeId) => {
     selectDetectHolesStage()
+    setSelectedFoldId(null)
     setSelectedHoleId(holeId)
     setSelectedProbe(null)
+  }, [selectDetectHolesStage])
+
+  const selectFold = useCallback((foldId) => {
+    const normalizedFoldId = normalizeFoldId(foldId)
+    if (normalizedFoldId == null) return
+    selectDetectHolesStage()
+    setSelectedFoldId(normalizedFoldId)
+    setSelectedHoleId(null)
+    setSelectedProbe(null)
+    setProbeMode(false)
   }, [selectDetectHolesStage])
 
   const handleSurfaceProbe = useCallback((sample) => {
     if (!sample?.point) return
     const inferredContour = sample.inferredContour || null
     selectDetectHolesStage()
+    setSelectedFoldId(null)
     setSelectedHoleId(null)
     setSelectedProbe({
       id: `probe-${Date.now()}`,
@@ -504,7 +520,7 @@ export default function App() {
     })
   }, [modelInfo?.center, selectDetectHolesStage, useFlatView])
 
-  const canUseProbeMode = focusedStage === 'Detect holes'
+  const canUseProbeMode = focusedStage === MERGED_HOLES_STAGE
 
   return (
     <div className="app">
@@ -584,7 +600,7 @@ export default function App() {
                     setProbeMode((value) => !value)
                   }}
                   disabled={!canUseProbeMode}
-                  title={canUseProbeMode ? 'Klik in het model om niet-herkende gaten te inspecteren' : 'Selecteer eerst Detect holes'}
+                  title={canUseProbeMode ? 'Klik in het model om niet-herkende gaten te inspecteren' : `Selecteer eerst ${MERGED_HOLES_STAGE}`}
                 >
                   {probeMode ? 'Probe mode aan' : 'Probe mode'}
                 </button>
@@ -611,14 +627,13 @@ export default function App() {
                 focusedStage={focusedStage}
                 selectedHole={selectedFeature}
                 selectedFoldId={selectedFoldId}
-                onFoldSelect={setSelectedFoldId}
+                onFoldSelect={selectFold}
                 onHoleSelect={selectHole}
                 onSurfaceProbe={handleSurfaceProbe}
                 selectedProbe={selectedProbe}
                 probeMode={probeMode}
                 controlsRef={controlsRef}
                 useFlatView={useFlatView}
-                showUnfoldSketch={showUnfoldSketch}
               />
             </Suspense>
           )}
@@ -636,7 +651,7 @@ export default function App() {
             onSelectEventIndex={setSelectedEventIndex}
             selectedHoleId={selectedHoleId}
             selectedFoldId={selectedFoldId}
-            onFoldSelect={setSelectedFoldId}
+            onFoldSelect={selectFold}
             onHoleSelect={selectHole}
             selectedProbe={selectedProbe}
             pipelineStatus={pipelineState.status}

@@ -1,8 +1,30 @@
 import React, { useCallback, useEffect, useMemo } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
-import { OrbitControls, Text } from '@react-three/drei'
+import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import StepModel from './StepModel'
+import { MERGED_HOLES_STAGE } from './pipelineUi'
+
+function normalizeFoldId(value) {
+  if (value === null || value === undefined || value === '') return null
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : String(value)
+}
+
+function axisVectorForKey(key) {
+  if (key === 'x') return new THREE.Vector3(1, 0, 0)
+  if (key === 'y') return new THREE.Vector3(0, 1, 0)
+  return new THREE.Vector3(0, 0, 1)
+}
+
+function toLocalPoint(point, center, normalVector, epsilon) {
+  if (!Array.isArray(point) || point.length < 3 || !center) return null
+  return new THREE.Vector3(
+    Number(point[0] || 0) - center.x + normalVector.x * epsilon,
+    Number(point[1] || 0) - center.y + normalVector.y * epsilon,
+    Number(point[2] || 0) - center.z + normalVector.z * epsilon
+  )
+}
 
 function CameraFitter({ modelInfo, controlsRef }) {
   const { camera, invalidate } = useThree()
@@ -67,6 +89,34 @@ function HoleFocusController({ selectedHole, modelInfo, controlsRef }) {
     controlsRef.current.update()
     invalidate()
   }, [camera, controlsRef, invalidate, modelInfo, selectedHole])
+
+  return null
+}
+
+function FoldFocusController({ selectedFold, modelInfo, controlsRef }) {
+  const { camera, invalidate } = useThree()
+
+  useEffect(() => {
+    if (!selectedFold || !modelInfo?.center || !controlsRef.current) return
+
+    const target = new THREE.Vector3(
+      selectedFold.position[0] - modelInfo.center.x,
+      selectedFold.position[1] - modelInfo.center.y,
+      selectedFold.position[2] - modelInfo.center.z
+    )
+    const axis = new THREE.Vector3(...(selectedFold.axis || [1, 0, 0])).normalize()
+    const lateral = new THREE.Vector3(0, 0, 1).cross(axis)
+    if (lateral.lengthSq() < 1e-6) lateral.set(0, 1, 0).cross(axis)
+    lateral.normalize()
+
+    const distance = Math.max((selectedFold.length || 0) * 0.9, modelInfo.boundingRadius * 0.18, 30)
+    const cameraOffset = lateral.multiplyScalar(distance).add(new THREE.Vector3(distance * 0.25, distance * 0.12, distance * 0.2))
+
+    camera.position.copy(target.clone().add(cameraOffset))
+    controlsRef.current.target.copy(target)
+    controlsRef.current.update()
+    invalidate()
+  }, [camera, controlsRef, invalidate, modelInfo, selectedFold])
 
   return null
 }
@@ -796,7 +846,188 @@ function buildFallbackSections(modelInfo) {
   })
 }
 
-function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, selectedProbe, onHoleSelect }) {
+function BendLineOverlay({ bend, center, isSelected, onSelect }) {
+  const position = [
+    bend.position[0] - center.x,
+    bend.position[1] - center.y,
+    bend.position[2] - center.z,
+  ]
+  const axis = new THREE.Vector3(...(bend.axis || [1, 0, 0])).normalize()
+  const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis)
+  const color = isSelected
+    ? '#f59e0b'
+    : bend.direction === 'up'
+      ? '#10b981'
+      : bend.direction === 'down'
+        ? '#ef4444'
+        : '#8f0008'
+
+  return (
+    <group position={position} quaternion={quaternion} renderOrder={22}>
+      <mesh
+        onClick={(event) => {
+          event.stopPropagation()
+          onSelect?.(bend.id)
+        }}
+      >
+        <cylinderGeometry args={[isSelected ? 1.4 : 0.95, isSelected ? 1.4 : 0.95, Math.max(Number(bend.length) || 0, 10), 16]} />
+        <meshBasicMaterial
+          color={color}
+          transparent
+          opacity={isSelected ? 1 : 0.88}
+          depthTest={false}
+          depthWrite={false}
+        />
+      </mesh>
+    </group>
+  )
+}
+
+function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSelect, drawPlate = false }) {
+  const length = Math.max(Number(unfoldVisuals?.flat_length) || 0, 40)
+  const width = Math.max(Number(unfoldVisuals?.flat_width) || 0, 20)
+  const bends = unfoldVisuals?.bends_logical || []
+  const bend3d = unfoldVisuals?.bends_3d || []
+  const foldDetails = unfoldVisuals?.fold_details || []
+  const bendSegments = unfoldVisuals?.bend_line_segments || []
+  const foldCount = Math.max(unfoldVisuals?.fold_lines || 0, bends.length, foldDetails.length, bend3d.length)
+
+  const foldRows = useMemo(() => {
+    if (foldCount <= 0) return []
+    const size = modelInfo?.size || {}
+    const rankedAxes = [
+      { key: 'x', size: Number(size.x) || 0, index: 0 },
+      { key: 'y', size: Number(size.y) || 0, index: 1 },
+      { key: 'z', size: Number(size.z) || 0, index: 2 },
+    ].sort((a, b) => b.size - a.size)
+
+    const thicknessAxis = rankedAxes[2]?.key || 'z'
+    const inPlaneAxes = [rankedAxes[0]?.key || 'x', rankedAxes[1]?.key || 'y']
+    const primaryAxis = inPlaneAxes[0]
+    const secondaryAxis = inPlaneAxes[1] || inPlaneAxes[0]
+    const primarySize = rankedAxes[0]?.size || length
+    const secondarySize = rankedAxes[1]?.size || width
+    const normalVector = axisVectorForKey(thicknessAxis)
+    const epsilon = Math.max((rankedAxes[2]?.size || 0) * 0.6, 0.2)
+
+    return Array.from({ length: foldCount }, (_, idx) => {
+      const detail = foldDetails[idx] || {}
+      const logical = bends[idx] || {}
+      const bend = bend3d[idx] || {}
+      const segment = bendSegments[idx] || {}
+      const id = normalizeFoldId(detail.id || bend.id || (idx + 1))
+      const detailCenter = Array.isArray(detail.center) && detail.center.length >= 3
+        ? detail.center
+        : [0, 0, 0]
+      const segmentAxis = String(detail.axis || segment.axis || '').toLowerCase()
+      const lineAxis = inPlaneAxes.includes(segmentAxis) ? segmentAxis : inPlaneAxes[0]
+      const varyingAxis = inPlaneAxes.find((axisKey) => axisKey !== lineAxis) || inPlaneAxes[1] || inPlaneAxes[0]
+      const lineVector = axisVectorForKey(lineAxis)
+      const varyingVector = axisVectorForKey(varyingAxis)
+      const basis = new THREE.Matrix4().makeBasis(lineVector, varyingVector, normalVector)
+      const quaternion = new THREE.Quaternion().setFromRotationMatrix(basis)
+      const localStart = toLocalPoint(detail.start || segment.start, modelInfo?.center, normalVector, epsilon)
+      const localEnd = toLocalPoint(detail.end || segment.end, modelInfo?.center, normalVector, epsilon)
+      const requestedLength = Number(detail.length || logical.length || segment.length) || Math.max(Math.min(length, width) * 0.9, 10)
+      const shouldPreferPrimaryAxis =
+        requestedLength > secondarySize * 1.35
+        && primarySize > secondarySize * 1.2
+      const fallbackAxis = shouldPreferPrimaryAxis ? primaryAxis : lineAxis
+      const fallbackQuaternion = new THREE.Quaternion().setFromUnitVectors(
+        new THREE.Vector3(1, 0, 0),
+        axisVectorForKey(fallbackAxis)
+      )
+      const position = modelInfo?.center
+        ? [
+            Number(detailCenter[0] || 0) - modelInfo.center.x + normalVector.x * epsilon,
+            Number(detailCenter[1] || 0) - modelInfo.center.y + normalVector.y * epsilon,
+            Number(detailCenter[2] || 0) - modelInfo.center.z + normalVector.z * epsilon,
+          ]
+        : [0, 0, 0]
+      return {
+        id,
+        position,
+        quaternion,
+        fallbackQuaternion,
+        forceFallback: shouldPreferPrimaryAxis,
+        localStart,
+        localEnd,
+        lineLength: requestedLength,
+        angle: logical.angle ?? bend.angle ?? null,
+        direction: logical.type || bend.direction || null,
+      }
+    })
+  }, [bend3d, bendSegments, bends, foldCount, foldDetails, length, modelInfo, width])
+
+  return (
+    <group renderOrder={25}>
+      {drawPlate && (
+        <>
+          <mesh>
+            <planeGeometry args={[length, width]} />
+            <meshBasicMaterial color="#eef4fb" transparent opacity={0.95} side={THREE.DoubleSide} depthTest={false} depthWrite={false} />
+          </mesh>
+
+          <lineLoop renderOrder={26}>
+            <bufferGeometry>
+              <bufferAttribute
+                attach="attributes-position"
+                args={[new Float32Array([
+                  -length / 2, -width / 2, 0.2,
+                  length / 2, -width / 2, 0.2,
+                  length / 2, width / 2, 0.2,
+                  -length / 2, width / 2, 0.2,
+                ]), 3]}
+              />
+            </bufferGeometry>
+            <lineBasicMaterial color="#6b7280" transparent opacity={0.9} depthTest={false} depthWrite={false} />
+          </lineLoop>
+        </>
+      )}
+
+      {foldRows.map((row) => {
+        const selected = normalizeFoldId(selectedFoldId) === row.id
+        const color = selected
+          ? '#f59e0b'
+          : row.direction === 'up'
+            ? '#10b981'
+            : row.direction === 'down'
+              ? '#ef4444'
+              : '#8f0008'
+        const segmentVector = row.localStart && row.localEnd
+          ? row.localEnd.clone().sub(row.localStart)
+          : null
+        const exactLength = segmentVector?.length?.() || 0
+        const exactMidpoint = segmentVector
+          ? row.localStart.clone().add(row.localEnd).multiplyScalar(0.5)
+          : null
+        const exactQuaternion = segmentVector && exactLength > 1e-6
+          ? new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), segmentVector.clone().normalize())
+          : null
+        const useExactSegment = !row.forceFallback && exactQuaternion && exactLength > 1e-6
+
+        return (
+          <group
+            key={`flat-fold-${row.id}`}
+            position={useExactSegment ? [exactMidpoint.x, exactMidpoint.y, exactMidpoint.z] : row.position}
+            quaternion={useExactSegment ? exactQuaternion : row.fallbackQuaternion || row.quaternion}
+            onClick={(event) => {
+              event.stopPropagation()
+              onFoldSelect?.(row.id)
+            }}
+          >
+            <mesh>
+              <planeGeometry args={[useExactSegment ? exactLength : row.lineLength, selected ? 8 : 5]} />
+              <meshBasicMaterial color={color} transparent opacity={selected ? 1 : 0.86} side={THREE.DoubleSide} depthTest={false} depthWrite={false} />
+            </mesh>
+          </group>
+        )
+      })}
+    </group>
+  )
+}
+
+function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, selectedProbe, selectedFoldId, onFoldSelect, onHoleSelect, useFlatView }) {
   const center = modelInfo?.center
   if (!center || !visuals || !focusedStage) return null
 
@@ -805,7 +1036,7 @@ function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, selecte
   const classificationVisuals = visuals?.classification || null
   const unfoldVisuals = visuals?.unfold || null
   const size = modelInfo?.size
-  const overlayExtent = Math.max(size?.x || 0, size?.y || 0, size?.z || 0, 50)
+  const bend3dItems = unfoldVisuals?.bends_3d || []
 
   const makePosition = (position) => [
     position[0] - center.x,
@@ -856,15 +1087,10 @@ function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, selecte
     quaternion: fallbackQuaternion,
   }))
   const sectionVisuals = routerSections.length > 0 ? routerSections : fallbackSections
-  const foldVisuals = (unfoldVisuals?.fold_details || []).map((fold) => ({
-    position: makePosition(fold.center),
-    length: fold.length || overlayExtent * 0.4,
-    id: fold.id,
-  }))
 
   return (
       <group>
-      {focusedStage === 'Detect holes' && holeVisuals.map((hole, index) => (
+      {focusedStage === MERGED_HOLES_STAGE && holeVisuals.map((hole, index) => (
         <HoleOutline
           key={hole.id || `${hole.type}-${index}`}
           hole={hole}
@@ -876,9 +1102,19 @@ function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, selecte
         />
       ))}
 
-      {focusedStage === 'Detect holes' && selectedProbe && (
+      {focusedStage === MERGED_HOLES_STAGE && selectedProbe && (
         <ManualProbeOverlay probe={selectedProbe} center={center} modelInfo={modelInfo} />
       )}
+
+      {focusedStage === MERGED_HOLES_STAGE && !useFlatView && bend3dItems.map((bend) => (
+        <BendLineOverlay
+          key={`bend-line-${bend.id}`}
+          bend={bend}
+          center={center}
+          isSelected={normalizeFoldId(selectedFoldId) === normalizeFoldId(bend.id)}
+          onSelect={onFoldSelect}
+        />
+      ))}
 
       {focusedStage === 'Profile Router' && sectionVisuals.map((section, index) => (
         section.polygonLines3d
@@ -917,136 +1153,6 @@ function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, selecte
       {focusedStage === 'Classify geometry' && (
         <ClassificationGuides modelInfo={modelInfo} classificationVisuals={classificationVisuals} />
       )}
-
-      {focusedStage === 'Unfold' && foldVisuals.map((fold, index) => (
-        <group key={`fold-${index}`} position={fold.position} renderOrder={20}>
-          <mesh rotation={[0, 0, Math.PI / 4]}>
-            <planeGeometry args={[Math.max(fold.length * 0.18, 18), 4]} />
-            <meshBasicMaterial
-              color="#8f0008"
-              transparent
-              opacity={1}
-              side={THREE.DoubleSide}
-              depthTest={false}
-              depthWrite={false}
-            />
-          </mesh>
-          <mesh rotation={[0, 0, -Math.PI / 4]}>
-            <planeGeometry args={[Math.max(fold.length * 0.18, 18), 4]} />
-            <meshBasicMaterial
-              color="#ff3b30"
-              transparent
-              opacity={1}
-              side={THREE.DoubleSide}
-              depthTest={false}
-              depthWrite={false}
-            />
-          </mesh>
-        </group>
-      ))}
-    </group>
-  )
-}
-
-function UnfoldFoldOverlay({ unfoldVisuals, selectedFoldId, onFoldSelect, drawPlate = false }) {
-  const length = Math.max(Number(unfoldVisuals?.flat_length) || 0, 40)
-  const width = Math.max(Number(unfoldVisuals?.flat_width) || 0, 20)
-  const bends = unfoldVisuals?.bends_logical || []
-  const foldDetails = unfoldVisuals?.fold_details || []
-  const foldCount = Math.max(unfoldVisuals?.fold_lines || 0, bends.length, foldDetails.length)
-
-  const foldRows = useMemo(() => {
-    if (foldCount <= 0) return []
-    const valuesX = foldDetails.map((f) => Number(f?.center?.[0])).filter((v) => Number.isFinite(v))
-    const valuesY = foldDetails.map((f) => Number(f?.center?.[1])).filter((v) => Number.isFinite(v))
-    const spreadX = valuesX.length > 1 ? Math.max(...valuesX) - Math.min(...valuesX) : 0
-    const spreadY = valuesY.length > 1 ? Math.max(...valuesY) - Math.min(...valuesY) : 0
-    const useX = spreadX >= spreadY
-    const axisValues = (useX ? valuesX : valuesY)
-    const minAxis = axisValues.length > 0 ? Math.min(...axisValues) : 0
-    const maxAxis = axisValues.length > 0 ? Math.max(...axisValues) : 0
-    const span = Math.max(maxAxis - minAxis, 1e-6)
-
-    return Array.from({ length: foldCount }, (_, idx) => {
-      const detail = foldDetails[idx] || {}
-      const bend = bends[idx] || {}
-      const id = detail.id || (idx + 1)
-      const rawAxis = Number(detail?.center?.[useX ? 0 : 1])
-      let u = (idx + 1) / (foldCount + 1)
-      if (Number.isFinite(rawAxis) && axisValues.length > 1) {
-        u = (rawAxis - minAxis) / span
-      }
-      const xPos = (u - 0.5) * length
-      return {
-        id,
-        xPos,
-        direction: bend.type || null,
-      }
-    })
-  }, [bends, foldCount, foldDetails, length])
-
-  return (
-    <group renderOrder={25}>
-      {drawPlate && (
-        <>
-          <mesh>
-            <planeGeometry args={[length, width]} />
-            <meshBasicMaterial color="#eef4fb" transparent opacity={0.95} side={THREE.DoubleSide} depthTest={false} depthWrite={false} />
-          </mesh>
-
-          <lineLoop renderOrder={26}>
-            <bufferGeometry>
-              <bufferAttribute
-                attach="attributes-position"
-                args={[new Float32Array([
-                  -length / 2, -width / 2, 0.2,
-                  length / 2, -width / 2, 0.2,
-                  length / 2, width / 2, 0.2,
-                  -length / 2, width / 2, 0.2,
-                ]), 3]}
-              />
-            </bufferGeometry>
-            <lineBasicMaterial color="#6b7280" transparent opacity={0.9} depthTest={false} depthWrite={false} />
-          </lineLoop>
-        </>
-      )}
-
-      {foldRows.map((row, index) => {
-        const selected = selectedFoldId === row.id
-        const color = selected
-          ? '#f59e0b'
-          : row.direction === 'up'
-            ? '#10b981'
-            : row.direction === 'down'
-              ? '#ef4444'
-              : '#8f0008'
-
-        return (
-          <group
-            key={`flat-fold-${row.id}-${index}`}
-            position={[row.xPos, 0, drawPlate ? 0.35 : 0.6]}
-            onClick={(event) => {
-              event.stopPropagation()
-              onFoldSelect?.(row.id)
-            }}
-          >
-            <mesh>
-              <planeGeometry args={[Math.max(width * 0.1, 6), width * 0.95]} />
-              <meshBasicMaterial color={color} transparent opacity={selected ? 1 : 0.78} side={THREE.DoubleSide} depthTest={false} depthWrite={false} />
-            </mesh>
-            <Text
-              position={[0, (width * 0.52), 0.2]}
-              fontSize={Math.max(width * 0.08, 12)}
-              color={color}
-              anchorX="center"
-              anchorY="middle"
-              depthTest={false}
-            >
-              {row.id}{bends[index]?.angle != null ? ` | ${Math.round(Math.abs(bends[index].angle))}°` : ''}
-            </Text>
-          </group>
-        )
-      })}
     </group>
   )
 }
@@ -1070,10 +1176,12 @@ export default function ViewerCanvas({
   probeMode = false,
   controlsRef,
   useFlatView,
-  showUnfoldSketch = false,
 }) {
   const renderMode = 'clean'
   const holeItems = backendVisuals?.holes?.items || []
+  const bend3dItems = backendVisuals?.unfold?.bends_3d || []
+  const normalizedSelectedFoldId = normalizeFoldId(selectedFoldId)
+  const selectedFold = bend3dItems.find((bend) => normalizeFoldId(bend.id) === normalizedSelectedFoldId) || null
   const handleSurfacePick = useCallback((sample, event) => {
     if (!probeMode) return
     const point = sample?.point || sample
@@ -1103,31 +1211,21 @@ export default function ViewerCanvas({
       <hemisphereLight args={['#ffffff', '#cbd5e1', 0.75]} />
       <directionalLight position={[100, 150, 100]} intensity={0.55} />
 
-      {!showUnfoldSketch && (
-        <StepModel
-          buffer={fileBuffer}
-          mesh={activeMesh}
-          onLoaded={onLoaded}
-          onError={onError}
-          onStatus={onStatus}
-          onSurfacePick={handleSurfacePick}
-          parseMode={parseMode}
-          renderMode={renderMode}
-        />
-      )}
+      <StepModel
+        buffer={fileBuffer}
+        mesh={activeMesh}
+        onLoaded={onLoaded}
+        onError={onError}
+        onStatus={onStatus}
+        onSurfacePick={handleSurfacePick}
+        parseMode={parseMode}
+        renderMode={renderMode}
+      />
 
-      {showUnfoldSketch && focusedStage === 'Unfold' && backendVisuals?.unfold?.success && (
+      {useFlatView && focusedStage === MERGED_HOLES_STAGE && backendVisuals?.unfold?.success && (
         <UnfoldFoldOverlay
           unfoldVisuals={backendVisuals.unfold}
-          selectedFoldId={selectedFoldId}
-          onFoldSelect={onFoldSelect}
-          drawPlate
-        />
-      )}
-
-      {!showUnfoldSketch && useFlatView && focusedStage === 'Unfold' && backendVisuals?.unfold?.success && (
-        <UnfoldFoldOverlay
-          unfoldVisuals={backendVisuals.unfold}
+          modelInfo={modelInfo || null}
           selectedFoldId={selectedFoldId}
           onFoldSelect={onFoldSelect}
           drawPlate={false}
@@ -1136,13 +1234,17 @@ export default function ViewerCanvas({
 
       <CameraFitter modelInfo={modelInfo} controlsRef={controlsRef} />
       <HoleFocusController selectedHole={selectedHole} modelInfo={modelInfo} controlsRef={controlsRef} />
+      <FoldFocusController selectedFold={selectedFold} modelInfo={modelInfo} controlsRef={controlsRef} />
       <StageOverlays
         modelInfo={modelInfo}
         visuals={backendVisuals}
         focusedStage={focusedStage}
         selectedHole={selectedHole}
         selectedProbe={selectedProbe}
+        selectedFoldId={selectedFoldId}
+        onFoldSelect={onFoldSelect}
         onHoleSelect={onHoleSelect}
+        useFlatView={useFlatView}
       />
       {!useFlatView && <gridHelper args={[500, 18, '#d4d9e1', '#edf1f5']} />}
       <SceneControls controlsRef={controlsRef} />
