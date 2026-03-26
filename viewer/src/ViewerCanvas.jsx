@@ -1031,12 +1031,12 @@ function UnfoldFoldOverlay({ unfoldVisuals, selectedFoldId, onFoldSelect, drawPl
             }}
           >
             <mesh>
-              <planeGeometry args={[2.2, width * 0.95]} />
+              <planeGeometry args={[Math.max(width * 0.1, 6), width * 0.95]} />
               <meshBasicMaterial color={color} transparent opacity={selected ? 1 : 0.78} side={THREE.DoubleSide} depthTest={false} depthWrite={false} />
             </mesh>
             <Text
               position={[0, (width * 0.52), 0.2]}
-              fontSize={Math.max(width * 0.04, 5)}
+              fontSize={Math.max(width * 0.08, 12)}
               color={color}
               anchorX="center"
               anchorY="middle"

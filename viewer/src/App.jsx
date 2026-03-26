@@ -16,6 +16,8 @@ const EMPTY_PIPELINE_STATE = {
   result: null,
 }
 
+const VIEWER_REVISION = '026734d'
+
 function ViewerCanvasFallback() {
   return (
     <div className="loading-overlay">
@@ -515,6 +517,7 @@ export default function App() {
           <button className="header-toggle-btn" onClick={() => setRightPanelOpen((value) => !value)}>
             {rightPanelOpen ? 'Verberg rechts' : 'Toon rechts'}
           </button>
+          <span className="header-status">rev {VIEWER_REVISION}</span>
           <span className="header-status">{engineStatus}</span>
         </div>
       </div>
