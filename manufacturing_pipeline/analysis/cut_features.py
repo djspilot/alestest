@@ -316,10 +316,18 @@ def extract_cut_features_for_sheet(
         
         # STAP 7: Totale snijlengte
         # ==========================
+        # Gesloten contouren zijn leidend voor aantal en snijlengte.
+        # Labels (thread/countersunk) worden achteraf gematcht op cylindrische gaten.
         if closed_contours:
             hole_contours = [float(item["perimeter"]) for item in closed_contours]
-            hole_types = ["hole"] * len(closed_contours)
-            hole_radii = []
+            label_results = _label_contours_from_holes(
+                closed_contours, cylindrical_holes, countersink_matches,
+            )
+            hole_types = [r["label"] for r in label_results]
+            hole_radii = [r["radius"] for r in label_results if r["radius"] is not None]
+            threaded_holes = sum(1 for r in label_results if r["label"] == "thread")
+            countersunk_holes = sum(1 for r in label_results if r["label"] == "countersunk")
+            countersunk_angles = [r["cs_angle"] for r in label_results if r.get("cs_angle") is not None]
 
         total_contour = sum(hole_contours) + outer_contour
         logger.info(f"[CutFeatures] Totale snijlengte: {total_contour:.2f} mm")
@@ -714,6 +722,94 @@ def _get_outer_contour_length(shape: TopoDS_Shape) -> float:
     except Exception as e:
         logger.error(f"[CutFeatures] Fout bij outer contour berekening: {e}")
         return 0.0
+
+
+def _label_contours_from_holes(
+    closed_contours: List[Dict[str, Any]],
+    cylindrical_holes,
+    countersink_matches: Dict[int, float],
+    inferred_countersunk: Optional[set] = None,
+    is_profile: bool = False,
+) -> List[Dict[str, Any]]:
+    """Match closed inner contours to cylindrical holes for label assignment.
+
+    Per gesloten contour: zoek dichtstbijzijnde cilindrisch gat (centrumafstand
+    ≤ 10 mm) en pas thread/countersink-logica toe op de diameter van dat gat.
+    Ongematchte contouren krijgen label 'hole'.
+
+    Returns list of dicts: {label, radius, cs_angle}
+    """
+    if inferred_countersunk is None:
+        inferred_countersunk = set()
+    results: List[Dict[str, Any]] = []
+    used_hole_indices: set = set()
+    match_tol = 10.0  # mm
+
+    for contour in closed_contours:
+        center_cc = contour.get("center")
+        best_idx: Optional[int] = None
+        best_dist = float("inf")
+
+        if center_cc is not None:
+            for idx, hole in enumerate(cylindrical_holes):
+                if idx in used_hole_indices:
+                    continue
+                pos = _as_point_tuple(getattr(hole, "position", None))
+                if pos is None:
+                    pos = _as_point_tuple(getattr(hole, "axis_origin", None))
+                if pos is None:
+                    continue
+                dx = center_cc[0] - pos[0]
+                dy = center_cc[1] - pos[1]
+                dz = center_cc[2] - pos[2]
+                dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_idx = idx
+
+        label = "hole"
+        radius: Optional[float] = None
+        cs_angle: Optional[float] = None
+
+        if best_idx is not None and best_dist <= match_tol:
+            used_hole_indices.add(best_idx)
+            hole = cylindrical_holes[best_idx]
+            radius = hole.diameter / 2.0
+            cs_angle_val = countersink_matches.get(best_idx)
+            if cs_angle_val is not None or best_idx in inferred_countersunk:
+                label = "countersunk"
+                cs_angle = cs_angle_val
+            else:
+                thread_matches = iso_standards.identify_thread_from_diameter(hole.diameter, 0.20)
+                tapped_matches = [m for m in thread_matches if "tapped" in m.designation.lower()]
+                major_matches = [m for m in thread_matches if "tapped" not in m.designation.lower()]
+                hole_depth = float(getattr(hole, "depth", 0.0) or 0.0)
+
+                if is_profile:
+                    if tapped_matches and not major_matches:
+                        label = "thread"
+                    elif tapped_matches and major_matches:
+                        if hole.diameter <= 6.0 and hole_depth <= max(6.0, hole.diameter * 1.5):
+                            for match in tapped_matches:
+                                delta = float(getattr(match, "major_diameter", 0.0) or 0.0) - float(hole.diameter)
+                                if 0.8 <= delta <= 1.4:
+                                    label = "thread"
+                                    break
+                else:
+                    if tapped_matches and major_matches:
+                        tapped_matches = []
+                    if tapped_matches and hole_depth > 0:
+                        plausible = [
+                            m for m in tapped_matches
+                            if float(getattr(m, "major_diameter", 0.0) or 0.0) <= hole_depth * 1.35
+                        ]
+                        tapped_matches = plausible if plausible else []
+                    if tapped_matches:
+                        label = "thread"
+
+        results.append({"label": label, "radius": radius, "cs_angle": cs_angle})
+
+    return results
 
 
 def _detect_closed_inner_contours(shape: TopoDS_Shape) -> List[Dict[str, Any]]:
@@ -1144,10 +1240,19 @@ def extract_cut_features_for_profile(
 
         # Profiel: geen buitencontour (ingekocht profiel)
         outer_contour = 0.0
+        # Gesloten contouren zijn leidend voor aantal en snijlengte.
+        # Labels (thread/countersunk) worden achteraf gematcht op cylindrische gaten.
         if closed_contours:
             hole_contours = [float(item["perimeter"]) for item in closed_contours]
-            hole_types = ["hole"] * len(closed_contours)
-            hole_radii = []
+            label_results = _label_contours_from_holes(
+                closed_contours, cylindrical_holes, countersink_matches,
+                inferred_countersunk=inferred_countersunk, is_profile=True,
+            )
+            hole_types = [r["label"] for r in label_results]
+            hole_radii = [r["radius"] for r in label_results if r["radius"] is not None]
+            threaded_holes = sum(1 for r in label_results if r["label"] == "thread")
+            countersunk_holes = sum(1 for r in label_results if r["label"] == "countersunk")
+            countersunk_angles = [r["cs_angle"] for r in label_results if r.get("cs_angle") is not None]
         total_contour = sum(hole_contours)
 
         total_holes = len(closed_contours) if closed_contours else len(hole_types)

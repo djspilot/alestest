@@ -41,9 +41,36 @@ Belangrijke architectuurnoot:
 
 ---
 
+## Primaire strategie: gesloten contour als basis
+
+**Aantal gaten en snijlengte worden bepaald op basis van gesloten binnencontouren.**
+
+`_detect_closed_inner_contours(shape)` is de leidende methode voor:
+- `nr_holes` (aantal gaten)
+- `hole_contours` (snijlengte per gat, gemeten perimeterlengte uit geometrie)
+- `total_contour` (totale snijlengte = sum(gatcontouren) + buitencontour)
+
+Reden:
+- werkt voor elke vorm: rond, sleuf, rechthoek, polygoon
+- perimeter is direct gemeten uit geometrie (niet berekend via 2πr of formules)
+- geen afhankelijkheid van vormclassificatie (slot/rect/poly)
+- werkt op flat pattern (plaat) én op 3D solid (profiel, via vlakke faces)
+
+De cylinder-detectie blijft nodig uitsluitend voor labels:
+- tapgaten (`thread`): diameter-matching via ISO 68-1
+- verzonken gaten (`countersunk`): conische face matching
+
+Volgorde in de wrappers (`cut_features.py`):
+1. `_detect_closed_inner_contours` → aantal + snijlengte
+2. `detect_holes` + thread/countersink logica → labels (thread/countersunk/round)
+3. Als `closed_contours` niet leeg: overschrijf `hole_contours` en `nr_holes` met gesloten contour data
+
+---
+
 ## Feature-overzicht
-1. Cilindrische gaten
-2. Vormgaten
+0. Gesloten binnencontouren (primair: aantal + snijlengte)
+1. Cilindrische gaten (voor labels: thread/countersunk/round)
+2. Vormgaten (fallback als geen closed_contours)
 3. Duplicaatfilter tussen rond en vormgat
 4. Tapgat-herkenning
 5. Verzonken gat-herkenning
@@ -51,9 +78,46 @@ Belangrijke architectuurnoot:
 7. Wrapper-specifieke verschillen: plaat versus profiel
 
 Stopregel:
-- er is geen enkele globale “eerste match stopt alles” regel zoals bij Step 0
+- er is geen enkele globale "eerste match stopt alles" regel zoals bij Step 0
 - alle subdetectoren leveren kandidaten op
 - de wrapper beslist daarna hoe deze kandidaten worden gelabeld en geteld
+- **voor aantal en snijlengte geldt: `closed_contours` wint altijd als die niet leeg is**
+
+---
+
+## Feature 0 - Gesloten binnencontouren (`_detect_closed_inner_contours`)
+
+Actieve functie:
+- `_detect_closed_inner_contours(shape: TopoDS_Shape) -> List[Dict]`
+
+### Doel
+Vind alle unieke gesloten binnencontouren exclusief de buitencontour. Vormt de primaire basis voor `nr_holes` en `hole_contours` (snijlengte per gat).
+
+### Werkwijze
+- Itereer over alle faces in de shape
+- Per face: neem `outer_wire = BRepTools.OuterWire_s(face)` als referentie buitencontour
+- Alle overige wires op die face → binnencontour-kandidaten
+- Per kandidaat: bereken perimeter via `BRepGProp.LinearProperties_s(wire)` → `.Mass()`
+- Sla op: `{perimeter, center(x,y,z), normal(nx,ny,nz), dim("WxH")}`
+
+### Deduplicatie
+Binnencontouren worden gegroepeerd per `(round(perimeter, 2), dim)` bucket.
+Een contour wordt als duplicaat gezien als:
+- centrumafstand `dist_sq < 0.01`
+- of het centrumverschil ligt vrijwel in de normaalrichting: `dot > 0.9`
+
+### Koppeling met cylindrische gaten voor labels
+Na `_detect_closed_inner_contours` wordt `_label_contours_from_holes()` aangeroepen:
+- Per gesloten contour: zoek dichtstbijzijnde cilindrische gat op centrumafstand ≤ 10 mm
+- Gebruik diameter van dat gat voor thread/countersink-matching
+- Ongematchte contouren → label `hole`
+
+### Werkt op
+- **Flat pattern** (plaat/gezette plaat): alle gaten zijn inner wires op het vlakke patroon
+- **3D solid** (profiel): gaten die een planaire wandface snijden
+
+### Samenvatting
+`nr_holes` en `hole_contours` worden uitsluitend van gesloten contouren afgeleid als `closed_contours` niet leeg is. Labels (thread/countersunk/round) volgen daarna via matching met cylindrische gaten.
 
 ---
 
