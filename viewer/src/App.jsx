@@ -130,7 +130,9 @@ export default function App() {
   const selectedHole = (pipelineVisuals?.holes?.items || []).find((item) => item.id === selectedHoleId) || null
   const selectedFeature = selectedHole || selectedProbe
   const selectedHoleSource = selectedFeature?.source || null
-  const showUnfoldSketch = focusedStage === 'Unfold' && unfoldSuccess && !flatMesh
+  // Always use synthetic unfold sketch in Unfold stage so bend lines/angles are visible,
+  // independent of flat mesh orientation or missing fold center metadata.
+  const showUnfoldSketch = focusedStage === 'Unfold' && unfoldSuccess
   const useFlatView =
     (
       focusedStage === 'Unfold' ||
