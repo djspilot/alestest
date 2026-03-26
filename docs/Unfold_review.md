@@ -10,23 +10,23 @@ Er is één implementatie. De wrapper map alleen veldnamen naar het formaat dat 
 ## 2) Criteria en thresholds in run_unfold_to_step
 
 ### Selectie van solids en base faces
-- Solids worden gesorteerd op volume (grootste eerst).
-- Alleen top 3 solids worden geprobeerd.
-- Voor elk solid worden alle vlakke faces (Plane) verzameld.
-- Alleen top 10 grootste vlakke faces worden geprobeerd als base face.
+- run_unfold_to_step zelf doet geen solid/base-face selectie; het is een wrapper.
+- De selectie gebeurt in unfold_sheet_metal:
+  - Bij meerdere solids wordt 1 solid gekozen (`shape.Solids[0]`).
+  - Base faces zijn alle vlakke faces, gesorteerd op oppervlakte.
+  - Aantal pogingen is `min(max_attempts, len(base_candidates))` met standaard `max_attempts=5`.
 
 ### K-factor
 - Vaste k-factor lookup: alle plaatdiktes mappen naar 0.44.
 - Gebruikte dikte buckets: 0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 15.0, 20.0.
 
 ### Unfold score (beste resultaat)
-- Score = (aantal fold lines * 1000000) + vlakke oppervlakte.
-- Fold lines wegen dus extreem zwaar t.o.v. oppervlakte.
+- Er wordt geen aparte scoreformule gebruikt in de actieve route.
+- De eerste geslaagde unfold-poging wordt geaccepteerd en teruggegeven.
 
 ### Dikte-detectie
-- Zoekt vlakke faces, pakt grootste als referentie.
-- Zoekt tegenoverliggende face met normal dot < -0.9.
-- Dikte = afstand tussen die faces (eerste valide match in top 10 kandidaten).
+- In run_unfold_to_step wordt geen dikte uit unfold afgeleid.
+- De wrapper retourneert `thickness = 0` (dikte uit analysepad blijft leidend).
 
 ### Resultaatvelden
 - fold_lines: aantal fold lines.
@@ -35,7 +35,8 @@ Er is één implementatie. De wrapper map alleen veldnamen naar het formaat dat 
 - flat_length, flat_width: uit bbox van flat_compound.
 
 ### Timeout
-- Subprocess timeout staat op 180 seconden.
+- In de actieve route via `run_unfold_to_step` is er geen 180s subprocess-timeout.
+- Als FreeCADCmd fallback wordt gebruikt, geldt in `freecad_unfold.py` een timeout van 300 seconden.
 
 ## 3) Criteria en thresholds in freecad_unfold.py (alternatieve route)
 
@@ -56,10 +57,21 @@ Er is één implementatie. De wrapper map alleen veldnamen naar het formaat dat 
 - Optioneel limiteren op max_bends.
 
 ### Merge van gesplitste bends
-- _merge_adjacent_bends(...) merge alleen als exact gelijk:
-  - angle gelijk
-  - radius gelijk
-- Er is geen tolerantie (geen fuzzy merge).
+- Primaire regel is nu geometrisch: segmenten worden samengevoegd als ze collineair zijn.
+- Criteria voor 1 fysieke zetlijn:
+  - zelfde segment-as (X of Y in vlak patroon)
+  - zelfde lijn-offset op de loodrechte as binnen tolerantie (`offset_tol`, standaard 2.0 mm)
+  - vergelijkbare zethoek (en radius) per segment
+  - segmenten moeten in elkaars verlengde liggen (kleine gap), niet als overlappende/gestapelde lijnen
+- Dit dekt expliciet onderbrekingen door gaten:
+  - 2 segmenten in elkaars verlengde => 1 zetlijn
+  - 3 segmenten in elkaars verlengde => 1 zetlijn
+- Resultaat is een lijst `bend_line_groups` met per fysieke zetlijn o.a.:
+  - `id`, `segment_count`, `segment_indices`, `pos_along_length`
+
+### Routeverschillen (belangrijk)
+- **Direct FreeCAD route**: heeft toegang tot `foldLines` geometrie en gebruikt collineaire merge.
+- **FreeCADCmd subprocess route**: gebruikt hetzelfde `bend_angles/bend_radii` pad; als geen segmentgeometrie beschikbaar is, wordt niet agressief op sequence gemerged (om foutieve 5 -> 1 merges te voorkomen).
 
 ## 4) Error handling
 
@@ -74,4 +86,6 @@ UNFOLD_ERROR_MESSAGES vertaalt foutcodes uit SheetMetalUnfolder, o.a.:
 
 ## 5) Korte conclusie voor debugging
 
-Voor de huidige pipeline is run_unfold_to_step in core/utils.py leidend. Diagnose van "Unfold failed" in de viewer moet daarom eerst op die route gebeuren (solids top3, faces top10, timeout 180s, SheetTree/Bend_analysis/unfold_tree2 stages).
+Voor de huidige pipeline is run_unfold_to_step in core/utils.py leidend. Diagnose van "Unfold failed" in de viewer moet daarom eerst op die route gebeuren (wrapper -> unfold_sheet_metal, met stages SheetTree/Bend_analysis/unfold_tree2 en error_details per poging).
+
+Pipeline-prioriteit: viewer is alleen een visualisatie van pipeline-data; we passen geen viewer-specifieke correctie toe die afwijkt van manufacturing-pipeline output.

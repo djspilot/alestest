@@ -2545,7 +2545,6 @@ def _try_unfold(
                 solid_object=solid_object,
                 output_dxf=dxf_output,
                 k_factor=k_factor,
-                max_attempts=3,
                 max_bends=nr_bends if nr_bends > 0 else None
             )
         else:
@@ -2553,7 +2552,6 @@ def _try_unfold(
                 step_path=step_file_path,
                 output_dxf=dxf_output,
                 k_factor=k_factor,
-                max_attempts=3,
                 max_bends=nr_bends if nr_bends > 0 else None
             )
 

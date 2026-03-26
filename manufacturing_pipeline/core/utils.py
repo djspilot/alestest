@@ -908,6 +908,9 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                 "fold_lines": unfold_result.get("fold_lines") if unfold_result else 0,
                 "fold_details": unfold_result.get("fold_details", []) if unfold_result else [],
                 "bends_logical": unfold_result.get("bends_logical", []) if unfold_result else [],
+                "attempts": unfold_result.get("attempts") if unfold_result else 0,
+                "used_face_idx": unfold_result.get("used_face_idx") if unfold_result else None,
+                "error_details": unfold_result.get("error_details", []) if unfold_result else [],
                 "error": unfold_result.get("error") if unfold_result else None,
             },
             status="OK" if unfold_result and unfold_result.get("success") else "FAIL",
@@ -1173,7 +1176,13 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     r = unfold_sheet_metal(step_path=step_file, output_dxf=dxf_path)
 
     if not r.get('success'):
-        return {'success': False, 'error': r.get('error', 'Unfold gefaald')}
+        return {
+            'success': False,
+            'error': r.get('error', 'Unfold gefaald'),
+            'attempts': r.get('attempts', 0),
+            'used_face_idx': r.get('used_face_idx'),
+            'error_details': r.get('error_details', []),
+        }
 
     # Map fields naar het formaat dat run_analysis verwacht
     bend_angles = r.get('bend_angles', [])
@@ -1187,18 +1196,51 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
         for i, a in enumerate(bend_angles)
     ]
 
-    # Build fold_details from bend_lines (Part.Edge objects)
     fold_details = []
-    for i, line in enumerate(r.get('bend_lines', [])):
-        try:
-            center = line.BoundBox.Center
-            fold_details.append({
-                'id': i + 1,
-                'length': round(line.Length, 2),
-                'center': (round(center.x, 2), round(center.y, 2), round(center.z, 2)),
-            })
-        except Exception:
-            pass
+    # Prefer merged geometric groups from pipeline if available.
+    for g in r.get('bend_line_groups', []) or []:
+        fold_details.append({
+            'id': g.get('id'),
+            'length': None,
+            'center': None,
+            'pos_along_length': g.get('pos_along_length'),
+            'segment_count': g.get('segment_count'),
+        })
+
+    # Fallback: build from raw bend line edges (direct FreeCAD route).
+    if not fold_details:
+        flat_length_val = r.get('flat_length', 0)
+        flat_shape = r.get('flat_shape')
+        flat_bbox_long_min = None
+        use_x_for_long = True
+        if flat_shape is not None:
+            try:
+                fbbox = flat_shape.BoundBox
+                use_x_for_long = fbbox.XLength >= fbbox.YLength
+                flat_bbox_long_min = float(fbbox.XMin if use_x_for_long else fbbox.YMin)
+            except Exception:
+                pass
+
+        for i, line in enumerate(r.get('bend_lines', [])):
+            try:
+                center = line.BoundBox.Center
+                cx = round(center.x, 2)
+                cy = round(center.y, 2)
+                cz = round(center.z, 2)
+                # Position along the long axis relative to the plate center
+                if flat_bbox_long_min is not None:
+                    raw_long = center.x if use_x_for_long else center.y
+                    pos_along_length = round(float(raw_long) - flat_bbox_long_min - flat_length_val / 2.0, 2)
+                else:
+                    pos_along_length = None
+                fold_details.append({
+                    'id': i + 1,
+                    'length': round(line.Length, 2),
+                    'center': (cx, cy, cz),
+                    'pos_along_length': pos_along_length,
+                })
+            except Exception:
+                pass
 
     return {
         'success': True,
@@ -1209,6 +1251,9 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
         'thickness': 0,              # dikte uit analyse zelf is betrouwbaarder
         'fold_details': fold_details,
         'bends_logical': bends_logical,
+        'attempts': r.get('attempts', 0),
+        'used_face_idx': r.get('used_face_idx'),
+        'error_details': r.get('error_details', []),
         'error': None,
     }
 
