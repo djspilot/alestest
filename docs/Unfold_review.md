@@ -57,15 +57,26 @@ Er is één implementatie. De wrapper map alleen veldnamen naar het formaat dat 
 - Optioneel limiteren op max_bends.
 
 ### Merge van gesplitste bends
-- Primaire regel is nu geometrisch: segmenten worden samengevoegd als ze collineair zijn.
-- Criteria voor 1 fysieke zetlijn:
-  - zelfde segment-as (X of Y in vlak patroon)
-  - zelfde lijn-offset op de loodrechte as binnen tolerantie (`offset_tol`, standaard 2.0 mm)
-  - vergelijkbare zethoek (en radius) per segment
-  - segmenten moeten in elkaars verlengde liggen (kleine gap), niet als overlappende/gestapelde lijnen
-- Dit dekt expliciet onderbrekingen door gaten:
-  - 2 segmenten in elkaars verlengde => 1 zetlijn
-  - 3 segmenten in elkaars verlengde => 1 zetlijn
+**Logica**: Segmenten worden samengevoegd in clusters als ze dezelfde fysieke zetlijn vertegenwoordigen. Een gat of slot (gat ≤ `gap_tol`) onderbreekt een zetlijn niet; slechts grote gaten leiden tot aparte groepen.
+
+**Toleranties en criteria** (in code-volgorde, freecad_unfold.py:878):
+
+| Criterium | Tolerantie | Gevolg |
+|-----------|-----------|--------|
+| **same_line** | `offset_tol = 2.0 mm` | Segmenten met zelfde axis (X of Y) én offset-verschil ≤ 2.0 mm (loodrechte as) → mogelijke merge |
+| **angle_ok** | `angle_tol = 1.0 °` | Als hoekverschilijnen ≤ 1.0° → mag mergen |
+| **radius_ok** | `radius_tol = 0.5 mm` | Als radius-verschil ≤ 0.5 mm → mag mergen |
+| **extension_ok** | `gap_tol = 120.0 mm` | Als gat tussen segmenten ≤ 120 mm → mag mergen (grote gaten blokkeren merge) |
+| **extension_ok** | `overlap_tol = 5.0 mm` | Als overlap ≤ 5.0 mm (niet te veel stacking) → mag mergen |
+
+**Merge-voorwaarde**: Same_line EN angle_ok EN radius_ok EN extension_ok (gap ≤ 120 mm EN overlap ≤ 5 mm)
+
+**Praktisch**:
+- 2 zetlijnstukken met zelfde hoek, 50 mm gat → merged (50 < 120)
+- 2 zetlijnstukken met zelfde hoek, 150 mm gat → apart (150 > 120)
+- Overlappingen > 5.0 mm → apart (stapeling voorkomen)
+- Hoeken > 1.0° verschil → apart
+
 - Resultaat is een lijst `bend_line_groups` met per fysieke zetlijn o.a.:
   - `id`, `segment_count`, `segment_indices`, `pos_along_length`
 
