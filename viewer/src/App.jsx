@@ -57,6 +57,7 @@ export default function App() {
   const [pipelineState, setPipelineState] = useState(EMPTY_PIPELINE_STATE)
   const [focusedStage, setFocusedStage] = useState(null)
   const [selectedHoleId, setSelectedHoleId] = useState(null)
+  const [selectedFoldId, setSelectedFoldId] = useState(null)
   const [selectedProbe, setSelectedProbe] = useState(null)
   const [probeMode, setProbeMode] = useState(false)
   const [selectedStageIndex, setSelectedStageIndex] = useState(0)
@@ -125,15 +126,17 @@ export default function App() {
   const completedStepCount = summary?.completed_step_count || 0
   const selectedStage = groupedStages[selectedStageIndex] || null
   const holeSource = pipelineVisuals?.holes?.source || null
+  const unfoldSuccess = Boolean(pipelineVisuals?.unfold?.success)
   const selectedHole = (pipelineVisuals?.holes?.items || []).find((item) => item.id === selectedHoleId) || null
   const selectedFeature = selectedHole || selectedProbe
   const selectedHoleSource = selectedFeature?.source || null
+  const showUnfoldSketch = focusedStage === 'Unfold' && unfoldSuccess && !flatMesh
   const useFlatView =
-    Boolean(flatMesh) &&
     (
       focusedStage === 'Unfold' ||
       (focusedStage === 'Detect holes' && (selectedHoleSource === 'flat' || (!selectedHoleSource && holeSource === 'flat')))
     )
+    && (Boolean(flatMesh) || showUnfoldSketch)
   const activeMesh = useFlatView ? flatMesh : backendMesh
   const shouldWaitForBackendMesh =
     pipelineEnabled &&
@@ -206,6 +209,13 @@ export default function App() {
       setSelectedHoleId(null)
     }
   }, [pipelineVisuals, selectedHoleId])
+
+  useEffect(() => {
+    const foldIds = new Set((pipelineVisuals?.unfold?.fold_details || []).map((fold, idx) => fold?.id ?? (idx + 1)))
+    if (selectedFoldId != null && !foldIds.has(selectedFoldId)) {
+      setSelectedFoldId(null)
+    }
+  }, [pipelineVisuals, selectedFoldId])
 
   useEffect(() => {
     if (pipelineState.status === 'processing') {
@@ -302,6 +312,7 @@ export default function App() {
     setModelInfo(null)
     setFocusedStage(null)
     setSelectedHoleId(null)
+    setSelectedFoldId(null)
     setSelectedProbe(null)
     setProbeMode(false)
     setSelectedStageIndex(0)
@@ -388,6 +399,7 @@ export default function App() {
     setModelInfo(null)
     setFocusedStage(null)
     setSelectedHoleId(null)
+    setSelectedFoldId(null)
     setSelectedProbe(null)
     setProbeMode(false)
     setSelectedStageIndex(0)
@@ -593,12 +605,15 @@ export default function App() {
                 backendVisuals={pipelineVisuals}
                 focusedStage={focusedStage}
                 selectedHole={selectedFeature}
+                selectedFoldId={selectedFoldId}
+                onFoldSelect={setSelectedFoldId}
                 onHoleSelect={selectHole}
                 onSurfaceProbe={handleSurfaceProbe}
                 selectedProbe={selectedProbe}
                 probeMode={probeMode}
                 controlsRef={controlsRef}
                 useFlatView={useFlatView}
+                showUnfoldSketch={showUnfoldSketch}
               />
             </Suspense>
           )}
@@ -615,6 +630,8 @@ export default function App() {
             onSelectStageIndex={handleSelectStageIndex}
             onSelectEventIndex={setSelectedEventIndex}
             selectedHoleId={selectedHoleId}
+            selectedFoldId={selectedFoldId}
+            onFoldSelect={setSelectedFoldId}
             onHoleSelect={selectHole}
             selectedProbe={selectedProbe}
             pipelineStatus={pipelineState.status}

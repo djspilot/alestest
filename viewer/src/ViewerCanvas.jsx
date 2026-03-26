@@ -859,6 +859,7 @@ function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, selecte
   const foldVisuals = (unfoldVisuals?.fold_details || []).map((fold) => ({
     position: makePosition(fold.center),
     length: fold.length || overlayExtent * 0.4,
+    id: fold.id,
   }))
 
   return (
@@ -947,6 +948,95 @@ function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, selecte
   )
 }
 
+function UnfoldSketch({ unfoldVisuals, selectedFoldId, onFoldSelect }) {
+  const length = Math.max(Number(unfoldVisuals?.flat_length) || 0, 40)
+  const width = Math.max(Number(unfoldVisuals?.flat_width) || 0, 20)
+  const bends = unfoldVisuals?.bends_logical || []
+  const foldDetails = unfoldVisuals?.fold_details || []
+  const foldCount = Math.max(unfoldVisuals?.fold_lines || 0, bends.length, foldDetails.length)
+
+  const foldRows = useMemo(() => {
+    if (foldCount <= 0) return []
+    const valuesX = foldDetails.map((f) => Number(f?.center?.[0])).filter((v) => Number.isFinite(v))
+    const valuesY = foldDetails.map((f) => Number(f?.center?.[1])).filter((v) => Number.isFinite(v))
+    const spreadX = valuesX.length > 1 ? Math.max(...valuesX) - Math.min(...valuesX) : 0
+    const spreadY = valuesY.length > 1 ? Math.max(...valuesY) - Math.min(...valuesY) : 0
+    const useX = spreadX >= spreadY
+    const axisValues = (useX ? valuesX : valuesY)
+    const minAxis = axisValues.length > 0 ? Math.min(...axisValues) : 0
+    const maxAxis = axisValues.length > 0 ? Math.max(...axisValues) : 0
+    const span = Math.max(maxAxis - minAxis, 1e-6)
+
+    return Array.from({ length: foldCount }, (_, idx) => {
+      const detail = foldDetails[idx] || {}
+      const bend = bends[idx] || {}
+      const id = detail.id || (idx + 1)
+      const rawAxis = Number(detail?.center?.[useX ? 0 : 1])
+      let u = (idx + 1) / (foldCount + 1)
+      if (Number.isFinite(rawAxis) && axisValues.length > 1) {
+        u = (rawAxis - minAxis) / span
+      }
+      const xPos = (u - 0.5) * length
+      return {
+        id,
+        xPos,
+        direction: bend.type || null,
+      }
+    })
+  }, [bends, foldCount, foldDetails, length])
+
+  return (
+    <group renderOrder={25}>
+      <mesh>
+        <planeGeometry args={[length, width]} />
+        <meshBasicMaterial color="#eef4fb" transparent opacity={0.95} side={THREE.DoubleSide} depthTest={false} depthWrite={false} />
+      </mesh>
+
+      <lineLoop renderOrder={26}>
+        <bufferGeometry>
+          <bufferAttribute
+            attach="attributes-position"
+            args={[new Float32Array([
+              -length / 2, -width / 2, 0.2,
+              length / 2, -width / 2, 0.2,
+              length / 2, width / 2, 0.2,
+              -length / 2, width / 2, 0.2,
+            ]), 3]}
+          />
+        </bufferGeometry>
+        <lineBasicMaterial color="#6b7280" transparent opacity={0.9} depthTest={false} depthWrite={false} />
+      </lineLoop>
+
+      {foldRows.map((row, index) => {
+        const selected = selectedFoldId === row.id
+        const color = selected
+          ? '#f59e0b'
+          : row.direction === 'up'
+            ? '#10b981'
+            : row.direction === 'down'
+              ? '#ef4444'
+              : '#8f0008'
+
+        return (
+          <group
+            key={`flat-fold-${row.id}-${index}`}
+            position={[row.xPos, 0, 0.35]}
+            onClick={(event) => {
+              event.stopPropagation()
+              onFoldSelect?.(row.id)
+            }}
+          >
+            <mesh>
+              <planeGeometry args={[2.2, width * 0.95]} />
+              <meshBasicMaterial color={color} transparent opacity={selected ? 1 : 0.78} side={THREE.DoubleSide} depthTest={false} depthWrite={false} />
+            </mesh>
+          </group>
+        )
+      })}
+    </group>
+  )
+}
+
 export default function ViewerCanvas({
   fileBuffer,
   activeMesh,
@@ -958,12 +1048,15 @@ export default function ViewerCanvas({
   backendVisuals,
   focusedStage,
   selectedHole,
+  selectedFoldId,
+  onFoldSelect,
   onHoleSelect,
   onSurfaceProbe,
   selectedProbe,
   probeMode = false,
   controlsRef,
   useFlatView,
+  showUnfoldSketch = false,
 }) {
   const renderMode = 'clean'
   const holeItems = backendVisuals?.holes?.items || []
@@ -996,16 +1089,26 @@ export default function ViewerCanvas({
       <hemisphereLight args={['#ffffff', '#cbd5e1', 0.75]} />
       <directionalLight position={[100, 150, 100]} intensity={0.55} />
 
-      <StepModel
-        buffer={fileBuffer}
-        mesh={activeMesh}
-        onLoaded={onLoaded}
-        onError={onError}
-        onStatus={onStatus}
-        onSurfacePick={handleSurfacePick}
-        parseMode={parseMode}
-        renderMode={renderMode}
-      />
+      {!showUnfoldSketch && (
+        <StepModel
+          buffer={fileBuffer}
+          mesh={activeMesh}
+          onLoaded={onLoaded}
+          onError={onError}
+          onStatus={onStatus}
+          onSurfacePick={handleSurfacePick}
+          parseMode={parseMode}
+          renderMode={renderMode}
+        />
+      )}
+
+      {showUnfoldSketch && focusedStage === 'Unfold' && backendVisuals?.unfold?.success && (
+        <UnfoldSketch
+          unfoldVisuals={backendVisuals.unfold}
+          selectedFoldId={selectedFoldId}
+          onFoldSelect={onFoldSelect}
+        />
+      )}
 
       <CameraFitter modelInfo={modelInfo} controlsRef={controlsRef} />
       <HoleFocusController selectedHole={selectedHole} modelInfo={modelInfo} controlsRef={controlsRef} />

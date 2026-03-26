@@ -43,6 +43,8 @@ export default function StageDetailsPanel({
   onSelectStageIndex,
   onSelectEventIndex,
   selectedHoleId,
+  selectedFoldId,
+  onFoldSelect,
   onHoleSelect,
   selectedProbe,
   pipelineStatus,
@@ -601,7 +603,15 @@ export default function StageDetailsPanel({
                             const length = detail.length != null ? Math.round(detail.length * 10) / 10 : '–'
                             const dirColor = dir === 'up' ? '#81c784' : dir === 'down' ? '#e57373' : '#aaa'
                             return (
-                              <tr key={i} style={{ borderBottom: '1px solid #222' }}>
+                              <tr
+                                key={i}
+                                style={{
+                                  borderBottom: '1px solid #222',
+                                  cursor: 'pointer',
+                                  background: selectedFoldId === (detail.id || (i + 1)) ? 'rgba(255, 59, 48, 0.15)' : 'transparent',
+                                }}
+                                onClick={() => onFoldSelect?.(detail.id || (i + 1))}
+                              >
                                 <td style={{ padding: '3px 6px 3px 0', color: '#888' }}>{i + 1}</td>
                                 <td style={{ padding: '3px 6px 3px 0', fontWeight: 600, color: dirColor }}>
                                   {dir === 'up' ? '▲ Op' : dir === 'down' ? '▼ Neer' : dir}
