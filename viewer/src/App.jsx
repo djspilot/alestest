@@ -62,7 +62,10 @@ export default function App() {
   const [error, setError] = useState(null)
   const [modelInfo, setModelInfo] = useState(null)
   const [engineStatus, setEngineStatus] = useState('Klaar')
-  const [pipelineEnabled, setPipelineEnabled] = useState(true)
+  const [pipelineEnabled, setPipelineEnabled] = useState(() => {
+    const stored = window.localStorage.getItem('ales-pipeline-enabled')
+    return stored == null ? true : stored === 'true'
+  })
   const [aagFallbackEnabled, setAagFallbackEnabled] = useState(() => {
     const stored = window.localStorage.getItem('ales-aag-fallback-enabled')
     return stored == null ? true : stored === 'true'
@@ -87,7 +90,7 @@ export default function App() {
   const [selectedEventIndex, setSelectedEventIndex] = useState(0)
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
-  const [showHiddenHoles, setShowHiddenHoles] = useState(false)
+  const [showHiddenHoles, setShowHiddenHoles] = useState(true)
   const [nowMs, setNowMs] = useState(() => Date.now())
   const controlsRef = useRef()
   const pipelineAbortRef = useRef(null)
@@ -184,6 +187,10 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    window.localStorage.setItem('ales-pipeline-enabled', String(pipelineEnabled))
+  }, [pipelineEnabled])
+
+  useEffect(() => {
     window.localStorage.setItem('ales-pipeline-api-base', pipelineApiBase)
   }, [pipelineApiBase])
 
@@ -199,13 +206,33 @@ export default function App() {
     window.localStorage.setItem('ales-disabled-stages', JSON.stringify(disabledStages))
   }, [disabledStages])
 
+  // Ref to track whether a settings change should trigger a re-run
+  const pendingRestartRef = useRef(false)
+
   const handleStageToggle = useCallback((stageKey, enabled) => {
     setDisabledStages(prev => {
       const next = enabled ? prev.filter(s => s !== stageKey) : [...prev, stageKey]
       window.localStorage.setItem('ales-disabled-stages', JSON.stringify(next))
       return next
     })
+    pendingRestartRef.current = true
   }, [])
+
+  const handleAagFallbackToggle = useCallback((value) => {
+    setAagFallbackEnabled(value)
+    pendingRestartRef.current = true
+  }, [])
+
+  // Auto-herstart pipeline wanneer stage-instellingen zijn gewijzigd en er een bestand geladen is
+  useEffect(() => {
+    if (!pendingRestartRef.current) return
+    if (!sourceFile || !pipelineEnabled) return
+    const settled = ['completed', 'failed', 'unavailable', 'auth_required', 'disabled']
+    if (!settled.includes(pipelineState.status)) return
+    pendingRestartRef.current = false
+    setPipelineState(EMPTY_PIPELINE_STATE)
+    void startPipeline(sourceFile)
+  }, [disabledStages, aagFallbackEnabled, pipelineEnabled, pipelineState.status, sourceFile, startPipeline])
 
   useEffect(() => {
     if (!pipelineEnabled) {
@@ -457,7 +484,7 @@ export default function App() {
     setSelectedEventIndex(0)
     setError(null)
     setEngineStatus('Klaar')
-    setShowHiddenHoles(false)
+    setShowHiddenHoles(true)
     setPipelineState(EMPTY_PIPELINE_STATE)
   }, [stopPipelineRequest])
 
@@ -605,7 +632,7 @@ export default function App() {
             pipelineEnabled={pipelineEnabled}
             onPipelineToggle={setPipelineEnabled}
             aagFallbackEnabled={aagFallbackEnabled}
-            onAagFallbackToggle={setAagFallbackEnabled}
+            onAagFallbackToggle={handleAagFallbackToggle}
             disabledStages={disabledStages}
             onStageToggle={handleStageToggle}
             pipelineApiBase={pipelineApiBase}
