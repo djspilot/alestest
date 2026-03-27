@@ -230,12 +230,13 @@ def _serialize_analysis_reasoning(analysis) -> list[dict]:
     return serialized
 
 
-def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=None) -> dict:
+def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=None, disable_stages: set[str] | None = None) -> dict:
     """Run the manufacturing analysis pipeline on a STEP file.
 
     Args:
         step_file: Absolute path to the STEP file.
         use_aag: Whether to run AAG topology-based feature recognition.
+        disable_stages: Set of stage keys to skip during analysis.
 
     Returns:
         Enriched result dict with analysis data, AAG details, and production info.
@@ -251,6 +252,12 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
             self.no_unfold = False
             self.no_pdf = True  # No PDF generation for API
             self.no_cache = True
+            self.disable_stages = disable_stages or set()
+            if "aag" in self.disable_stages:
+                self.aag = False
+                self.aag_fallback = False
+            if "unfold" in self.disable_stages:
+                self.no_unfold = True
 
     args = Args()
     part_name = os.path.basename(step_file)

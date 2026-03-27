@@ -121,6 +121,7 @@ export async function runPipelineAnalysis(file, options = {}) {
     apiBase = getDefaultPipelineApiBase(),
     apiKey = '',
     aag = true,
+    disableStages = [],
     onProgress,
     signal,
     pollIntervalMs = 1200,
@@ -132,7 +133,11 @@ export async function runPipelineAnalysis(file, options = {}) {
     throw new Error('Pipeline API URL ontbreekt')
   }
 
-  const analyzeUrl = `${base}/api/v1/analyze?aag=${aag ? 'true' : 'false'}`
+  const parts = [`aag=${aag ? 'true' : 'false'}`]
+  if (disableStages.length > 0) {
+    parts.push(`disable_stages=${disableStages.join(',')}`)
+  }
+  const analyzeUrl = `${base}/api/v1/analyze?${parts.join('&')}`
   const formData = new FormData()
   formData.append('file', file)
 

@@ -3,7 +3,7 @@ import Dropzone from './Dropzone'
 import Sidebar from './Sidebar'
 import StageDetailsPanel from './StageDetailsPanel'
 import { checkPipelineConnection, getDefaultPipelineApiBase, runPipelineAnalysis } from './pipelineClient'
-import { groupEventsByStage, MERGED_HOLES_STAGE, normalizeStageName, parseIsoToMs } from './pipelineUi'
+import { groupEventsByStage, MERGED_HOLES_STAGE, PRE_UNFOLD_HOLES_STAGE, normalizeStageName, parseIsoToMs } from './pipelineUi'
 
 const ViewerCanvas = lazy(() => import('./ViewerCanvas'))
 
@@ -43,6 +43,17 @@ function normalizeFoldId(value) {
   return Number.isFinite(numeric) ? numeric : String(value)
 }
 
+function isIrregularHole(hole) {
+  const type = String(hole?.type || '').toLowerCase()
+  const label = String(hole?.label || '').toLowerCase()
+  const reason = String(hole?.reason || '').toLowerCase()
+  return type.includes('irregular') || label.includes('irregular') || reason.includes('irregular')
+}
+
+function isHiddenHoleCandidate(hole) {
+  return hole?.status === 'rejected' || isIrregularHole(hole)
+}
+
 export default function App() {
   const [fileBuffer, setFileBuffer] = useState(null)
   const [fileName, setFileName] = useState(null)
@@ -55,6 +66,10 @@ export default function App() {
   const [aagFallbackEnabled, setAagFallbackEnabled] = useState(() => {
     const stored = window.localStorage.getItem('ales-aag-fallback-enabled')
     return stored == null ? true : stored === 'true'
+  })
+  const [disabledStages, setDisabledStages] = useState(() => {
+    const stored = window.localStorage.getItem('ales-disabled-stages')
+    return stored ? JSON.parse(stored) : []
   })
   const [pipelineApiBase, setPipelineApiBase] = useState(() => {
     return window.localStorage.getItem('ales-pipeline-api-base') || getDefaultPipelineApiBase()
@@ -72,6 +87,7 @@ export default function App() {
   const [selectedEventIndex, setSelectedEventIndex] = useState(0)
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
+  const [showHiddenHoles, setShowHiddenHoles] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
   const controlsRef = useRef()
   const pipelineAbortRef = useRef(null)
@@ -107,6 +123,13 @@ export default function App() {
         }
       }
 
+      if (event.stage === PRE_UNFOLD_HOLES_STAGE && event.type === 'holes_detected_pre_unfold') {
+        visuals.holes_pre_unfold = {
+          ...(visuals.holes_pre_unfold || {}),
+          ...event.payload,
+        }
+      }
+
       if (event.stage === 'Unfold' && event.type === 'unfold_result') {
         visuals.unfold = {
           ...(visuals.unfold || {}),
@@ -133,9 +156,12 @@ export default function App() {
   const totalStepsHint = summary?.total_steps_hint || summary?.step_count || groupedStages.length
   const completedStepCount = summary?.completed_step_count || 0
   const selectedStage = groupedStages[selectedStageIndex] || null
-  const holeSource = pipelineVisuals?.holes?.source || null
+  const activeHoleVisuals = focusedStage === PRE_UNFOLD_HOLES_STAGE
+    ? (pipelineVisuals?.holes_pre_unfold || pipelineVisuals?.holes || null)
+    : (pipelineVisuals?.holes || null)
+  const holeSource = activeHoleVisuals?.source || null
   const unfoldSuccess = Boolean(pipelineVisuals?.unfold?.success)
-  const selectedHole = (pipelineVisuals?.holes?.items || []).find((item) => item.id === selectedHoleId) || null
+  const selectedHole = (activeHoleVisuals?.items || []).find((item) => item.id === selectedHoleId) || null
   const selectedFeature = selectedHole || selectedProbe
   const selectedHoleSource = selectedFeature?.source || null
   const useFlatView =
@@ -168,6 +194,18 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem('ales-aag-fallback-enabled', String(aagFallbackEnabled))
   }, [aagFallbackEnabled])
+
+  useEffect(() => {
+    window.localStorage.setItem('ales-disabled-stages', JSON.stringify(disabledStages))
+  }, [disabledStages])
+
+  const handleStageToggle = useCallback((stageKey, enabled) => {
+    setDisabledStages(prev => {
+      const next = enabled ? prev.filter(s => s !== stageKey) : [...prev, stageKey]
+      window.localStorage.setItem('ales-disabled-stages', JSON.stringify(next))
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     if (!pipelineEnabled) {
@@ -209,11 +247,15 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedHoleId) return
-    const holeItems = pipelineVisuals?.holes?.items || []
+    const holeItems = activeHoleVisuals?.items || []
     if (!holeItems.some((item) => item.id === selectedHoleId)) {
       setSelectedHoleId(null)
+      return
     }
-  }, [pipelineVisuals, selectedHoleId])
+    if (!showHiddenHoles && holeItems.some((item) => item.id === selectedHoleId && isHiddenHoleCandidate(item))) {
+      setSelectedHoleId(null)
+    }
+  }, [activeHoleVisuals, selectedHoleId, showHiddenHoles])
 
   useEffect(() => {
     const foldIds = new Set([
@@ -274,6 +316,7 @@ export default function App() {
         apiBase: pipelineApiBase,
         apiKey: pipelineApiKey,
         aag: aagFallbackEnabled,
+        disableStages,
         signal: controller.signal,
         onProgress: (progress) => {
           setPipelineState((prev) => ({
@@ -304,7 +347,7 @@ export default function App() {
         error: pipelineError?.message || 'Pipeline analyse mislukt',
       }))
     }
-  }, [aagFallbackEnabled, pipelineApiBase, pipelineApiKey, pipelineEnabled, stopPipelineRequest])
+  }, [aagFallbackEnabled, disabledStages, pipelineApiBase, pipelineApiKey, pipelineEnabled, stopPipelineRequest])
 
   const handleFile = useCallback((file) => {
     const ext = file.name.split('.').pop().toLowerCase()
@@ -414,6 +457,7 @@ export default function App() {
     setSelectedEventIndex(0)
     setError(null)
     setEngineStatus('Klaar')
+    setShowHiddenHoles(false)
     setPipelineState(EMPTY_PIPELINE_STATE)
   }, [stopPipelineRequest])
 
@@ -428,13 +472,20 @@ export default function App() {
   }, [])
 
   const selectDetectHolesStage = useCallback(() => {
-    const detectStageIndex = groupedStages.findIndex((group) => group.stage === MERGED_HOLES_STAGE)
+    const preferredStage = focusedStage === PRE_UNFOLD_HOLES_STAGE ? PRE_UNFOLD_HOLES_STAGE : MERGED_HOLES_STAGE
+    let detectStageIndex = groupedStages.findIndex((group) => group.stage === preferredStage)
+    if (detectStageIndex < 0) {
+      detectStageIndex = groupedStages.findIndex((group) => group.stage === MERGED_HOLES_STAGE)
+    }
     if (detectStageIndex >= 0) {
       handleSelectStageIndex(detectStageIndex)
+      setFocusedStage(groupedStages[detectStageIndex]?.stage || MERGED_HOLES_STAGE)
+      setRightPanelOpen(true)
+      return
     }
     setFocusedStage(MERGED_HOLES_STAGE)
     setRightPanelOpen(true)
-  }, [groupedStages, handleSelectStageIndex])
+  }, [focusedStage, groupedStages, handleSelectStageIndex])
 
   const selectHole = useCallback((holeId) => {
     selectDetectHolesStage()
@@ -555,6 +606,8 @@ export default function App() {
             onPipelineToggle={setPipelineEnabled}
             aagFallbackEnabled={aagFallbackEnabled}
             onAagFallbackToggle={setAagFallbackEnabled}
+            disabledStages={disabledStages}
+            onStageToggle={handleStageToggle}
             pipelineApiBase={pipelineApiBase}
             onPipelineApiBaseChange={setPipelineApiBase}
             pipelineApiKey={pipelineApiKey}
@@ -624,6 +677,7 @@ export default function App() {
                 parseMode={parseMode}
                 modelInfo={modelInfo}
                 backendVisuals={pipelineVisuals}
+                activeHoleVisuals={activeHoleVisuals}
                 focusedStage={focusedStage}
                 selectedHole={selectedFeature}
                 selectedFoldId={selectedFoldId}
@@ -634,6 +688,7 @@ export default function App() {
                 probeMode={probeMode}
                 controlsRef={controlsRef}
                 useFlatView={useFlatView}
+                showHiddenHoles={showHiddenHoles}
               />
             </Suspense>
           )}
@@ -655,6 +710,8 @@ export default function App() {
             onHoleSelect={selectHole}
             selectedProbe={selectedProbe}
             pipelineStatus={pipelineState.status}
+            showHiddenHoles={showHiddenHoles}
+            onShowHiddenHolesChange={setShowHiddenHoles}
           />
         )}
       </div>

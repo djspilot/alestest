@@ -6,6 +6,7 @@ import {
   formatLabel,
   getStageMeta,
   MERGED_HOLES_STAGE,
+  PRE_UNFOLD_HOLES_STAGE,
   summarizePayload,
 } from './pipelineUi'
 
@@ -14,6 +15,13 @@ function getHoleStatusLabel(status) {
   if (status === 'rejected') return 'Afgewezen'
   if (status === 'probe') return 'Handmatige probe'
   return status || 'Onbekend'
+}
+
+function getHoleMethodLabel(method) {
+  if (method === 'face_boundary_primary') return 'Face Boundary (primair)'
+  if (method === 'recovery_bucket_fallback') return 'Recovery Bucket (fallback)'
+  if (method === 'cylindrical_detector') return 'Cylindrical detector'
+  return method || 'Onbekend'
 }
 
 function getClassificationStatusLabel(status) {
@@ -40,6 +48,17 @@ function normalizeFoldId(value) {
   return Number.isFinite(numeric) ? numeric : String(value)
 }
 
+function isIrregularHole(hole) {
+  const type = String(hole?.type || '').toLowerCase()
+  const label = String(hole?.label || '').toLowerCase()
+  const reason = String(hole?.reason || '').toLowerCase()
+  return type.includes('irregular') || label.includes('irregular') || reason.includes('irregular')
+}
+
+function isHiddenHoleCandidate(hole) {
+  return hole?.status === 'rejected' || isIrregularHole(hole)
+}
+
 export default function StageDetailsPanel({
   pipelineVisuals,
   groupedStages,
@@ -55,6 +74,8 @@ export default function StageDetailsPanel({
   onHoleSelect,
   selectedProbe,
   pipelineStatus,
+  showHiddenHoles,
+  onShowHiddenHolesChange,
 }) {
   const [holeFilter, setHoleFilter] = useState('all')
   const selectedStage = groupedStages[selectedStageIndex] || null
@@ -67,7 +88,11 @@ export default function StageDetailsPanel({
   const classificationFinal = classificationVisuals?.final_decision || null
   const step0Review = classificationVisuals?.step0_review || null
   const legacyClassification = classificationVisuals?.legacy_classification || null
-  const holeVisuals = pipelineVisuals?.holes || null
+  const isPreUnfoldHoleStage = selectedStage?.stage === PRE_UNFOLD_HOLES_STAGE
+  const isMergedHoleStage = selectedStage?.stage === MERGED_HOLES_STAGE
+  const holeVisuals = isPreUnfoldHoleStage
+    ? (pipelineVisuals?.holes_pre_unfold || pipelineVisuals?.holes || null)
+    : (pipelineVisuals?.holes || null)
   const unfoldVisuals = pipelineVisuals?.unfold || null
   const holeItems = holeVisuals?.items || []
   const foldRows = useMemo(() => {
@@ -96,11 +121,16 @@ export default function StageDetailsPanel({
   const normalizedSelectedFoldId = normalizeFoldId(selectedFoldId)
   const selectedFold = foldRows.find((row) => row.id === normalizedSelectedFoldId) || null
   const selectedInspection = selectedHole || selectedProbe
+  const hiddenHoleItems = useMemo(() => holeItems.filter((hole) => isHiddenHoleCandidate(hole)), [holeItems])
+  const baseVisibleHoleItems = useMemo(() => {
+    if (showHiddenHoles) return holeItems
+    return holeItems.filter((hole) => !isHiddenHoleCandidate(hole))
+  }, [holeItems, showHiddenHoles])
   const visibleHoleItems = useMemo(() => {
-    if (holeFilter === 'accepted') return holeItems.filter((hole) => hole.status === 'accepted')
-    if (holeFilter === 'rejected') return holeItems.filter((hole) => hole.status === 'rejected')
-    return holeItems
-  }, [holeFilter, holeItems])
+    if (holeFilter === 'accepted') return baseVisibleHoleItems.filter((hole) => hole.status === 'accepted')
+    if (holeFilter === 'rejected') return baseVisibleHoleItems.filter((hole) => hole.status === 'rejected')
+    return baseVisibleHoleItems
+  }, [baseVisibleHoleItems, holeFilter])
 
   if (!selectedStage) {
     return (
@@ -182,14 +212,23 @@ export default function StageDetailsPanel({
 
         {selectedEvent && (
           <div className="timeline-payload">
-            {selectedStage.stage === MERGED_HOLES_STAGE && holeVisuals && (
+            {(isMergedHoleStage || isPreUnfoldHoleStage) && holeVisuals && (
               <div className="visual-stage-card" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none' }}>
                 <div className="timeline-title">Hole Overlay</div>
                 <div className="timeline-text">
                   Bron: {holeVisuals.source || '-'} | Geaccepteerd: {holeVisuals.accepted_total || 0} | Afgewezen: {holeVisuals.rejected_total || 0} | Kandidaten: {holeVisuals.total_candidates || 0}
                 </div>
+                <div className="timeline-text">
+                  Viewer: zichtbaar {baseVisibleHoleItems.length} | incl. verborgen {holeItems.length}
+                  {hiddenHoleItems.length > 0 ? ` (verborgen: ${hiddenHoleItems.length})` : ''}
+                </div>
                 {holeVisuals.criteria_note && (
                   <div className="timeline-text">{holeVisuals.criteria_note}</div>
+                )}
+                {Array.isArray(holeVisuals.method_order) && holeVisuals.method_order.length > 0 && (
+                  <div className="timeline-text">
+                    Methodiekvolgorde: {holeVisuals.method_order.join(' -> ')}
+                  </div>
                 )}
                 {holeVisuals.thresholds && (
                   <div className="reasoning-list" style={{ marginTop: 8 }}>
@@ -217,6 +256,15 @@ export default function StageDetailsPanel({
                   <button className={`hole-filter-btn ${holeFilter === 'accepted' ? 'is-active' : ''}`} onClick={() => setHoleFilter('accepted')}>Geaccepteerd</button>
                   <button className={`hole-filter-btn ${holeFilter === 'rejected' ? 'is-active' : ''}`} onClick={() => setHoleFilter('rejected')}>Afgewezen</button>
                 </div>
+                <div className="hole-toggle-row">
+                  <button
+                    className={`hole-filter-btn ${showHiddenHoles ? 'is-active' : ''}`}
+                    onClick={() => onShowHiddenHolesChange?.(!showHiddenHoles)}
+                    title="Toon of verberg afgewezen en irregulaire kandidaten"
+                  >
+                    {showHiddenHoles ? 'Verberg afgewezen/irregulair' : 'Toon afgewezen/irregulair'}
+                  </button>
+                </div>
                 <div className="hole-list">
                   {visibleHoleItems.map((hole) => (
                     <button
@@ -240,6 +288,7 @@ export default function StageDetailsPanel({
                         {selectedInspection.label || formatLabel(selectedInspection.type)} | {getHoleStatusLabel(selectedInspection.status)}
                       </div>
                       <div className="timeline-text">{selectedInspection.reason || 'Geen toelichting'}</div>
+                      <div className="timeline-text">Methodiek: {getHoleMethodLabel(selectedInspection.method)}</div>
                       <pre className="timeline-payload-value">{formatDetailValue(selectedInspection.position)}</pre>
                       {selectedInspection.inferredContour && (
                         <div className="timeline-text">

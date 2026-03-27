@@ -3,7 +3,7 @@ import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import StepModel from './StepModel'
-import { MERGED_HOLES_STAGE } from './pipelineUi'
+import { MERGED_HOLES_STAGE, PRE_UNFOLD_HOLES_STAGE } from './pipelineUi'
 
 function normalizeFoldId(value) {
   if (value === null || value === undefined || value === '') return null
@@ -533,6 +533,17 @@ function inferProbeContour(point, normal, mesh, center, modelInfo) {
   }
 
   return null
+}
+
+function isIrregularHole(hole) {
+  const type = String(hole?.type || '').toLowerCase()
+  const label = String(hole?.label || '').toLowerCase()
+  const reason = String(hole?.reason || '').toLowerCase()
+  return type.includes('irregular') || label.includes('irregular') || reason.includes('irregular')
+}
+
+function isHiddenHoleCandidate(hole) {
+  return hole?.status === 'rejected' || isIrregularHole(hole)
 }
 
 function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSelect }) {
@@ -1096,11 +1107,15 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
   )
 }
 
-function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, selectedProbe, selectedFoldId, onFoldSelect, onHoleSelect, useFlatView }) {
+function StageOverlays({ modelInfo, visuals, holeVisuals, focusedStage, selectedHole, selectedProbe, selectedFoldId, onFoldSelect, onHoleSelect, useFlatView, showHiddenHoles }) {
   const center = modelInfo?.center
   if (!center || !visuals || !focusedStage) return null
 
-  const holeVisuals = visuals?.holes?.items || []
+  const isHoleStage = focusedStage === MERGED_HOLES_STAGE || focusedStage === PRE_UNFOLD_HOLES_STAGE
+  const holeItems = holeVisuals?.items || []
+  const visibleHoleVisuals = showHiddenHoles
+    ? holeItems
+    : holeItems.filter((hole) => !isHiddenHoleCandidate(hole))
   const routerVisuals = visuals?.router || null
   const classificationVisuals = visuals?.classification || null
   const unfoldVisuals = visuals?.unfold || null
@@ -1159,7 +1174,7 @@ function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, selecte
 
   return (
       <group>
-      {focusedStage === MERGED_HOLES_STAGE && holeVisuals.map((hole, index) => (
+      {isHoleStage && visibleHoleVisuals.map((hole, index) => (
         <HoleOutline
           key={hole.id || `${hole.type}-${index}`}
           hole={hole}
@@ -1171,7 +1186,7 @@ function StageOverlays({ modelInfo, visuals, focusedStage, selectedHole, selecte
         />
       ))}
 
-      {focusedStage === MERGED_HOLES_STAGE && selectedProbe && (
+      {isHoleStage && selectedProbe && (
         <ManualProbeOverlay probe={selectedProbe} center={center} modelInfo={modelInfo} />
       )}
 
@@ -1235,6 +1250,7 @@ export default function ViewerCanvas({
   parseMode,
   modelInfo,
   backendVisuals,
+  activeHoleVisuals,
   focusedStage,
   selectedHole,
   selectedFoldId,
@@ -1245,9 +1261,13 @@ export default function ViewerCanvas({
   probeMode = false,
   controlsRef,
   useFlatView,
+  showHiddenHoles = false,
 }) {
   const renderMode = 'clean'
-  const holeItems = backendVisuals?.holes?.items || []
+  const holeItems = activeHoleVisuals?.items || backendVisuals?.holes?.items || []
+  const visibleHoleItems = showHiddenHoles
+    ? holeItems
+    : holeItems.filter((hole) => !isHiddenHoleCandidate(hole))
   const bend3dItems = backendVisuals?.unfold?.bends_3d || []
   const normalizedSelectedFoldId = normalizeFoldId(selectedFoldId)
   const selectedFold = useFlatView
@@ -1258,7 +1278,7 @@ export default function ViewerCanvas({
     const point = sample?.point || sample
     if (!modelInfo?.center || !point) return
     event?.stopPropagation?.()
-    const closest = findClosestHoleByPoint(point, holeItems, modelInfo.center)
+    const closest = findClosestHoleByPoint(point, visibleHoleItems, modelInfo.center)
     const inferredContour = inferProbeContour(point, sample?.normal, activeMesh, modelInfo.center, modelInfo)
     onSurfaceProbe?.({
       point,
@@ -1267,7 +1287,7 @@ export default function ViewerCanvas({
       nearestHoleDistance: closest?.distance || null,
       inferredContour,
     })
-  }, [activeMesh, holeItems, modelInfo, onSurfaceProbe, probeMode])
+  }, [activeMesh, modelInfo, onSurfaceProbe, probeMode, visibleHoleItems])
 
   return (
     <Canvas
@@ -1309,6 +1329,7 @@ export default function ViewerCanvas({
       <StageOverlays
         modelInfo={modelInfo}
         visuals={backendVisuals}
+        holeVisuals={activeHoleVisuals || backendVisuals?.holes || null}
         focusedStage={focusedStage}
         selectedHole={selectedHole}
         selectedProbe={selectedProbe}
@@ -1316,6 +1337,7 @@ export default function ViewerCanvas({
         onFoldSelect={onFoldSelect}
         onHoleSelect={onHoleSelect}
         useFlatView={useFlatView}
+        showHiddenHoles={showHiddenHoles}
       />
       {!useFlatView && <gridHelper args={[500, 18, '#d4d9e1', '#edf1f5']} />}
       <SceneControls controlsRef={controlsRef} />

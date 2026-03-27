@@ -230,6 +230,7 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
     7. Generate report
     """
     from manufacturing_pipeline.analysis.step_processing import load_step_file, detect_holes, detect_shaped_holes, deduplicate_holes, precompute_face_properties
+    from manufacturing_pipeline.analysis.cut_features import _detect_closed_inner_contours
     from manufacturing_pipeline.analysis.part_analyzer import analyze_part_geometry, format_analysis_report, PartType
     from manufacturing_pipeline.core.profiler import AnalysisProfiler
 
@@ -860,6 +861,107 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
         },
     )
 
+    # Pre-unfold snapshot for viewer: detect holes on original 3D geometry
+    # before any flattening, so pre/post unfold can be compared in timeline.
+    if part_category == "GEBOGEN PLAATWERK" and not args.no_unfold:
+        try:
+            pre_circular_holes, pre_circular_debug = detect_holes(
+                shape,
+                is_flat_pattern=False,
+                is_turned=analysis.is_turned,
+                face_data=face_data,
+                return_debug=True,
+            )
+            pre_shaped_holes, pre_shaped_debug = detect_shaped_holes(
+                shape,
+                face_data=face_data,
+                is_flat_pattern=False,
+                return_debug=True,
+            )
+            pre_circular_holes, pre_dedup_rejections = deduplicate_holes(
+                pre_circular_holes,
+                pre_shaped_holes,
+                return_debug=True,
+            )
+
+            pre_total_holes = len(pre_circular_holes) + len(pre_shaped_holes)
+            pre_debug_items = []
+            for item in pre_circular_debug + pre_shaped_debug:
+                normalized_item = dict(item)
+                normalized_item["source"] = "3d-preunfold"
+                pre_debug_items.append(normalized_item)
+
+            for rejection in pre_dedup_rejections:
+                for item in pre_debug_items:
+                    if item.get("id") == rejection.get("id"):
+                        item["status"] = "rejected"
+                        item["reason"] = rejection.get("reason")
+                        item["criteria"] = [
+                            *(item.get("criteria") or []),
+                            *(rejection.get("criteria") or []),
+                        ]
+                        break
+
+            pre_accepted = sum(1 for item in pre_debug_items if item.get("status") == "accepted")
+            pre_rejected = sum(1 for item in pre_debug_items if item.get("status") == "rejected")
+
+            analysis.detected_hole_visuals_pre_unfold = {
+                "source": "3d-preunfold",
+                "method_order": [
+                    "detect_holes_cylindrical",
+                    "face_boundary_primary_for_irregular",
+                    "recovery_bucket_fallback_for_unclassified",
+                ],
+                "criteria_note": "Pre-unfold snapshot op originele 3D geometrie (voor vergelijking met flat detectie).",
+                "total_candidates": len(pre_debug_items),
+                "accepted_total": pre_accepted,
+                "rejected_total": pre_rejected,
+                "items": [
+                    {
+                        "id": str(item.get("id") or ""),
+                        "status": str(item.get("status") or "accepted"),
+                        "type": str(item.get("type", "hole")).lower(),
+                        "diameter": float(item.get("diameter", 0.0) or 0.0) if item.get("diameter") is not None else None,
+                        "depth": float(item.get("depth", 0.0) or 0.0) if item.get("depth") is not None else None,
+                        "position": [
+                            float((item.get("position") or (0.0, 0.0, 0.0))[0]),
+                            float((item.get("position") or (0.0, 0.0, 0.0))[1]),
+                            float((item.get("position") or (0.0, 0.0, 0.0))[2]),
+                        ],
+                        "label": str(item.get("label") or item.get("type") or "Hole"),
+                        "reason": str(item.get("reason") or "Geen toelichting"),
+                        "axis": list(item.get("axis") or (1.0, 0.0, 0.0)),
+                        "normal": list(item.get("normal") or (1.0, 0.0, 0.0)),
+                        "size": str(item.get("size", "")),
+                        "source": "3d-preunfold",
+                        "method": str(item.get("method") or ("cylindrical_detector" if str(item.get("type", "hole")).lower() == "cylindrical" else "unknown")),
+                        "criteria": item.get("criteria") or [],
+                        "contour_points": [
+                            [float(pt[0]), float(pt[1]), float(pt[2])]
+                            for pt in (item.get("contour_points") or [])
+                            if isinstance(pt, (list, tuple)) and len(pt) >= 3
+                        ],
+                    }
+                    for item in pre_debug_items
+                ],
+            }
+
+            profiler.emit(
+                "holes_detected_pre_unfold",
+                "Detect holes (pre-unfold)",
+                {
+                    "total": pre_total_holes,
+                    "cylindrical": len(pre_circular_holes),
+                    "shaped": len(pre_shaped_holes),
+                    "accepted": pre_accepted,
+                    "rejected": pre_rejected,
+                    **analysis.detected_hole_visuals_pre_unfold,
+                },
+                status="OK",
+            )
+        except Exception:
+            pass
+
     # ================================================================
     # STEP 5: Unfold if gebogen plaatwerk
     # ================================================================
@@ -931,12 +1033,27 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
     # ================================================================
     print("\n[6/7] Detecting holes...")
     with profiler.step("Detect holes", 6, 7):
+        pre_unfold_shaped_holes = []
+        pre_unfold_shaped_debug = []
+
         if flat_shape is not None:
             print(f"  Analyseren op: UITSLAG (flat pattern)")
             analysis_shape = flat_shape
             is_flat = True
             # Precompute face data for flat pattern (different shape)
             hole_face_data = precompute_face_properties(flat_shape)
+
+            # Also detect shaped contours on original 3D model before unfold.
+            # Some irregular inner wires can be altered/lost by unfold conversion.
+            try:
+                pre_unfold_shaped_holes, pre_unfold_shaped_debug = detect_shaped_holes(
+                    shape,
+                    face_data=face_data,
+                    is_flat_pattern=False,
+                    return_debug=True,
+                )
+            except Exception:
+                pre_unfold_shaped_holes, pre_unfold_shaped_debug = [], []
         else:
             print(f"  Analyseren op: 3D model")
             analysis_shape = shape
@@ -957,6 +1074,288 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                 is_flat_pattern=is_flat,
                 return_debug=True,
             )
+
+        # If unfold is active, bridge missing irregular shaped holes from pre-unfold 3D.
+        if is_flat and pre_unfold_shaped_holes:
+            def _norm(v):
+                return str(v or "").strip().lower()
+
+            def _is_irregular_candidate(hole):
+                return "irregular" in _norm(hole.get("type"))
+
+            def _same_xy(a, b, tol=1.0):
+                dx = float(a[0]) - float(b[0])
+                dy = float(a[1]) - float(b[1])
+                return math.sqrt(dx * dx + dy * dy) <= tol
+
+            existing_flat_points = [tuple(h.get("center", (0.0, 0.0, 0.0))) for h in shaped_holes]
+            bridge_count = 0
+
+            for idx, hole in enumerate(pre_unfold_shaped_holes):
+                if not _is_irregular_candidate(hole):
+                    continue
+
+                center = hole.get("center")
+                if center is None:
+                    continue
+
+                if any(_same_xy(center, p) for p in existing_flat_points):
+                    continue
+
+                item_id = f"hole-preunfold-{len(shaped_holes) + bridge_count}"
+                bridge_count += 1
+
+                shaped_holes.append({
+                    "id": item_id,
+                    "type": hole.get("type") or "Irregular contour",
+                    "dim": hole.get("dim") or "",
+                    "center": center,
+                    "normal": hole.get("normal") or (1.0, 0.0, 0.0),
+                    "perimeter": float(hole.get("perimeter") or 0.0),
+                    "contour_points": hole.get("contour_points") or [],
+                    "method": "pre_unfold_face_boundary_bridge",
+                })
+                shaped_debug.append({
+                    "id": item_id,
+                    "status": "accepted",
+                    "type": "irregular_contour",
+                    "label": hole.get("dim") or "Irregular contour",
+                    "reason": "Toegevoegd vanuit pre-unfold 3D face boundaries (bridge)",
+                    "method": "pre_unfold_face_boundary_bridge",
+                    "criteria": [
+                        {
+                            "name": "pre_unfold_bridge",
+                            "value": True,
+                            "threshold": True,
+                            "passed": True,
+                            "note": "Irregulaire contour bestond pre-unfold maar ontbrak op flat detectie",
+                        }
+                    ],
+                    "position": center,
+                    "normal": hole.get("normal") or (1.0, 0.0, 0.0),
+                    "size": hole.get("dim") or "",
+                    "perimeter": float(hole.get("perimeter") or 0.0),
+                    "contour_points": hole.get("contour_points") or [],
+                    "source": "3d-preunfold",
+                })
+                existing_flat_points.append(tuple(center))
+
+        # Face Boundary is leading for irregular contours. If any closed inner contour
+        # is still unmatched after cylindrical+shaped detection, add it explicitly.
+        try:
+            from OCP.TopExp import TopExp_Explorer
+            from OCP.TopAbs import TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE
+            from OCP.TopoDS import TopoDS
+            from OCP.BRepTools import BRepTools
+            from OCP.BRepAdaptor import BRepAdaptor_Surface, BRepAdaptor_Curve
+            from OCP.GeomAbs import GeomAbs_Plane, GeomAbs_Circle
+            from OCP.GProp import GProp_GProps
+            from OCP.BRepGProp import BRepGProp
+            from OCP.Bnd import Bnd_Box
+            from OCP.BRepBndLib import BRepBndLib
+
+            shape_for_contours = None
+            if hasattr(analysis_shape, "val"):
+                val = analysis_shape.val()
+                shape_for_contours = val.wrapped if hasattr(val, "wrapped") else val
+            elif hasattr(analysis_shape, "wrapped"):
+                shape_for_contours = analysis_shape.wrapped
+            else:
+                shape_for_contours = analysis_shape
+
+            closed_inner_contours = _detect_closed_inner_contours(shape_for_contours) if shape_for_contours is not None else []
+
+            existing_points = []
+            existing_points.extend([tuple(getattr(h, "position", (0.0, 0.0, 0.0))) for h in circular_holes])
+            existing_points.extend([tuple(h.get("center", (0.0, 0.0, 0.0))) for h in shaped_holes])
+            circular_points = [tuple(getattr(h, "position", (0.0, 0.0, 0.0))) for h in circular_holes]
+
+            def _distance(a, b):
+                dx = float(a[0]) - float(b[0])
+                dy = float(a[1]) - float(b[1])
+                dz = float(a[2]) - float(b[2])
+                return math.sqrt(dx * dx + dy * dy + dz * dz)
+
+            def _is_same_detection(a, b):
+                dx = float(a[0]) - float(b[0])
+                dy = float(a[1]) - float(b[1])
+                dz = float(a[2]) - float(b[2])
+                planar = math.sqrt(dx * dx + dy * dy)
+                if is_flat:
+                    # Flat holes are represented on top/bottom surfaces with Z offset.
+                    # Match by XY first so we don't duplicate circular contours.
+                    return planar <= 1.0
+                return math.sqrt(dx * dx + dy * dy + dz * dz) <= 2.0
+
+            injected_count = 0
+            for contour in closed_inner_contours:
+                center = contour.get("center")
+                if center is None:
+                    continue
+
+                dim_text = str(contour.get("dim") or "")
+                dim_parts = dim_text.lower().split("x") if "x" in dim_text.lower() else []
+                is_round_contour = False
+                if len(dim_parts) == 2:
+                    try:
+                        dim_a = abs(float(dim_parts[0].strip()))
+                        dim_b = abs(float(dim_parts[1].strip()))
+                        if dim_a > 0 and dim_b > 0:
+                            ratio = max(dim_a, dim_b) / max(min(dim_a, dim_b), 1e-6)
+                            is_round_contour = ratio <= 1.15
+                    except Exception:
+                        pass
+
+                if is_round_contour:
+                    # Usually covered by cylindrical detection. If not matched,
+                    # keep as fallback to avoid missing circular-like contours.
+                    if any(_is_same_detection(center, point) for point in circular_points):
+                        continue
+                    if any(_distance(center, point) <= 5.0 for point in circular_points):
+                        continue
+
+                if any(_is_same_detection(center, point) for point in existing_points):
+                    continue
+
+                item_id = f"hole-face-boundary-{len(shaped_holes) + injected_count}"
+                injected_count += 1
+
+                shaped_holes.append({
+                    "id": item_id,
+                    "type": "Closed contour" if is_round_contour else "Irregular contour",
+                    "dim": str(contour.get("dim") or ""),
+                    "center": center,
+                    "normal": contour.get("normal") or (1.0, 0.0, 0.0),
+                    "perimeter": float(contour.get("perimeter") or 0.0),
+                    "method": "face_boundary_round_contour_fallback" if is_round_contour else "face_boundary_primary",
+                })
+                shaped_debug.append({
+                    "id": item_id,
+                    "status": "accepted",
+                    "type": "closed_contour" if is_round_contour else "irregular_contour",
+                    "label": str(contour.get("dim") or ("Closed contour" if is_round_contour else "Irregular contour")),
+                    "reason": "Toegevoegd vanuit Face Boundary als ontbrekende gesloten contour"
+                    + (" (circular fallback)" if is_round_contour else ""),
+                    "method": "face_boundary_round_contour_fallback" if is_round_contour else "face_boundary_primary",
+                    "criteria": [
+                        {
+                            "name": "method_order",
+                            "value": "primary",
+                            "threshold": "face_boundary_primary_first",
+                            "passed": True,
+                            "note": "Ontbrekende contour aangevuld vanuit closed inner contours",
+                        }
+                    ],
+                    "position": center,
+                    "normal": contour.get("normal") or (1.0, 0.0, 0.0),
+                    "size": str(contour.get("dim") or ""),
+                    "perimeter": float(contour.get("perimeter") or 0.0),
+                    "source": "flat" if is_flat else "3d",
+                })
+                existing_points.append(tuple(center))
+
+            # Extra fallback: circular inner wires directly from planar faces.
+            # Some circular contours are not recovered through cylindrical faces
+            # and can be missed after unfold/topology conversion.
+            if shape_for_contours is not None:
+                circular_wire_seen = []
+                circular_wire_added = 0
+                face_exp = TopExp_Explorer(shape_for_contours, TopAbs_FACE)
+                while face_exp.More():
+                    face = TopoDS.Face_s(face_exp.Current())
+                    face_exp.Next()
+
+                    surf = BRepAdaptor_Surface(face, True)
+                    if surf.GetType() != GeomAbs_Plane:
+                        continue
+
+                    outer = BRepTools.OuterWire_s(face)
+                    wire_exp = TopExp_Explorer(face, TopAbs_WIRE)
+                    while wire_exp.More():
+                        wire = TopoDS.Wire_s(wire_exp.Current())
+                        wire_exp.Next()
+                        if wire.IsSame(outer):
+                            continue
+
+                        edge_exp = TopExp_Explorer(wire, TopAbs_EDGE)
+                        edge_count = 0
+                        circle_count = 0
+                        while edge_exp.More():
+                            edge = TopoDS.Edge_s(edge_exp.Current())
+                            edge_exp.Next()
+                            curve = BRepAdaptor_Curve(edge)
+                            edge_count += 1
+                            if curve.GetType() == GeomAbs_Circle:
+                                circle_count += 1
+
+                        is_circular_wire = (edge_count == 1 and circle_count == 1) or (edge_count == 2 and circle_count == 2)
+                        if not is_circular_wire:
+                            continue
+
+                        props = GProp_GProps()
+                        BRepGProp.LinearProperties_s(wire, props)
+                        c = props.CentreOfMass()
+                        center = (float(c.X()), float(c.Y()), float(c.Z()))
+
+                        if any(math.hypot(center[0] - seen[0], center[1] - seen[1]) <= 1.0 for seen in circular_wire_seen):
+                            continue
+                        circular_wire_seen.append(center)
+
+                        if any(_distance(center, point) <= 1.0 for point in existing_points):
+                            continue
+
+                        if any(math.hypot(center[0] - point[0], center[1] - point[1]) <= 4.8 for point in circular_points):
+                            continue
+
+                        if circular_wire_added >= 3:
+                            continue
+
+                        bbox = Bnd_Box()
+                        BRepBndLib.Add_s(wire, bbox)
+                        xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
+                        dx = max(0.0, float(xmax - xmin))
+                        dy = max(0.0, float(ymax - ymin))
+                        dim_a = round(max(dx, dy), 1)
+                        dim_b = round(min(dx, dy), 1)
+                        dim_text = f"{dim_a}x{dim_b}"
+
+                        item_id = f"hole-face-circular-wire-{len(shaped_holes)}"
+                        shaped_holes.append({
+                            "id": item_id,
+                            "type": "Closed contour",
+                            "dim": dim_text,
+                            "center": center,
+                            "normal": (1.0, 0.0, 0.0),
+                            "perimeter": float(props.Mass() or 0.0),
+                            "method": "face_boundary_circular_wire_fallback",
+                        })
+                        shaped_debug.append({
+                            "id": item_id,
+                            "status": "accepted",
+                            "type": "closed_contour",
+                            "label": dim_text,
+                            "reason": "Toegevoegd vanuit circular inner wire fallback op face boundaries",
+                            "method": "face_boundary_circular_wire_fallback",
+                            "criteria": [
+                                {
+                                    "name": "circular_wire_fallback",
+                                    "value": True,
+                                    "threshold": True,
+                                    "passed": True,
+                                    "note": "Ronde inner wire zonder match in bestaande detecties",
+                                }
+                            ],
+                            "position": center,
+                            "normal": (1.0, 0.0, 0.0),
+                            "size": dim_text,
+                            "perimeter": float(props.Mass() or 0.0),
+                            "source": "flat" if is_flat else "3d",
+                        })
+                        existing_points.append(tuple(center))
+                        circular_wire_added += 1
+        except Exception:
+            pass
+
         profiler.set_sub_count("Shaped", len(shaped_holes))
 
         with profiler.sub_step("Dedup"):
@@ -996,6 +1395,13 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
 
     analysis.detected_hole_visuals = {
         "source": "flat" if is_flat else "3d",
+        "method_order": [
+            "detect_holes_cylindrical",
+            "face_boundary_primary_for_irregular",
+            "pre_unfold_face_boundary_bridge_for_missing_irregular",
+            "recovery_bucket_fallback_for_unclassified",
+        ],
+        "criteria_note": "Irregulaire contouren: eerst Face Boundary (inner wires), daarna pas Recovery Bucket fallback.",
         "total_candidates": len(hole_debug_items),
         "accepted_total": accepted_hole_count,
         "rejected_total": rejected_hole_count,
@@ -1017,6 +1423,7 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                 "normal": list(item.get("normal") or (1.0, 0.0, 0.0)),
                 "size": str(item.get("size", "")),
                 "source": str(item.get("source") or ("flat" if is_flat else "3d")),
+                "method": str(item.get("method") or ("cylindrical_detector" if str(item.get("type", "hole")).lower() == "cylindrical" else "unknown")),
                 "criteria": item.get("criteria") or [],
                 "contour_points": [
                     [float(pt[0]), float(pt[1]), float(pt[2])]

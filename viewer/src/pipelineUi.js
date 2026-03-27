@@ -11,6 +11,7 @@ export const STATUS_LABELS = {
 }
 
 export const MERGED_HOLES_STAGE = 'Unfold / Detect holes'
+export const PRE_UNFOLD_HOLES_STAGE = 'Detect holes (pre-unfold)'
 
 export function summarizePayload(payload) {
   if (!payload || typeof payload !== 'object') return ''
@@ -134,7 +135,7 @@ export function getStageMeta(group, summary, liveActiveElapsed, pipelineStatus =
   return {
     stateLabel: `${group?.events?.length || 0} events`,
     elapsed: null,
-    isSelectable: false,
+    isSelectable: (group?.events?.length || 0) > 0,
     pendingReason: null,
   }
 }

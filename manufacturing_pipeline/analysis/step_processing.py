@@ -1570,6 +1570,7 @@ def _recover_contours_from_bucket(bucket_entries, tolerance=0.05):
             "normal": normal,
             "perimeter": perimeter,
             "contour_points": contour_points,
+            "method": "recovery_bucket_fallback",
         })
         debug_items.append({
             "id": item_id,
@@ -1577,7 +1578,15 @@ def _recover_contours_from_bucket(bucket_entries, tolerance=0.05):
             "type": str(shape_type).lower().replace(" ", "_"),
             "label": dim_str or shape_type,
             "reason": "Geaccepteerd via recovery bucket (gemengde contour line/arc)",
+            "method": "recovery_bucket_fallback",
             "criteria": [
+                {
+                    "name": "method_order",
+                    "value": "fallback",
+                    "threshold": "face_boundary_primary_first",
+                    "passed": True,
+                    "note": "Pas gebruikt nadat Face Boundary geen herkenbare vorm gaf",
+                },
                 {
                     "name": "recovery_bucket",
                     "value": True,
@@ -1761,6 +1770,7 @@ def detect_shaped_holes(shape, face_data=None, is_flat_pattern=False, return_deb
                         "normal": normal,
                         "perimeter": perimeter,
                         "contour_points": contour_points,
+                        "method": "face_boundary_primary",
                     }
                     all_shaped_holes.append(candidate)
                     debug_items.append({
@@ -1773,7 +1783,10 @@ def detect_shaped_holes(shape, face_data=None, is_flat_pattern=False, return_deb
                             if shape_type == "Closed contour"
                             else f"Geaccepteerd als {shape_type}"
                         ),
+                        "method": "face_boundary_primary",
                         "criteria": [
+                            make_criterion("method_order", "primary", "face_boundary_primary_first", True, "Eerst geprobeerd via inner wires van face"),
+                            make_criterion("face_boundary", True, True, True, "Outer wire uitgesloten; inner wires als hole-kandidaten"),
                             make_criterion("recognized_shape", shape_type, "known", True, f"{lines} lijnen / {circles} bogen"),
                             make_criterion("shape_family", shape_family, "slot/rect/poly/closed_contour", True, "Inner wire op planar face"),
                             make_criterion("closed_inner_wire", True, True, True, "Inner wire van planar face wordt als gesloten contour behandeld"),
@@ -1787,31 +1800,48 @@ def detect_shaped_holes(shape, face_data=None, is_flat_pattern=False, return_deb
                         "source": source,
                     })
                 else:
-                    b = Bnd_Box()
-                    BRepBndLib.Add_s(wire.wrapped, b)
-                    xmin, ymin, zmin, xmax, ymax, zmax = b.Get()
-                    c = ((xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2)
+                    w_props = GProp_GProps()
+                    BRepGProp.LinearProperties_s(wire.wrapped, w_props)
+                    c = w_props.CentreOfMass()
+                    center = (c.X(), c.Y(), c.Z())
+                    perimeter = float(w_props.Mass())
+                    contour_points = []
+                    for edge in edges:
+                        contour_points.extend(_sample_edge_points(edge))
+                    if contour_points and contour_points[0] != contour_points[-1]:
+                        contour_points.append(contour_points[0])
+
                     item_id = f"hole-shaped-{candidate_counter}"
                     candidate_counter += 1
+                    candidate = {
+                        "id": item_id,
+                        "type": "Irregular contour",
+                        "dim": dim_str,
+                        "center": center,
+                        "normal": normal,
+                        "perimeter": perimeter,
+                        "contour_points": contour_points,
+                        "method": "face_boundary_primary",
+                    }
+                    all_shaped_holes.append(candidate)
                     debug_items.append({
                         "id": item_id,
-                        "status": "rejected",
-                        "type": "unknown",
-                        "label": "Onbekende contour",
-                        "reason": "Afgewezen omdat de contour niet als slot/rect/poly is herkend",
+                        "status": "accepted",
+                        "type": "irregular_contour",
+                        "label": dim_str or "Irregular contour",
+                        "reason": "Geaccepteerd als irregulaire gesloten contour via Face Boundary",
+                        "method": "face_boundary_primary",
                         "criteria": [
-                            make_criterion("recognized_shape", "unknown", "known", False, f"{lines} lijnen / {circles} bogen"),
-                            make_criterion("is_circle", False, False, True, "Niet door de cilindrische detector afgehandeld"),
+                            make_criterion("method_order", "primary", "face_boundary_primary_first", True, "Eerst geprobeerd via inner wires van face"),
+                            make_criterion("face_boundary", True, True, True, "Inner wire kandidaat vanuit face boundaries"),
+                            make_criterion("recognized_shape", "unknown", "known", True, f"{lines} lijnen / {circles} bogen"),
+                            make_criterion("irregular_contour_policy", True, True, True, "Onbekende gesloten contour toch als gat teruggeven"),
                         ],
-                        "position": c,
+                        "position": center,
                         "normal": normal,
                         "size": dim_str,
-                        "source": source,
-                    })
-                    recovery_bucket.append({
-                        "id": item_id,
-                        "edges": [TopoDS.Edge_s(edge) for edge in edges],
-                        "normal": normal,
+                        "perimeter": perimeter,
+                        "contour_points": contour_points,
                         "source": source,
                     })
 
@@ -1896,6 +1926,14 @@ def deduplicate_holes(circular_holes, shaped_holes, return_debug=False):
         
         for shaped in shaped_holes:
             s_pos = shaped["center"]
+
+            # Fallback contour candidates are diagnostics/augmentation from face boundaries;
+            # they should not suppress cylindrical holes in final counting.
+            if shaped.get("method") in {
+                "face_boundary_round_contour_fallback",
+                "face_boundary_circular_wire_fallback",
+            }:
+                continue
 
             # Check of gat en shaped hole op zelfde vlak zitten (parallelle assen)
             # Niet-parallelle assen → ander vlak → nooit duplicaat

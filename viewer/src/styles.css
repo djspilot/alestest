@@ -373,6 +373,12 @@ html, body, #root {
   margin-top: 10px;
 }
 
+.hole-toggle-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
 .hole-filter-btn {
   padding: 5px 8px;
   border: 1px solid #d7dee7;

@@ -9,6 +9,8 @@ export default function Sidebar({
   onPipelineToggle,
   aagFallbackEnabled,
   onAagFallbackToggle,
+  disabledStages,
+  onStageToggle,
   pipelineApiBase,
   onPipelineApiBaseChange,
   pipelineApiKey,
@@ -78,6 +80,27 @@ export default function Sidebar({
           />
           <span>AAG fallback inschakelen</span>
         </label>
+
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: '0.82rem', color: '#888', marginBottom: 6 }}>Analyse fases</div>
+          {[
+            { key: 'classify_geometry', label: 'Classify geometry' },
+            { key: 'detect_holes_pre_unfold', label: 'Detect holes (pre-unfold)' },
+            { key: 'unfold', label: 'Unfold' },
+            { key: 'detect_holes', label: 'Detect holes' },
+            { key: 'aag', label: 'AAG analyse' },
+          ].map(({ key, label }) => (
+            <label className="sidebar-toggle" key={key} style={{ opacity: pipelineEnabled ? 1 : 0.6 }}>
+              <input
+                type="checkbox"
+                checked={!disabledStages.includes(key)}
+                onChange={(event) => onStageToggle(key, event.target.checked)}
+                disabled={!pipelineEnabled}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
 
         <div style={{ marginTop: 10 }}>
           <div className="sidebar-row" style={{ paddingBottom: 6 }}>
