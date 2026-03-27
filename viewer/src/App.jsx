@@ -3,7 +3,15 @@ import Dropzone from './Dropzone'
 import Sidebar from './Sidebar'
 import StageDetailsPanel from './StageDetailsPanel'
 import { checkPipelineConnection, getDefaultPipelineApiBase, runPipelineAnalysis } from './pipelineClient'
-import { groupEventsByStage, MERGED_HOLES_STAGE, PRE_UNFOLD_HOLES_STAGE, normalizeStageName, parseIsoToMs } from './pipelineUi'
+import {
+  groupEventsByStage,
+  isMergedHolesStageName,
+  isPreUnfoldStageName,
+  MERGED_HOLES_STAGE,
+  PRE_UNFOLD_HOLES_STAGE,
+  normalizeStageName,
+  parseIsoToMs,
+} from './pipelineUi'
 
 const ViewerCanvas = lazy(() => import('./ViewerCanvas'))
 
@@ -91,6 +99,7 @@ export default function App() {
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [showHiddenHoles, setShowHiddenHoles] = useState(true)
+  const [highlightHiddenHoleLocations, setHighlightHiddenHoleLocations] = useState(true)
   const [nowMs, setNowMs] = useState(() => Date.now())
   const controlsRef = useRef()
   const pipelineAbortRef = useRef(null)
@@ -126,7 +135,7 @@ export default function App() {
         }
       }
 
-      if (event.stage === PRE_UNFOLD_HOLES_STAGE && event.type === 'holes_detected_pre_unfold') {
+      if (isPreUnfoldStageName(event.stage) && event.type === 'holes_detected_pre_unfold') {
         visuals.holes_pre_unfold = {
           ...(visuals.holes_pre_unfold || {}),
           ...event.payload,
@@ -159,7 +168,7 @@ export default function App() {
   const totalStepsHint = summary?.total_steps_hint || summary?.step_count || groupedStages.length
   const completedStepCount = summary?.completed_step_count || 0
   const selectedStage = groupedStages[selectedStageIndex] || null
-  const activeHoleVisuals = focusedStage === PRE_UNFOLD_HOLES_STAGE
+  const activeHoleVisuals = isPreUnfoldStageName(focusedStage)
     ? (pipelineVisuals?.holes_pre_unfold || pipelineVisuals?.holes || null)
     : (pipelineVisuals?.holes || null)
   const holeSource = activeHoleVisuals?.source || null
@@ -222,17 +231,6 @@ export default function App() {
     setAagFallbackEnabled(value)
     pendingRestartRef.current = true
   }, [])
-
-  // Auto-herstart pipeline wanneer stage-instellingen zijn gewijzigd en er een bestand geladen is
-  useEffect(() => {
-    if (!pendingRestartRef.current) return
-    if (!sourceFile || !pipelineEnabled) return
-    const settled = ['completed', 'failed', 'unavailable', 'auth_required', 'disabled']
-    if (!settled.includes(pipelineState.status)) return
-    pendingRestartRef.current = false
-    setPipelineState(EMPTY_PIPELINE_STATE)
-    void startPipeline(sourceFile)
-  }, [disabledStages, aagFallbackEnabled, pipelineEnabled, pipelineState.status, sourceFile, startPipeline])
 
   useEffect(() => {
     if (!pipelineEnabled) {
@@ -376,6 +374,17 @@ export default function App() {
     }
   }, [aagFallbackEnabled, disabledStages, pipelineApiBase, pipelineApiKey, pipelineEnabled, stopPipelineRequest])
 
+  // Auto-herstart pipeline wanneer stage-instellingen zijn gewijzigd en er een bestand geladen is
+  useEffect(() => {
+    if (!pendingRestartRef.current) return
+    if (!sourceFile || !pipelineEnabled) return
+    const settled = ['completed', 'failed', 'unavailable', 'auth_required', 'disabled']
+    if (!settled.includes(pipelineState.status)) return
+    pendingRestartRef.current = false
+    setPipelineState(EMPTY_PIPELINE_STATE)
+    void startPipeline(sourceFile)
+  }, [disabledStages, aagFallbackEnabled, pipelineEnabled, pipelineState.status, sourceFile, startPipeline])
+
   const handleFile = useCallback((file) => {
     const ext = file.name.split('.').pop().toLowerCase()
     if (!['step', 'stp'].includes(ext)) {
@@ -485,6 +494,7 @@ export default function App() {
     setError(null)
     setEngineStatus('Klaar')
     setShowHiddenHoles(true)
+    setHighlightHiddenHoleLocations(true)
     setPipelineState(EMPTY_PIPELINE_STATE)
   }, [stopPipelineRequest])
 
@@ -499,9 +509,11 @@ export default function App() {
   }, [])
 
   const selectDetectHolesStage = useCallback(() => {
-    const preferredStage = focusedStage === PRE_UNFOLD_HOLES_STAGE ? PRE_UNFOLD_HOLES_STAGE : MERGED_HOLES_STAGE
-    let detectStageIndex = groupedStages.findIndex((group) => group.stage === preferredStage)
-    if (detectStageIndex < 0) {
+    const preferPreUnfold = isPreUnfoldStageName(focusedStage)
+    let detectStageIndex = preferPreUnfold
+      ? groupedStages.findIndex((group) => isPreUnfoldStageName(group.stage))
+      : groupedStages.findIndex((group) => isMergedHolesStageName(group.stage))
+    if (detectStageIndex < 0 && !preferPreUnfold) {
       detectStageIndex = groupedStages.findIndex((group) => group.stage === MERGED_HOLES_STAGE)
     }
     if (detectStageIndex >= 0) {
@@ -716,6 +728,7 @@ export default function App() {
                 controlsRef={controlsRef}
                 useFlatView={useFlatView}
                 showHiddenHoles={showHiddenHoles}
+                highlightHiddenHoleLocations={highlightHiddenHoleLocations}
               />
             </Suspense>
           )}
@@ -739,6 +752,8 @@ export default function App() {
             pipelineStatus={pipelineState.status}
             showHiddenHoles={showHiddenHoles}
             onShowHiddenHolesChange={setShowHiddenHoles}
+            highlightHiddenHoleLocations={highlightHiddenHoleLocations}
+            onHighlightHiddenHoleLocationsChange={setHighlightHiddenHoleLocations}
           />
         )}
       </div>

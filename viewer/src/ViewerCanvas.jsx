@@ -3,7 +3,7 @@ import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import StepModel from './StepModel'
-import { MERGED_HOLES_STAGE, PRE_UNFOLD_HOLES_STAGE } from './pipelineUi'
+import { isPreUnfoldStageName, MERGED_HOLES_STAGE, PRE_UNFOLD_HOLES_STAGE } from './pipelineUi'
 
 function normalizeFoldId(value) {
   if (value === null || value === undefined || value === '') return null
@@ -699,6 +699,55 @@ function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSele
   )
 }
 
+function HiddenHoleBeacon({ hole, center, modelInfo, onSelect, isSelected = false }) {
+  if (!Array.isArray(hole?.position) || hole.position.length < 3) return null
+  const position = holeCenterPosition(hole, center)
+  if (!position) return null
+  const quaternion = quaternionFromDirection(hole.normal || hole.axis || [0, 0, 1])
+  const baseRadius = Math.max(holeFocusRadius(hole, modelInfo) * 0.62, 4)
+  const crossSegments = useMemo(() => new Float32Array([
+    -baseRadius, 0, 0,
+    baseRadius, 0, 0,
+    0, -baseRadius, 0,
+    0, baseRadius, 0,
+    -baseRadius * 0.72, -baseRadius * 0.72, 0,
+    baseRadius * 0.72, baseRadius * 0.72, 0,
+    -baseRadius * 0.72, baseRadius * 0.72, 0,
+    baseRadius * 0.72, -baseRadius * 0.72, 0,
+  ]), [baseRadius])
+  const ringSegments = useMemo(
+    () => toFloat32(circlePoints(baseRadius * 1.15, 56)),
+    [baseRadius],
+  )
+  const statusColor = isIrregularHole(hole) ? '#d97706' : '#1d4ed8'
+  const color = isSelected ? '#f5c542' : statusColor
+  const handleSelect = useCallback((event) => {
+    event.stopPropagation()
+    onSelect?.(hole.id)
+  }, [hole.id, onSelect])
+
+  return (
+    <group position={position} quaternion={quaternion} renderOrder={24} onClick={handleSelect}>
+      <lineSegments position={[0, 0, 0.5]}>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" args={[crossSegments, 3]} />
+        </bufferGeometry>
+        <lineBasicMaterial color={color} transparent opacity={0.95} depthTest={false} depthWrite={false} />
+      </lineSegments>
+      <lineLoop position={[0, 0, 0.5]}>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" args={[ringSegments, 3]} />
+        </bufferGeometry>
+        <lineBasicMaterial color={color} transparent opacity={0.55} depthTest={false} depthWrite={false} />
+      </lineLoop>
+      <mesh>
+        <circleGeometry args={[baseRadius * 1.4, 42]} />
+        <meshBasicMaterial transparent opacity={0.01} depthTest={false} depthWrite={false} side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  )
+}
+
 function ManualProbeOverlay({ probe, center, modelInfo }) {
   const inferredHole = probe?.inferredContour || null
   const baseHole = inferredHole
@@ -1107,15 +1156,34 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
   )
 }
 
-function StageOverlays({ modelInfo, visuals, holeVisuals, focusedStage, selectedHole, selectedProbe, selectedFoldId, onFoldSelect, onHoleSelect, useFlatView, showHiddenHoles }) {
+function StageOverlays({
+  modelInfo,
+  visuals,
+  holeVisuals,
+  focusedStage,
+  selectedHole,
+  selectedProbe,
+  selectedFoldId,
+  onFoldSelect,
+  onHoleSelect,
+  useFlatView,
+  showHiddenHoles,
+  highlightHiddenHoleLocations,
+}) {
   const center = modelInfo?.center
   if (!center || !visuals || !focusedStage) return null
 
-  const isHoleStage = focusedStage === MERGED_HOLES_STAGE || focusedStage === PRE_UNFOLD_HOLES_STAGE
+  const isHoleStage = focusedStage === MERGED_HOLES_STAGE || isPreUnfoldStageName(focusedStage)
   const holeItems = holeVisuals?.items || []
   const visibleHoleVisuals = showHiddenHoles
     ? holeItems
     : holeItems.filter((hole) => !isHiddenHoleCandidate(hole))
+  const hiddenHoleVisuals = holeItems.filter((hole) => (
+    isHiddenHoleCandidate(hole)
+    && Array.isArray(hole?.position)
+    && hole.position.length >= 3
+    && hole.position.every((value) => Number.isFinite(Number(value)))
+  ))
   const routerVisuals = visuals?.router || null
   const classificationVisuals = visuals?.classification || null
   const unfoldVisuals = visuals?.unfold || null
@@ -1180,6 +1248,17 @@ function StageOverlays({ modelInfo, visuals, holeVisuals, focusedStage, selected
           hole={hole}
           center={center}
           hasSelection={Boolean(selectedHole?.id)}
+          modelInfo={modelInfo}
+          isSelected={selectedHole?.id === hole.id}
+          onSelect={onHoleSelect}
+        />
+      ))}
+
+      {isHoleStage && highlightHiddenHoleLocations && hiddenHoleVisuals.map((hole, index) => (
+        <HiddenHoleBeacon
+          key={`hidden-hole-${hole.id || index}`}
+          hole={hole}
+          center={center}
           modelInfo={modelInfo}
           isSelected={selectedHole?.id === hole.id}
           onSelect={onHoleSelect}
@@ -1262,6 +1341,7 @@ export default function ViewerCanvas({
   controlsRef,
   useFlatView,
   showHiddenHoles = false,
+  highlightHiddenHoleLocations = true,
 }) {
   const renderMode = 'clean'
   const holeItems = activeHoleVisuals?.items || backendVisuals?.holes?.items || []
@@ -1338,6 +1418,7 @@ export default function ViewerCanvas({
         onHoleSelect={onHoleSelect}
         useFlatView={useFlatView}
         showHiddenHoles={showHiddenHoles}
+        highlightHiddenHoleLocations={highlightHiddenHoleLocations}
       />
       {!useFlatView && <gridHelper args={[500, 18, '#d4d9e1', '#edf1f5']} />}
       <SceneControls controlsRef={controlsRef} />

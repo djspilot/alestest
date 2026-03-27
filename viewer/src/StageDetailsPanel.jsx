@@ -5,6 +5,7 @@ import {
   formatDuration,
   formatLabel,
   getStageMeta,
+  isPreUnfoldStageName,
   MERGED_HOLES_STAGE,
   PRE_UNFOLD_HOLES_STAGE,
   summarizePayload,
@@ -76,6 +77,8 @@ export default function StageDetailsPanel({
   pipelineStatus,
   showHiddenHoles,
   onShowHiddenHolesChange,
+  highlightHiddenHoleLocations,
+  onHighlightHiddenHoleLocationsChange,
 }) {
   const [holeFilter, setHoleFilter] = useState('all')
   const selectedStage = groupedStages[selectedStageIndex] || null
@@ -88,7 +91,7 @@ export default function StageDetailsPanel({
   const classificationFinal = classificationVisuals?.final_decision || null
   const step0Review = classificationVisuals?.step0_review || null
   const legacyClassification = classificationVisuals?.legacy_classification || null
-  const isPreUnfoldHoleStage = selectedStage?.stage === PRE_UNFOLD_HOLES_STAGE
+  const isPreUnfoldHoleStage = isPreUnfoldStageName(selectedStage?.stage)
   const isMergedHoleStage = selectedStage?.stage === MERGED_HOLES_STAGE
   const holeVisuals = isPreUnfoldHoleStage
     ? (pipelineVisuals?.holes_pre_unfold || pipelineVisuals?.holes || null)
@@ -264,7 +267,19 @@ export default function StageDetailsPanel({
                   >
                     {showHiddenHoles ? 'Verberg afgewezen/irregulair' : 'Toon afgewezen/irregulair'}
                   </button>
+                  <button
+                    className={`hole-filter-btn ${highlightHiddenHoleLocations ? 'is-active' : ''}`}
+                    onClick={() => onHighlightHiddenHoleLocationsChange?.(!highlightHiddenHoleLocations)}
+                    title="Toon of verberg extra locatie-markers op het 3D model"
+                  >
+                    {highlightHiddenHoleLocations ? 'Locatie-markers aan' : 'Locatie-markers uit'}
+                  </button>
                 </div>
+                {hiddenHoleItems.length > 0 && (
+                  <div className="timeline-text">
+                    Extra locatie-markers staan op de afgewezen/irregulaire gaten zodat direct zichtbaar is waar de ontbrekende gaten op het model zitten.
+                  </div>
+                )}
                 <div className="hole-list">
                   {visibleHoleItems.map((hole) => (
                     <button

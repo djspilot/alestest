@@ -13,6 +13,21 @@ export const STATUS_LABELS = {
 export const MERGED_HOLES_STAGE = 'Unfold / Detect holes'
 export const PRE_UNFOLD_HOLES_STAGE = 'Detect holes (pre-unfold)'
 
+export function isPreUnfoldStageName(stage) {
+  const normalized = String(stage || '').toLowerCase()
+  return normalized.includes('detect holes') && normalized.includes('pre') && normalized.includes('unfold')
+}
+
+export function isMergedHolesStageName(stage) {
+  const normalized = String(stage || '').toLowerCase()
+  return (
+    stage === MERGED_HOLES_STAGE
+    || normalized === 'detect holes'
+    || normalized === 'unfold'
+    || normalized === 'unfold / detect holes'
+  )
+}
+
 export function summarizePayload(payload) {
   if (!payload || typeof payload !== 'object') return ''
 
