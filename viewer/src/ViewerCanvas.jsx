@@ -537,6 +537,21 @@ function inferProbeContour(point, normal, mesh, center, modelInfo) {
 
 function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSelect }) {
   const position = holeCenterPosition(hole, center)
+  const explicitContour = useMemo(() => {
+    if (!Array.isArray(hole.contour_points) || hole.contour_points.length < 3) return null
+    const normalized = hole.contour_points
+      .filter((point) => Array.isArray(point) && point.length >= 3)
+      .map((point) => [
+        Number(point[0] || 0) - center.x,
+        Number(point[1] || 0) - center.y,
+        Number(point[2] || 0) - center.z,
+      ])
+    if (normalized.length < 3) return null
+    const first = normalized[0]
+    const last = normalized[normalized.length - 1]
+    const isClosed = Math.hypot(first[0] - last[0], first[1] - last[1], first[2] - last[2]) < 0.25
+    return isClosed ? normalized : [...normalized, first]
+  }, [center.x, center.y, center.z, hole.contour_points])
   const [rectWidth, rectHeight] = parseHoleSize(hole.size || hole.label, 14)
   const contourPoints = useMemo(
     () => getHoleContourPoints(hole, rectWidth, rectHeight),
@@ -557,6 +572,62 @@ function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSele
     event.stopPropagation()
     onSelect?.(hole.id)
   }, [hole.id, onSelect])
+
+  const explicitCenter = useMemo(() => {
+    if (!explicitContour || explicitContour.length === 0) return [position[0], position[1], position[2]]
+    const totals = explicitContour.reduce((acc, point) => {
+      acc[0] += point[0]
+      acc[1] += point[1]
+      acc[2] += point[2]
+      return acc
+    }, [0, 0, 0])
+    return [
+      totals[0] / explicitContour.length,
+      totals[1] / explicitContour.length,
+      totals[2] / explicitContour.length,
+    ]
+  }, [explicitContour, position])
+
+  if (explicitContour) {
+    const normal = new THREE.Vector3(...(hole.normal || hole.axis || [0, 0, 1])).normalize()
+    const contourBase = toFloat32(explicitContour)
+    const contourHighlight = toFloat32(explicitContour.map(([x, y, z]) => [
+      x + normal.x * 0.2,
+      y + normal.y * 0.2,
+      z + normal.z * 0.2,
+    ]))
+    const contourInner = toFloat32(explicitContour.map(([x, y, z]) => [
+      x - normal.x * 0.2,
+      y - normal.y * 0.2,
+      z - normal.z * 0.2,
+    ]))
+    return (
+      <group renderOrder={20} onClick={handleSelect}>
+        <lineLoop>
+          <bufferGeometry>
+            <bufferAttribute attach="attributes-position" args={[contourHighlight, 3]} />
+          </bufferGeometry>
+          <lineBasicMaterial color={palette.secondary} transparent opacity={palette.echoOpacity} depthTest={false} depthWrite={false} />
+        </lineLoop>
+        <lineLoop>
+          <bufferGeometry>
+            <bufferAttribute attach="attributes-position" args={[contourBase, 3]} />
+          </bufferGeometry>
+          <lineBasicMaterial color={palette.primary} transparent opacity={palette.primaryOpacity} depthTest={false} depthWrite={false} />
+        </lineLoop>
+        <lineLoop>
+          <bufferGeometry>
+            <bufferAttribute attach="attributes-position" args={[contourInner, 3]} />
+          </bufferGeometry>
+          <lineBasicMaterial color={palette.secondary} transparent opacity={palette.selectionOpacity} depthTest={false} depthWrite={false} />
+        </lineLoop>
+        <mesh position={explicitCenter}>
+          <sphereGeometry args={[hitRadius, 18, 18]} />
+          <meshBasicMaterial transparent opacity={0.01} depthTest={false} depthWrite={false} side={THREE.DoubleSide} />
+        </mesh>
+      </group>
+    )
+  }
 
   if (hole.type === 'cylindrical') {
     const quaternion = quaternionFromDirection(hole.axis || [1, 0, 0])

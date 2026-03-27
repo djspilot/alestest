@@ -258,6 +258,22 @@ Een vormgat wordt opgenomen als:
 - het geen pure cirkel is
 - de edge-samenstelling overeenkomt met Slot, Rect (R), Rect of Poly
 
+### Nieuwe fallback: recovery bucket voor gemengde contouren (line + arc)
+Actieve uitbreiding:
+- inner-wire kandidaten die niet direct als bekende vorm zijn herkend, gaan naar een recovery bucket
+- recovery reconstrueert gesloten lussen uit edge-fragmenten via endpoint hashing + wire walking
+- als een gesloten lus valide is, wordt deze alsnog toegevoegd als shaped hole (`Recovered contour` of afgeleide Slot/Rect/Poly)
+
+Validatie in fallbackpad:
+- minimale lusgrootte: `>= 3` edges
+- closure gate: begin/eindpunt binnen tolerance
+- perimeter gate: `> 0`
+
+Output-impact:
+- recovered holes worden meegeteld in shaped hole output
+- debug payload bevat `contour_points` (exacte polyline punten)
+- viewer kan deze contouren direct als exacte rand tekenen in plaats van benaderde primitives
+
 Output-notitie (actueel):
 - vormgaten worden wel meegeteld en gemeten
 - maar niet als aparte labelcategorie naar XML geschreven
@@ -678,6 +694,7 @@ Wordt naar `Tube_*` velden geschreven, o.a.:
 
 1. `detect_shaped_holes` gebruikt de aanname dat elke inner wire op een planair vlak een gat is.
    - bij profielen is nu een end-face filter toegevoegd voor grote holle-kern openingen
+   - daarnaast is een recovery bucket toegevoegd voor gemengde contourfragmenten op unfold geometry
    - resterend risico: complexe end-features die sterk op een holle kern lijken
 
 2. Thread-detectie is diameter-gedreven.

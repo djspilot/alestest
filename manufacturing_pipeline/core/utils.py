@@ -1018,6 +1018,11 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                 "size": str(item.get("size", "")),
                 "source": str(item.get("source") or ("flat" if is_flat else "3d")),
                 "criteria": item.get("criteria") or [],
+                "contour_points": [
+                    [float(pt[0]), float(pt[1]), float(pt[2])]
+                    for pt in (item.get("contour_points") or [])
+                    if isinstance(pt, (list, tuple)) and len(pt) >= 3
+                ],
             }
             for item in hole_debug_items
         ],

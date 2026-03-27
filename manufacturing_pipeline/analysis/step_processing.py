@@ -1354,6 +1354,270 @@ def _classify_shaped_inner_wire(edge_count, lines, circles, radii, lengths, bbox
     return "unknown", dim_str, "unknown"
 
 
+def _sample_edge_points(edge, reverse=False):
+    """Sample edge geometry into 3D points for viewer contour rendering."""
+    try:
+        curve = BRepAdaptor_Curve(TopoDS.Edge_s(edge))
+        c_type = curve.GetType()
+        if c_type == GeomAbs_Circle:
+            segments = 18
+        elif c_type == GeomAbs_Line:
+            segments = 2
+        else:
+            segments = 8
+
+        u_start = curve.FirstParameter()
+        u_end = curve.LastParameter()
+        if reverse:
+            u_start, u_end = u_end, u_start
+
+        points = []
+        for idx in range(segments):
+            if segments == 1:
+                t = u_start
+            else:
+                t = u_start + (u_end - u_start) * (idx / (segments - 1))
+            point = curve.Value(t)
+            points.append((point.X(), point.Y(), point.Z()))
+        return points
+    except Exception:
+        return []
+
+
+def _edge_end_keys(edge, tolerance):
+    """Return endpoint keys/coords for edge adjacency reconstruction."""
+    exp = TopExp_Explorer(edge, TopAbs_VERTEX)
+    vertices = []
+    while exp.More():
+        vertices.append(TopoDS.Vertex_s(exp.Current()))
+        exp.Next()
+
+    if len(vertices) < 2:
+        return None
+
+    start = BRep_Tool.Pnt_s(vertices[0])
+    end = BRep_Tool.Pnt_s(vertices[-1])
+
+    start_point = (float(start.X()), float(start.Y()), float(start.Z()))
+    end_point = (float(end.X()), float(end.Y()), float(end.Z()))
+
+    def _key(point):
+        return (
+            round(point[0] / tolerance),
+            round(point[1] / tolerance),
+            round(point[2] / tolerance),
+        )
+
+    return _key(start_point), _key(end_point), start_point, end_point
+
+
+def _recover_contours_from_bucket(bucket_entries, tolerance=0.05):
+    """Reconstruct closed mixed contours from rejected edge fragments."""
+    if not bucket_entries:
+        return [], []
+
+    from collections import defaultdict
+
+    edge_records = []
+    adjacency = defaultdict(list)
+
+    for entry in bucket_entries:
+        for edge in entry.get("edges") or []:
+            end_info = _edge_end_keys(edge, tolerance)
+            if end_info is None:
+                continue
+            start_key, end_key, start_point, end_point = end_info
+            rec = {
+                "edge": edge,
+                "start_key": start_key,
+                "end_key": end_key,
+                "start_point": start_point,
+                "end_point": end_point,
+                "normal": entry.get("normal"),
+                "source": entry.get("source", "3d"),
+            }
+            edge_index = len(edge_records)
+            edge_records.append(rec)
+            adjacency[start_key].append((edge_index, False))
+            adjacency[end_key].append((edge_index, True))
+
+    if not edge_records:
+        return [], []
+
+    used_edges = set()
+    recovered = []
+    debug_items = []
+
+    for edge_index, edge_record in enumerate(edge_records):
+        if edge_index in used_edges:
+            continue
+
+        chain = [(edge_index, False)]
+        used_edges.add(edge_index)
+        start_key = edge_record["start_key"]
+        current_key = edge_record["end_key"]
+
+        max_steps = max(32, len(edge_records) * 2)
+        closed = False
+
+        while max_steps > 0:
+            max_steps -= 1
+            if current_key == start_key and len(chain) >= 3:
+                closed = True
+                break
+
+            next_choice = None
+            for candidate_index, reverse in adjacency.get(current_key, []):
+                if candidate_index in used_edges:
+                    continue
+                next_choice = (candidate_index, reverse)
+                break
+
+            if next_choice is None:
+                break
+
+            candidate_index, reverse = next_choice
+            chain.append((candidate_index, reverse))
+            used_edges.add(candidate_index)
+
+            candidate = edge_records[candidate_index]
+            current_key = candidate["start_key"] if reverse else candidate["end_key"]
+
+        if not closed:
+            continue
+
+        contour_points = []
+        edge_lengths = []
+        lines = 0
+        circles = 0
+        radii = []
+        line_lengths = []
+
+        for chain_index, (candidate_index, reverse) in enumerate(chain):
+            rec = edge_records[candidate_index]
+            edge = rec["edge"]
+
+            sampled = _sample_edge_points(edge, reverse=reverse)
+            if not sampled:
+                continue
+
+            if chain_index > 0 and contour_points:
+                sampled = sampled[1:]
+            contour_points.extend(sampled)
+
+            edge_props = GProp_GProps()
+            BRepGProp.LinearProperties_s(edge, edge_props)
+            edge_length = float(edge_props.Mass())
+            edge_lengths.append(edge_length)
+
+            curve = BRepAdaptor_Curve(TopoDS.Edge_s(edge))
+            c_type = curve.GetType()
+            if c_type == GeomAbs_Line:
+                lines += 1
+                line_lengths.append(edge_length)
+            elif c_type == GeomAbs_Circle:
+                circles += 1
+                try:
+                    radii.append(float(curve.Circle().Radius()))
+                except Exception:
+                    pass
+
+        if len(contour_points) < 4:
+            continue
+
+        first_point = contour_points[0]
+        last_point = contour_points[-1]
+        close_dist = math.sqrt(
+            (first_point[0] - last_point[0]) ** 2
+            + (first_point[1] - last_point[1]) ** 2
+            + (first_point[2] - last_point[2]) ** 2
+        )
+        if close_dist > max(0.25, tolerance * 6.0):
+            continue
+
+        if edge_lengths and sum(edge_lengths) <= 1e-3:
+            continue
+
+        xs = [pt[0] for pt in contour_points]
+        ys = [pt[1] for pt in contour_points]
+        zs = [pt[2] for pt in contour_points]
+        dx = max(xs) - min(xs)
+        dy = max(ys) - min(ys)
+        dz = max(zs) - min(zs)
+
+        shape_type, dim_str, shape_family = _classify_shaped_inner_wire(
+            len(chain), lines, circles, radii, line_lengths, (dx, dy, dz)
+        )
+        if shape_type == "unknown":
+            shape_type = "Recovered contour"
+            shape_family = "recovered_mixed"
+
+        center = (
+            sum(xs) / len(xs),
+            sum(ys) / len(ys),
+            sum(zs) / len(zs),
+        )
+        perimeter = float(sum(edge_lengths))
+        normal = next((edge_records[idx]["normal"] for idx, _ in chain if edge_records[idx].get("normal") is not None), (0.0, 0.0, 1.0))
+        source = next((edge_records[idx]["source"] for idx, _ in chain if edge_records[idx].get("source") is not None), "3d")
+
+        item_id = f"hole-recovered-{len(recovered)}"
+        recovered.append({
+            "id": item_id,
+            "type": shape_type,
+            "dim": dim_str,
+            "center": center,
+            "normal": normal,
+            "perimeter": perimeter,
+            "contour_points": contour_points,
+        })
+        debug_items.append({
+            "id": item_id,
+            "status": "accepted",
+            "type": str(shape_type).lower().replace(" ", "_"),
+            "label": dim_str or shape_type,
+            "reason": "Geaccepteerd via recovery bucket (gemengde contour line/arc)",
+            "criteria": [
+                {
+                    "name": "recovery_bucket",
+                    "value": True,
+                    "threshold": True,
+                    "passed": True,
+                    "note": "Wire walking op afgewezen contour-fragmenten",
+                },
+                {
+                    "name": "edge_count",
+                    "value": len(chain),
+                    "threshold": 3,
+                    "passed": len(chain) >= 3,
+                    "note": "Minimale gesloten lus",
+                },
+                {
+                    "name": "closed_loop",
+                    "value": round(close_dist, 4),
+                    "threshold": round(max(0.25, tolerance * 6.0), 4),
+                    "passed": True,
+                    "note": "Begin/eind binnen closure tolerance",
+                },
+                {
+                    "name": "shape_family",
+                    "value": shape_family,
+                    "threshold": "slot/rect/poly/recovered_mixed",
+                    "passed": True,
+                    "note": "Recovered contour classificatie",
+                },
+            ],
+            "position": center,
+            "normal": normal,
+            "size": dim_str,
+            "perimeter": perimeter,
+            "contour_points": contour_points,
+            "source": source,
+        })
+
+    return recovered, debug_items
+
+
 def detect_shaped_holes(shape, face_data=None, is_flat_pattern=False, return_debug=False):
     """
     Detect non-circular holes (slots, rectangles) by analyzing planar face contours.
@@ -1365,6 +1629,7 @@ def detect_shaped_holes(shape, face_data=None, is_flat_pattern=False, return_deb
     """
     all_shaped_holes = []
     debug_items = []
+    recovery_bucket = []
     candidate_counter = 0
 
     def make_criterion(name, value=None, threshold=None, passed=True, note=None):
@@ -1479,6 +1744,12 @@ def detect_shaped_holes(shape, face_data=None, is_flat_pattern=False, return_deb
                     BRepGProp.LinearProperties_s(wire.wrapped, w_props)
                     c = w_props.CentreOfMass()
                     center = (c.X(), c.Y(), c.Z())
+                    perimeter = float(w_props.Mass())
+                    contour_points = []
+                    for edge in edges:
+                        contour_points.extend(_sample_edge_points(edge))
+                    if contour_points and contour_points[0] != contour_points[-1]:
+                        contour_points.append(contour_points[0])
                     
                     item_id = f"hole-shaped-{candidate_counter}"
                     candidate_counter += 1
@@ -1488,6 +1759,8 @@ def detect_shaped_holes(shape, face_data=None, is_flat_pattern=False, return_deb
                         "dim": dim_str,
                         "center": center,
                         "normal": normal,
+                        "perimeter": perimeter,
+                        "contour_points": contour_points,
                     }
                     all_shaped_holes.append(candidate)
                     debug_items.append({
@@ -1509,6 +1782,8 @@ def detect_shaped_holes(shape, face_data=None, is_flat_pattern=False, return_deb
                         "position": center,
                         "normal": normal,
                         "size": dim_str,
+                        "perimeter": perimeter,
+                        "contour_points": contour_points,
                         "source": source,
                     })
                 else:
@@ -1533,6 +1808,17 @@ def detect_shaped_holes(shape, face_data=None, is_flat_pattern=False, return_deb
                         "size": dim_str,
                         "source": source,
                     })
+                    recovery_bucket.append({
+                        "id": item_id,
+                        "edges": [TopoDS.Edge_s(edge) for edge in edges],
+                        "normal": normal,
+                        "source": source,
+                    })
+
+    recovered_holes, recovered_debug = _recover_contours_from_bucket(recovery_bucket)
+    if recovered_holes:
+        all_shaped_holes.extend(recovered_holes)
+        debug_items.extend(recovered_debug)
                     
     # Deduplicate - pre-group by (type, dim) to avoid O(n²)
     from collections import defaultdict
