@@ -62,6 +62,35 @@ from manufacturing_pipeline.core.analysis_pipeline import (
     build_legacy_gate_flow,
     build_classification_visuals,
 )
+from manufacturing_pipeline.core.hole_detection_fallback import (
+    normalize_string,
+    is_irregular_hole,
+    xy_distance,
+    euclidean_distance,
+    is_same_detection,
+    classify_contour_roundness,
+    bridge_pre_unfold_irregular_holes,
+    inject_closed_contours,
+    detect_circular_wire_fallback,
+)
+from manufacturing_pipeline.core.unfold_integration import (
+    calculate_unfold_statistics,
+    merge_unfold_thickness_with_analysis,
+    should_attempt_unfold,
+    validate_unfold_dimensions,
+    build_unfold_event_payload,
+)
+from manufacturing_pipeline.core.report_generation import (
+    REPORT_FORMAT_SIMPLE,
+    REPORT_FORMAT_COMPACT,
+    build_part_summary,
+    calculate_unfold_summary,
+    build_hole_report,
+    build_classification_report,
+    build_csv_export,
+    build_json_export,
+    calculate_report_completeness,
+)
 
 
 # =============================================================================
