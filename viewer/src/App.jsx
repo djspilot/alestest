@@ -316,7 +316,7 @@ export default function App() {
         apiBase: pipelineApiBase,
         apiKey: pipelineApiKey,
         aag: aagFallbackEnabled,
-        disableStages,
+        disableStages: disabledStages,
         signal: controller.signal,
         onProgress: (progress) => {
           setPipelineState((prev) => ({
