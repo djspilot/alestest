@@ -153,3 +153,36 @@ Next phase handoff:
 - Risks to watch:
 	- Keep root docs/*.md files that are still active references.
 	- Re-run pytest and CLI model test after commit even though this is docs-only cleanup.
+
+## Phase 2 - Docs and Planning Junk
+Date: 2026-03-28 16:11:13 CET
+Commit: db05840 phase 2: remove stale docs, archived scripts, planning files
+Command: python /Users/ds/AIdoel/alestest/manufacturing_pipeline/cli.py -f /Users/ds/AIdoel/alestest/nieuwmodel.step
+Exit code: 0
+Automated result: pass
+Key output:
+- QUICK ANALYSIS: nieuwmodel
+- TOTAL 33.60s
+- COMPLETE with report and output files generated
+Manual test result: pending
+Manual notes:
+- Please run your manual validation checklist for Phase 2.
+Next action:
+- Proceed to Phase 3 after manual sign-off.
+
+Phase completion summary:
+- Removed docs/archive, docs/scripts, docs/plans, docs/superpowers, docs/index.html, and .planning.
+- Preserved active top-level docs/*.md reference documents.
+- Verified no runtime regression after cleanup.
+Ready-for-next-phase checklist:
+- [x] commit created
+- [x] pytest run result recorded
+- [x] CLI model test result recorded
+- [ ] manual test result recorded or marked pending
+Next phase handoff:
+- Start from phase: 3
+- First files to touch:
+	- manufacturing_pipeline/scripts/compare_erp.py
+- Risks to watch:
+	- Ensure no remaining imports/reference hooks to compare_erp.py.
+	- Keep scripts/aag_analyzer.py untouched until Phase 7.
