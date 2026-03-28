@@ -269,3 +269,40 @@ Next phase handoff:
 - Risks to watch:
 	- Removing PDF/excel paths changes user-facing outputs; keep core analysis intact.
 	- Ensure quick-mode still runs after stripping report generation calls.
+
+## Phase 5 - PDF Reports and Excel Export
+Date: 2026-03-28 16:15:27 CET
+Commit: 86baf3b phase 5: remove PDF reports, Excel export, report_generation
+Command: python /Users/ds/AIdoel/alestest/manufacturing_pipeline/cli.py -f /Users/ds/AIdoel/alestest/nieuwmodel.step
+Exit code: 0
+Automated result: pass
+Key output:
+- QUICK ANALYSIS: nieuwmodel
+- TOTAL 34.60s
+- COMPLETE (without PDF generation step)
+Manual test result: pending
+Manual notes:
+- Please run your manual validation checklist for Phase 5.
+Next action:
+- Proceed to Phase 6 after manual sign-off.
+
+Phase completion summary:
+- Removed modules:
+	- manufacturing_pipeline/reporting/report_generator.py
+	- manufacturing_pipeline/reporting/excel_exporter.py
+	- manufacturing_pipeline/core/report_generation.py
+- Stripped PDF/Excel branches from CLI and API routes.
+- Reduced runtime_reporting to AAG + debug only.
+Ready-for-next-phase checklist:
+- [x] commit created
+- [x] pytest run result recorded
+- [x] CLI model test result recorded
+- [ ] manual test result recorded or marked pending
+Next phase handoff:
+- Start from phase: 6
+- First files to touch:
+	- manufacturing_pipeline/reporting/dxf_metrics_extractor.py
+	- manufacturing_pipeline/reporting/xml_exporter.py
+- Risks to watch:
+	- xml_exporter currently has optional DXF branch; replace with graceful skip to avoid runtime errors.
+	- Keep XML generation functional after removing DXF integration points.
