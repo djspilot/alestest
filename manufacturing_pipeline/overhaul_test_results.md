@@ -346,3 +346,42 @@ Next phase handoff:
 - Risks to watch:
 	- Removing AAG impacts fallback bend/thickness logic in runtime_analysis.
 	- Removing ISO standards can affect thread/countersink fields used in cut_features and full pipeline stages.
+
+## Phase 7 - AAG Analyzer + ISO Standards
+Date: 2026-03-28 16:22:18 CET
+Commit: fc32624 phase 7: remove AAG analyzer and ISO standards
+Pytest command: python -m pytest
+Pytest result: pass (37 passed, 2 skipped)
+CLI command: python /Users/ds/AIdoel/alestest/manufacturing_pipeline/cli.py -f /Users/ds/AIdoel/alestest/nieuwmodel.step
+Exit code: 0
+Automated result: pass
+Key output:
+- [3b/7] AAG: Uitgeschakeld (fase 7)
+- TOTAL 34.39s
+- COMPLETE
+Manual test result: pending
+Manual notes:
+- Please run your manual validation checklist for Phase 7.
+Next action:
+- Proceed to Phase 8 after manual sign-off.
+
+Phase completion summary:
+- Removed modules manufacturing_pipeline/scripts/aag_analyzer.py and manufacturing_pipeline/analysis/iso_standards.py.
+- Removed AAG CLI path and runtime fallback execution; quick mode now explicitly skips AAG in phase 7.
+- Added local ISO compatibility fallbacks in step/cut/pipeline analysis paths to keep quick/full flows stable without the deleted module.
+Ready-for-next-phase checklist:
+- [x] commit created
+- [x] pytest run result recorded
+- [x] CLI model test result recorded
+- [ ] manual test result recorded or marked pending
+Next phase handoff:
+- Start from phase: 8
+- First files to touch:
+	- manufacturing_pipeline/api/
+	- deploy/docker-compose.yml
+	- deploy/Dockerfile
+	- requirements.txt
+	- manufacturing_pipeline/cli.py
+- Risks to watch:
+	- API imports may still reference removed report/analysis options; trim endpoints carefully to avoid router/test regressions.
+	- Keep CLI and tests green while removing API-only dependencies.
