@@ -84,7 +84,7 @@ export default function Sidebar({
         <div style={{ marginTop: 12 }}>
           <div style={{ fontSize: '0.82rem', color: '#888', marginBottom: 6 }}>Analyse fases</div>
           {[
-            { key: 'classify_geometry', label: 'Classify geometry' },
+            { key: 'classify_geometry', label: 'Profile Router (classif.)' },
             { key: 'detect_holes_pre_unfold', label: 'Detect holes (pre-unfold)' },
             { key: 'unfold', label: 'Unfold' },
             { key: 'detect_holes', label: 'Detect holes' },

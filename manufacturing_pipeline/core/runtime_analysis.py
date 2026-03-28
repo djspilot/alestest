@@ -72,6 +72,7 @@ from manufacturing_pipeline.core.hole_detection_fallback import (
     bridge_pre_unfold_irregular_holes,
     inject_closed_contours,
     detect_circular_wire_fallback,
+    promote_rejected_contour_candidates,
 )
 from manufacturing_pipeline.core.unfold_integration import (
     calculate_unfold_statistics,
@@ -778,6 +779,12 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                 is_flat_pattern=False,
                 return_debug=True,
             )
+            pre_shaped_holes, pre_shaped_debug, pre_promoted_count = promote_rejected_contour_candidates(
+                pre_shaped_holes,
+                pre_shaped_debug,
+                pre_circular_holes,
+                is_flat_pattern=False,
+            )
             pre_circular_holes, pre_dedup_rejections = deduplicate_holes(
                 pre_circular_holes,
                 pre_shaped_holes,
@@ -811,6 +818,7 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                     "detect_holes_cylindrical",
                     "face_boundary_primary_for_irregular",
                     "recovery_bucket_fallback_for_unclassified",
+                    "face_boundary_rejected_promoted",
                 ],
                 "criteria_note": "Pre-unfold snapshot op originele 3D geometrie (voor vergelijking met flat detectie).",
                 "total_candidates": len(pre_debug_items),
@@ -853,6 +861,7 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                     "total": pre_total_holes,
                     "cylindrical": len(pre_circular_holes),
                     "shaped": len(pre_shaped_holes),
+                    "promoted_from_rejected": int(pre_promoted_count),
                     "accepted": pre_accepted,
                     "rejected": pre_rejected,
                     **analysis.detected_hole_visuals_pre_unfold,
@@ -1259,6 +1268,15 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
 
             profiler.set_sub_count("Shaped", len(shaped_holes))
 
+            shaped_holes, shaped_debug, promoted_count = promote_rejected_contour_candidates(
+                shaped_holes,
+                shaped_debug,
+                circular_holes,
+                is_flat_pattern=is_flat,
+            )
+            if promoted_count > 0:
+                profiler.set_sub_count("Shaped", len(shaped_holes))
+
             with profiler.sub_step("Dedup"):
                 circular_holes, dedup_rejections = deduplicate_holes(circular_holes, shaped_holes, return_debug=True)
 
@@ -1301,6 +1319,7 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                 "face_boundary_primary_for_irregular",
                 "pre_unfold_face_boundary_bridge_for_missing_irregular",
                 "recovery_bucket_fallback_for_unclassified",
+                "face_boundary_rejected_promoted",
             ],
             "criteria_note": "Irregulaire contouren: eerst Face Boundary (inner wires), daarna pas Recovery Bucket fallback.",
             "total_candidates": len(hole_debug_items),
@@ -1342,6 +1361,7 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                 "total": total_holes,
                 "cylindrical": len(circular_holes),
                 "shaped": len(shaped_holes),
+                "promoted_from_rejected": int(promoted_count),
                 "accepted": accepted_hole_count,
                 "rejected": rejected_hole_count,
                 **analysis.detected_hole_visuals,

@@ -263,7 +263,7 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
     part_name = os.path.basename(step_file)
 
     try:
-        output_dir, _ = get_output_dir(step_file)
+        output_dir = get_output_dir(step_file)
         analysis, total_holes = run_analysis(
             step_file,
             output_dir,
@@ -365,6 +365,9 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
             "holes": {
                 "total": total_holes,
                 **(getattr(analysis, "detected_hole_visuals", None) or {"items": []}),
+            },
+            "holes_pre_unfold": {
+                **(getattr(analysis, "detected_hole_visuals_pre_unfold", None) or {"items": []}),
             },
             "unfold": {
                 "success": bool(unfold_result and unfold_result.get("success")),

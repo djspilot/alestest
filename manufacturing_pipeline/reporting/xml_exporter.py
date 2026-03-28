@@ -425,8 +425,19 @@ def export_to_xml(result: Dict[str, Any], output_path: Path, part_name: Optional
 
     # Production counts
     production = result.get('production', {})
+    visuals = result.get('visuals', {}) or {}
+    hole_visuals = visuals.get('holes', {}) or {}
+    accepted_visual_holes = [
+        item for item in (hole_visuals.get('items') or [])
+        if str(item.get('status') or '').lower() == 'accepted'
+    ]
+
+    holes_total = len(accepted_visual_holes)
+    if holes_total <= 0:
+        holes_total = int(production.get('holes_total', 0) or 0)
+
     ET.SubElement(calc, 'Sheet_NrBends').text = str(production.get('bends_total', 0))
-    ET.SubElement(calc, 'Sheet_NrHoles').text = str(production.get('holes_total', 0))
+    ET.SubElement(calc, 'Sheet_NrHoles').text = str(holes_total)
     ET.SubElement(calc, 'Sheet_HoleTypes').text = ''
     ET.SubElement(calc, 'Sheet_ThreadedHoles').text = '0'
     ET.SubElement(calc, 'Sheet_CountersunkHoles').text = '0'
@@ -460,7 +471,7 @@ def export_to_xml(result: Dict[str, Any], output_path: Path, part_name: Optional
     ET.SubElement(calc, 'Sheet_UnfoldSuccess').text = str(unfold_success)
 
     # AAG details (if available)
-    aag_details = result.get('aag_details', {})
+    aag_details = result.get('aag_details') or {}
 
     # Bend details
     bend_details = aag_details.get('bend_details', [])
@@ -474,8 +485,60 @@ def export_to_xml(result: Dict[str, Any], output_path: Path, part_name: Optional
         ET.SubElement(calc, 'Sheet_BendInnerRadii').text = ''
 
     # Hole details
+    if accepted_visual_holes:
+        hole_contours_values = []
+        hole_radii_values = []
+        hole_types_values = []
+        hole_polylines = []
+        threaded_count = 0
+        countersunk_count = 0
+        countersunk_angles = []
+
+        for hole in accepted_visual_holes:
+            hole_type = str(hole.get('type') or 'round').strip().lower()
+            if hole_type:
+                hole_types_values.append(hole_type)
+
+            diameter = float(hole.get('diameter') or 0.0)
+            if diameter > 0:
+                hole_radii_values.append(diameter / 2.0)
+                hole_contours_values.append(diameter)
+
+            perimeter = float(hole.get('perimeter') or 0.0)
+            if perimeter > 0:
+                hole_contours_values.append(perimeter)
+
+            contour_points = [
+                pt for pt in (hole.get('contour_points') or [])
+                if isinstance(pt, (list, tuple)) and len(pt) >= 3
+            ]
+            if contour_points:
+                polyline = ';'.join(
+                    f"{_format_float(float(pt[0]), 3)},{_format_float(float(pt[1]), 3)},{_format_float(float(pt[2]), 3)}"
+                    for pt in contour_points
+                )
+                if polyline:
+                    hole_polylines.append(polyline)
+
+            if hole_type in {'thread', 'threaded', 'tap', 'tapped'}:
+                threaded_count += 1
+            if 'countersunk' in hole_type:
+                countersunk_count += 1
+                angle_val = float(hole.get('countersink_angle') or 0.0)
+                if angle_val > 0:
+                    countersunk_angles.append(angle_val)
+
+        ET.SubElement(calc, 'Sheet_HoleContours').text = '_'.join(_format_float(v) for v in hole_contours_values) if hole_contours_values else ''
+        ET.SubElement(calc, 'Sheet_HoleRadii').text = '_'.join(_format_float(v) for v in hole_radii_values) if hole_radii_values else ''
+        ET.SubElement(calc, 'Sheet_HoleContoursXYZ').text = '|'.join(hole_polylines) if hole_polylines else ''
+        calc.find('Sheet_HoleTypes').text = '_'.join(hole_types_values) if hole_types_values else ''
+        calc.find('Sheet_ThreadedHoles').text = str(threaded_count)
+        calc.find('Sheet_CountersunkHoles').text = str(countersunk_count)
+        calc.find('Sheet_CountersunkAngles').text = '_'.join(_format_float(v) for v in countersunk_angles) if countersunk_angles else ''
+
+    # Fallback to AAG holes only when visuals don't provide accepted hole items.
     hole_details = aag_details.get('hole_details', [])
-    if hole_details:
+    if hole_details and not accepted_visual_holes:
         # Hole contours (perimeters)
         hole_contours = '_'.join(
             _format_float(h.get('perimeter', 0))
@@ -520,7 +583,7 @@ def export_to_xml(result: Dict[str, Any], output_path: Path, part_name: Optional
         calc.find('Sheet_CountersunkAngles').text = '_'.join(
             _format_float(angle) for angle in countersunk_angles
         )
-    else:
+    elif not accepted_visual_holes:
         ET.SubElement(calc, 'Sheet_HoleContours').text = ''
         ET.SubElement(calc, 'Sheet_HoleRadii').text = ''
 

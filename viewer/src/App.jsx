@@ -407,6 +407,8 @@ export default function App() {
     setEngineStatus('Bestand laden...')
     setPipelineState(EMPTY_PIPELINE_STATE)
     setFileBuffer(null)
+    // De nieuwe run gebruikt de huidige instellingen — geen extra restart nodig
+    pendingRestartRef.current = false
 
     if (pipelineEnabled) {
       void readFileAsArrayBuffer(file)
