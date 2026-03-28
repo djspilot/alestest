@@ -1,5 +1,15 @@
 # ALES Manufacturing Pipeline
 
+## Huidige Status (Overhaul)
+
+Dit project draait nu in quick-only modus.
+
+- Beschikbaar: quick analyse en batch verwerking via `python run.py`
+- Verwijderd: API/FastAPI, Docker/deploy map, `--full` pipeline, database/cache stages
+- Viewer launcher: gebruik alleen `python run_viewer.py`
+
+Belangrijk: historische secties hieronder kunnen nog verwijzingen bevatten naar verwijderde onderdelen.
+
 **Laatste update:** 26 maart 2026
 **Versie:** 3.14-dev (unfold/detect-holes viewer merge + grouped bend lines)
 

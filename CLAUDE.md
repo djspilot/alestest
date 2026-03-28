@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Current Repository Status (Post-Overhaul)
+
+The repository is now quick-mode focused.
+
+- Available: quick analysis and batch processing through `python run.py`
+- Removed: `--full` mode, API package, Docker/deploy setup, AAG analyzer, ISO standards module, database/cache pipeline layers
+- Viewer launcher: use `python run_viewer.py`
+
+Note: parts of this document are historical and may still mention removed components.
+
 ## Project Overview
 
 This is a **manufacturing analysis pipeline** that processes STEP CAD files to extract geometric data, analyze components, detect holes/features, and generate reports. The pipeline includes comprehensive **Dutch/ISO manufacturing standards** analysis for tolerances, fits, threads, surface finish, and material calculations.

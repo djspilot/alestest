@@ -1,27 +1,4 @@
-"""Runtime reporting helpers (AAG and debug only)."""
-
-import json
-import os
-import subprocess
-import sys
-
-from manufacturing_pipeline.core.config import SystemConfig
-
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PIPELINE_DIR = os.path.join(PROJECT_ROOT, "manufacturing_pipeline")
-SCRIPTS_DIR = os.path.join(PIPELINE_DIR, "scripts")
-
-FREECAD_PYTHON = SystemConfig.from_env().freecad_python
-
-if PIPELINE_DIR not in sys.path:
-    sys.path.insert(0, PIPELINE_DIR)
-if SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, SCRIPTS_DIR)
-
-
-def run_aag_analysis(step_file):
-    """AAG disabled in phase 7."""
-    return {"success": False, "error": "AAG disabled (phase 7)"}
+"""Runtime reporting helpers."""
 
 
 def run_debug(step_file):

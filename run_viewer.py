@@ -18,14 +18,10 @@ from urllib.request import urlopen
 ROOT_DIR = Path(__file__).resolve().parent
 VIEWER_DIR = ROOT_DIR / "viewer"
 
-API_HOST = os.environ.get("API_HOST", "127.0.0.1")
-API_PORT = int(os.environ.get("API_PORT", "8000"))
 VIEWER_HOST = os.environ.get("VIEWER_HOST", "127.0.0.1")
 VIEWER_PORT = int(os.environ.get("VIEWER_PORT", "5173"))
-API_PORT_FALLBACK_RANGE = int(os.environ.get("API_PORT_FALLBACK_RANGE", "20"))
 VIEWER_PORT_FALLBACK_RANGE = int(os.environ.get("VIEWER_PORT_FALLBACK_RANGE", "20"))
 
-API_URL = f"http://{API_HOST}:{API_PORT}"
 VIEWER_URL = f"http://{VIEWER_HOST}:{VIEWER_PORT}"
 
 PROCESSES: list[subprocess.Popen] = []
@@ -101,34 +97,16 @@ def spawn_process(command: list[str], cwd: Path) -> subprocess.Popen:
 
 
 def main() -> int:
-    global API_PORT, VIEWER_PORT, API_URL, VIEWER_URL
+    global VIEWER_PORT, VIEWER_URL
 
-    python_executable = sys.executable
     npm_command = require_command("npm.cmd" if os.name == "nt" else "npm")
 
-    API_PORT = find_free_port(API_HOST, API_PORT, API_PORT_FALLBACK_RANGE, "API")
     VIEWER_PORT = find_free_port(VIEWER_HOST, VIEWER_PORT, VIEWER_PORT_FALLBACK_RANGE, "Viewer")
-    API_URL = f"http://{API_HOST}:{API_PORT}"
     VIEWER_URL = f"http://{VIEWER_HOST}:{VIEWER_PORT}"
 
     atexit.register(terminate_processes)
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
-
-    spawn_process(
-        [
-            python_executable,
-            "-m",
-            "uvicorn",
-            "manufacturing_pipeline.api.app:app",
-            "--host",
-            API_HOST,
-            "--port",
-            str(API_PORT),
-        ],
-        ROOT_DIR,
-    )
-    wait_for_http(f"{API_URL}/api/v1/health", "API")
 
     spawn_process(
         [
@@ -147,8 +125,7 @@ def main() -> int:
 
     print(
         "\nALES STEP Viewer is running.\n"
-        f"Viewer: {VIEWER_URL}\n"
-        f"API:    {API_URL}\n\n"
+        f"Viewer: {VIEWER_URL}\n\n"
         "Press Ctrl+C to stop both processes."
     )
 

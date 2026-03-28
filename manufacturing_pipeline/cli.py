@@ -63,7 +63,8 @@ def run_quick(step_file, args):
 def run_batch(step_files, args, cache):
     """Run batch processing over multiple STEP files."""
     try:
-        from tqdm import tqdm
+        import importlib
+        tqdm = importlib.import_module("tqdm").tqdm
         has_tqdm = True
     except ImportError:
         has_tqdm = False
