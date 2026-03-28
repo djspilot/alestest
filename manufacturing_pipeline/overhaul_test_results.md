@@ -385,3 +385,47 @@ Next phase handoff:
 - Risks to watch:
 	- API imports may still reference removed report/analysis options; trim endpoints carefully to avoid router/test regressions.
 	- Keep CLI and tests green while removing API-only dependencies.
+
+## Phase 8 - API & Docker
+Date: 2026-03-28 16:23:59 CET
+Commit: 303a25e phase 8: remove API, Docker, deploy
+Pytest command: python -m pytest
+Pytest result: pass (34 passed, 2 skipped)
+CLI command: python /Users/ds/AIdoel/alestest/manufacturing_pipeline/cli.py -f /Users/ds/AIdoel/alestest/nieuwmodel.step
+Exit code: 0
+Automated result: pass
+Key output:
+- QUICK ANALYSIS: nieuwmodel
+- TOTAL 34.46s
+- COMPLETE
+Manual test result: pending
+Manual notes:
+- Please run your manual validation checklist for Phase 8.
+Next action:
+- Proceed to Phase 9 after manual sign-off.
+
+Phase completion summary:
+- Removed full API package under manufacturing_pipeline/api/.
+- Removed deployment artifacts deploy/Dockerfile and deploy/docker-compose.yml.
+- Removed API-specific test manufacturing_pipeline/tests/test_timeline_api.py.
+Ready-for-next-phase checklist:
+- [x] commit created
+- [x] pytest run result recorded
+- [x] CLI model test result recorded
+- [ ] manual test result recorded or marked pending
+Next phase handoff:
+- Start from phase: 9
+- First files to touch:
+	- manufacturing_pipeline/analysis/pipeline_stages.py
+	- manufacturing_pipeline/analysis/werkvoorbereiding.py
+	- manufacturing_pipeline/reporting/cli_output.py
+	- manufacturing_pipeline/data/cache_manager.py
+	- manufacturing_pipeline/data/database.py
+	- manufacturing_pipeline/data/sql/
+	- manufacturing_pipeline/core/pipeline_init.py
+	- manufacturing_pipeline/cli.py
+	- manufacturing_pipeline/core/models.py
+	- manufacturing_pipeline/analysis/router.py
+- Risks to watch:
+	- --full mode removal requires careful CLI arg cleanup so quick mode remains intact.
+	- core/models.py removal needs RouteCategory migration to avoid router import breaks.
