@@ -72,7 +72,7 @@ def get_output_dir(step_file):
     name_without_ext = os.path.splitext(basename)[0]
     output_subdir = os.path.join(OUTPUT_DIR, name_without_ext)
     os.makedirs(output_subdir, exist_ok=True)
-    return output_subdir
+    return output_subdir, name_without_ext
 
 
 def process_single_file(step_file, args_dict, cache_data=None):
@@ -82,7 +82,7 @@ def process_single_file(step_file, args_dict, cache_data=None):
     # Convert args dict back to namespace
     args = SimpleNamespace(**args_dict)
     
-    output_dir = get_output_dir(step_file)
+    output_dir, _ = get_output_dir(step_file)
     
     try:
         analysis, profiler = run_analysis(step_file, output_dir, args)

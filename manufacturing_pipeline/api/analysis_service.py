@@ -263,7 +263,7 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
     part_name = os.path.basename(step_file)
 
     try:
-        output_dir = get_output_dir(step_file)
+        output_dir, _ = get_output_dir(step_file)
         analysis, total_holes = run_analysis(
             step_file,
             output_dir,

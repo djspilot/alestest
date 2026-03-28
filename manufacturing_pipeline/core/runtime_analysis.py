@@ -100,7 +100,8 @@ from manufacturing_pipeline.core.report_generation import (
 
 
 # Runtime cross-module calls used by run_analysis
-from manufacturing_pipeline.core.runtime_functions import run_aag_analysis, run_unfold_to_step
+from manufacturing_pipeline.core.runtime_reporting import run_aag_analysis
+from manufacturing_pipeline.core.runtime_unfold import run_unfold_to_step
 
 def run_analysis(step_file, output_dir, args, progress_callback=None):
     """Run the complete analysis pipeline.

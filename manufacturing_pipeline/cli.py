@@ -33,8 +33,6 @@ from manufacturing_pipeline.core.utils import (
 def _import_full_pipeline():
     """Lazy import of full pipeline modules (only needed for --full mode)."""
     from manufacturing_pipeline.analysis.step_processing import load_step_file
-    from manufacturing_pipeline.reporting.pdf_processing import extract_dimensions_from_pdf
-    from manufacturing_pipeline.analysis.correlation import correlate_hole_dimension
     from manufacturing_pipeline.data.database import DatabaseManager
     from manufacturing_pipeline.reporting.report_generator import PDFReportGenerator
     from manufacturing_pipeline.analysis import iso_standards  # noqa: F841
@@ -113,8 +111,6 @@ def run_full_pipeline(step_file, pdf_file, db_path, schema_path, args, config, c
     PipelineRunner = mods["PipelineRunner"]
     PipelineStage = mods["PipelineStage"]
     PDFReportGenerator = mods["PDFReportGenerator"]
-    extract_dimensions_from_pdf = mods["extract_dimensions_from_pdf"]
-    correlate_hole_dimension = mods["correlate_hole_dimension"]
     run_geometry_and_topology_stages = mods["run_geometry_and_topology_stages"]
     run_iso_standards_stages = mods["run_iso_standards_stages"]
     run_werkvoorbereiding_stage = mods["run_werkvoorbereiding_stage"]
@@ -211,15 +207,10 @@ def run_full_pipeline(step_file, pdf_file, db_path, schema_path, args, config, c
         if not production_only:
             print("\n" + "=" * 60)
 
-        # Stage 17: PDF Correlation
+        # Stage 17: PDF Correlation (removed in Phase 1)
         if not production_only:
-            print("\nCorrelating Data...")
-        pdf_dims = extract_dimensions_from_pdf(pdf_file)
-
-        def correlate_all_holes(holes_list, dims):
-            return [m for h in holes_list if (m := correlate_hole_dimension(h, dims))]
-
-        matches = runner.get_or_run(PipelineStage.PDF_CORRELATION, correlate_all_holes, holes, pdf_dims)
+            print("\nCorrelating Data... (skipped: correlation module removed)")
+        matches = []
 
         # Save Results
         if not production_only:

@@ -34,7 +34,9 @@ class TestUtils(unittest.TestCase):
         
         # Cleanup
         if os.path.exists(out_dir):
-            os.rmdir(os.path.join(out_dir, "images"))
+            images_dir = os.path.join(out_dir, "images")
+            if os.path.exists(images_dir):
+                os.rmdir(images_dir)
             os.rmdir(out_dir)
 
 if __name__ == '__main__':
