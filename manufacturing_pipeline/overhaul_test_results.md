@@ -186,3 +186,41 @@ Next phase handoff:
 - Risks to watch:
 	- Ensure no remaining imports/reference hooks to compare_erp.py.
 	- Keep scripts/aag_analyzer.py untouched until Phase 7.
+
+## Phase 3 - Standalone Scripts
+Date: 2026-03-28 16:13:11 CET
+Commit: 62acff3 phase 3: remove standalone compare_erp script
+Command: python /Users/ds/AIdoel/alestest/manufacturing_pipeline/cli.py -f /Users/ds/AIdoel/alestest/nieuwmodel.step
+Exit code: 0
+Automated result: pass
+Key output:
+- QUICK ANALYSIS: nieuwmodel
+- TOTAL 34.26s
+- COMPLETE with report and output files generated
+Manual test result: pending
+Manual notes:
+- Please run your manual validation checklist for Phase 3.
+Next action:
+- Proceed to Phase 4 after manual sign-off.
+
+Phase completion summary:
+- Removed standalone script manufacturing_pipeline/scripts/compare_erp.py.
+- Confirmed no runtime impact on pipeline and tests.
+Ready-for-next-phase checklist:
+- [x] commit created
+- [x] pytest run result recorded
+- [x] CLI model test result recorded
+- [ ] manual test result recorded or marked pending
+Next phase handoff:
+- Start from phase: 4
+- First files to touch:
+	- deploy/file_watcher_service.py
+	- deploy/install_windows_service.bat
+	- deploy/requirements-watcher.txt
+	- deploy/install.sh
+	- deploy/deploy.sh
+	- deploy/nginx.conf
+	- deploy/.env.example
+- Risks to watch:
+	- Keep deploy/Dockerfile and deploy/docker-compose.yml for now (Phase 8 removes API/Docker).
+	- Re-run pytest and CLI model test after commit even for deploy-only deletions.
