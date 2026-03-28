@@ -9,10 +9,18 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from manufacturing_pipeline.core.models import RouteCategory
+
+class RouteCategory(Enum):
+    """Pre-routing classificatie: bepaalt welk pad de pipeline volgt."""
+
+    PLAAT = "plaat"
+    PROFIEL = "profiel"
+    ROND = "rond"
+    OVERIG = "overig"
 
 logger = logging.getLogger("profile_router")
 

@@ -1,5 +1,6 @@
 import math
 import cadquery as cq
+from dataclasses import dataclass
 from OCP.GProp import GProp_GProps
 from OCP.BRepGProp import BRepGProp
 from OCP.BRepAdaptor import BRepAdaptor_Surface, BRepAdaptor_Curve
@@ -12,8 +13,6 @@ from OCP.TopAbs import TopAbs_SOLID, TopAbs_SHELL, TopAbs_FACE, TopAbs_EDGE, Top
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 from OCP.BRep import BRep_Tool
-from manufacturing_pipeline.core.models import HoleFeature
-from manufacturing_pipeline.analysis import werkvoorbereiding
 from manufacturing_pipeline.analysis import sheetmetal_analysis
 from manufacturing_pipeline.analysis import assembly_analysis
 import os
@@ -22,6 +21,16 @@ from collections import Counter
 import tempfile
 
 STEP_HEADER = b"ISO-10303-21;"
+
+
+@dataclass
+class HoleFeature:
+    diameter: float
+    depth: float
+    position: tuple[float, float, float]
+    axis: tuple[float, float, float]
+    type: str = "unknown"
+    id: str | None = None
 
 
 class _IsoThreadMatch:
@@ -91,6 +100,31 @@ class _IsoStandardsFallback:
 
 
 iso_standards = _IsoStandardsFallback()
+
+
+class _WerkvoorbereidingFallback:
+    @staticmethod
+    def calculate_cost_estimate(*_args, **_kwargs):
+        return {"estimated_total_cost": None, "currency": "EUR"}
+
+    @staticmethod
+    def generate_tool_list(*_args, **_kwargs):
+        return []
+
+    @staticmethod
+    def classify_outsourcing(*_args, **_kwargs):
+        return {"recommended": False, "reason": "Werkvoorbereiding disabled"}
+
+    @staticmethod
+    def recommend_surface_treatment(*_args, **_kwargs):
+        return []
+
+    @staticmethod
+    def generate_purchase_spec(*_args, **_kwargs):
+        return {"summary": "Werkvoorbereiding disabled"}
+
+
+werkvoorbereiding = _WerkvoorbereidingFallback()
 
 
 def _normalize_step_file(filepath: str) -> str:
