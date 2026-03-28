@@ -43,11 +43,13 @@ async function fetchStatus(url, options = {}) {
       ok: false,
       status: 'unavailable',
       message: getErrorMessage(error, 'Pipeline backend niet bereikbaar'),
+      url,
+      code: 'network_error',
     }
   }
 
   if (response.ok) {
-    return { ok: true, status: 'ready', message: null }
+    return { ok: true, status: 'ready', message: null, url, code: null }
   }
 
   if (response.status === 401) {
@@ -55,6 +57,8 @@ async function fetchStatus(url, options = {}) {
       ok: false,
       status: 'auth_required',
       message: 'Pipeline API vereist een geldige X-API-Key',
+      url,
+      code: 'auth_required',
     }
   }
 
@@ -70,6 +74,8 @@ async function fetchStatus(url, options = {}) {
     ok: false,
     status: 'unavailable',
     message: detail || `${response.status} ${response.statusText}`,
+    url,
+    code: `http_${response.status}`,
   }
 }
 
@@ -150,7 +156,7 @@ export async function runPipelineAnalysis(file, options = {}) {
       headers: buildHeaders(apiKey),
     })
   } catch (error) {
-    throw new Error(getErrorMessage(error, 'Upload naar pipeline mislukt'))
+    throw new Error(`${getErrorMessage(error, 'Upload naar pipeline mislukt')} (${analyzeUrl})`)
   }
 
   const jobId = created?.job_id
@@ -173,7 +179,7 @@ export async function runPipelineAnalysis(file, options = {}) {
         headers: buildHeaders(apiKey),
       })
     } catch (error) {
-      throw new Error(getErrorMessage(error, 'Job status ophalen mislukt'))
+      throw new Error(`${getErrorMessage(error, 'Job status ophalen mislukt')} (${base}/api/v1/jobs/${jobId})`)
     }
 
     onProgress?.({
@@ -195,7 +201,7 @@ export async function runPipelineAnalysis(file, options = {}) {
           headers: buildHeaders(apiKey),
         })
       } catch (error) {
-        throw new Error(getErrorMessage(error, 'Timeline ophalen mislukt'))
+        throw new Error(`${getErrorMessage(error, 'Timeline ophalen mislukt')} (${base}/api/v1/jobs/${jobId}/timeline)`)
       }
 
       onProgress?.({

@@ -26,6 +26,17 @@ const EMPTY_PIPELINE_STATE = {
 
 const VIEWER_REVISION = '026734d'
 
+function buildPipelineDebug(details = {}) {
+  return {
+    checkedBase: details.checkedBase || null,
+    checkedUrl: details.checkedUrl || null,
+    fallbackBase: details.fallbackBase || null,
+    fallbackUrl: details.fallbackUrl || null,
+    code: details.code || null,
+    message: details.message || null,
+  }
+}
+
 function ViewerCanvasFallback() {
   return (
     <div className="loading-overlay">
@@ -320,17 +331,44 @@ export default function App() {
     setPipelineState({ ...EMPTY_PIPELINE_STATE, status: 'checking' })
 
     try {
-      const connection = await checkPipelineConnection({
+      const configuredBase = (pipelineApiBase || '').trim()
+      const defaultBase = getDefaultPipelineApiBase()
+
+      let connection = await checkPipelineConnection({
         apiBase: pipelineApiBase,
         apiKey: pipelineApiKey,
         signal: controller.signal,
       })
+
+      let usedBase = configuredBase
+      let fallbackAttempt = null
+
+      if (!connection.ok && configuredBase && configuredBase !== defaultBase) {
+        fallbackAttempt = await checkPipelineConnection({
+          apiBase: defaultBase,
+          apiKey: pipelineApiKey,
+          signal: controller.signal,
+        })
+        if (fallbackAttempt.ok) {
+          usedBase = defaultBase
+          connection = fallbackAttempt
+          setPipelineApiBase(defaultBase)
+        }
+      }
 
       if (!connection.ok) {
         setPipelineState((prev) => ({
           ...prev,
           status: connection.status,
           error: connection.message,
+          debug: buildPipelineDebug({
+            checkedBase: configuredBase,
+            checkedUrl: connection.url,
+            fallbackBase: fallbackAttempt ? defaultBase : null,
+            fallbackUrl: fallbackAttempt?.url || null,
+            code: connection.code,
+            message: connection.message,
+          }),
         }))
         return
       }
@@ -338,7 +376,7 @@ export default function App() {
       setPipelineState({ ...EMPTY_PIPELINE_STATE, status: 'queued' })
 
       const result = await runPipelineAnalysis(file, {
-        apiBase: pipelineApiBase,
+        apiBase: usedBase,
         apiKey: pipelineApiKey,
         aag: aagFallbackEnabled,
         disableStages: disabledStages,
@@ -363,6 +401,10 @@ export default function App() {
         events: result.timeline?.events || [],
         summary: result.timeline?.summary || null,
         error: null,
+        debug: buildPipelineDebug({
+          checkedBase: usedBase,
+          checkedUrl: `${usedBase}/api/v1/health`,
+        }),
       }))
     } catch (pipelineError) {
       if (pipelineError?.name === 'AbortError') return
@@ -370,6 +412,11 @@ export default function App() {
         ...prev,
         status: 'failed',
         error: pipelineError?.message || 'Pipeline analyse mislukt',
+        debug: buildPipelineDebug({
+          checkedBase: (pipelineApiBase || '').trim(),
+          checkedUrl: `${(pipelineApiBase || '').trim()}/api/v1/health`,
+          message: pipelineError?.message || 'Pipeline analyse mislukt',
+        }),
       }))
     }
   }, [aagFallbackEnabled, disabledStages, pipelineApiBase, pipelineApiKey, pipelineEnabled, stopPipelineRequest])
@@ -669,6 +716,8 @@ export default function App() {
               void startPipeline(sourceFile)
             }}
             pipelineStatus={pipelineState.status}
+            pipelineDebug={pipelineState.debug || null}
+            onResetPipelineApiBase={() => setPipelineApiBase(getDefaultPipelineApiBase())}
           />
         )}
 

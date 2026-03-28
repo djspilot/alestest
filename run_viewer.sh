@@ -101,7 +101,7 @@ API_PID=$!
 wait_for_http "$API_URL/api/v1/health" "API"
 
 cd "$VIEWER_DIR"
-npm run dev -- --host "$VIEWER_HOST" --port "$VIEWER_PORT" &
+VITE_PIPELINE_API_BASE_URL="$API_URL" npm run dev -- --host "$VIEWER_HOST" --port "$VIEWER_PORT" &
 VIEWER_PID=$!
 
 wait_for_http "$VIEWER_URL" "Viewer"
