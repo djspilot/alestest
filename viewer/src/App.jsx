@@ -60,7 +60,7 @@ export default function App() {
     pipeline.handleAagFallbackToggle // triggers flag in pipeline
     pipeline.handleStageToggle // triggers flag in pipeline
     if (pendingRestartRef.current) {
-      pipeline.triggerAutoRestart(viewers.sourceFile)
+      pipeline.triggerAutoRestart(viewer.sourceFile)
     }
   }, [pipeline.disabledStages, pipeline.aagFallbackEnabled])
 
