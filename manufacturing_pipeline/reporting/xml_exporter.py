@@ -58,14 +58,9 @@ try:
 except ImportError:
     HAS_ASSEMBLY_GEOM = False
 
-try:
-    from manufacturing_pipeline.reporting.dxf_metrics_extractor import (
-        generate_dxf_from_solid,
-        extract_metrics_from_dxf
-    )
-    HAS_DXF_METRICS = True
-except ImportError:
-    HAS_DXF_METRICS = False
+# Phase 6: DXF metrics extractor removed.
+# Keep runtime path explicit so DXF-related branches are skipped safely.
+HAS_DXF_METRICS = False
 
 try:
     from manufacturing_pipeline.analysis.profile_features import (
