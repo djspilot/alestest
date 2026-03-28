@@ -429,3 +429,44 @@ Next phase handoff:
 - Risks to watch:
 	- --full mode removal requires careful CLI arg cleanup so quick mode remains intact.
 	- core/models.py removal needs RouteCategory migration to avoid router import breaks.
+
+## Phase 9 - Remove Full Mode
+Date: 2026-03-28 16:28:41 CET
+Commit: 835512a phase 9: remove --full mode, database, cache, werkvoorbereiding
+Pytest command: python -m pytest
+Pytest result: pass (34 passed, 2 skipped)
+CLI command: python /Users/ds/AIdoel/alestest/manufacturing_pipeline/cli.py -f /Users/ds/AIdoel/alestest/nieuwmodel.step
+Exit code: 0
+Automated result: pass
+Key output:
+- Mode: Quick
+- TOTAL 34.60s
+- COMPLETE
+Manual test result: pending
+Manual notes:
+- Please run your manual validation checklist for Phase 9.
+Next action:
+- Proceed to Phase 10 after manual sign-off.
+
+Phase completion summary:
+- Removed full-mode pipeline modules and storage layers: pipeline stages, werkvoorbereiding, cache manager, database, sql schema, and pipeline init.
+- Simplified CLI to quick/batch/list flow only; removed --full control paths and related arguments.
+- Moved RouteCategory ownership to analysis/router and updated router tests.
+Ready-for-next-phase checklist:
+- [x] commit created
+- [x] pytest run result recorded
+- [x] CLI model test result recorded
+- [ ] manual test result recorded or marked pending
+Next phase handoff:
+- Start from phase: 10
+- First files to touch:
+	- manufacturing_pipeline/core/runtime_reporting.py
+	- manufacturing_pipeline/core/utils.py
+	- requirements.txt
+	- README.md
+	- CLAUDE.md
+	- run_viewer.py
+	- run_viewer.sh
+- Risks to watch:
+	- Requirement trimming must keep actual quick-mode runtime dependencies in place.
+	- Docs are currently out-of-sync with removed API/full features and need coherent quick-only updates.
