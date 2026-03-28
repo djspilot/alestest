@@ -4,12 +4,7 @@ import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import StepModel from './StepModel'
 import { isPreUnfoldStageName, MERGED_HOLES_STAGE, PRE_UNFOLD_HOLES_STAGE } from './pipelineUi'
-
-function normalizeFoldId(value) {
-  if (value === null || value === undefined || value === '') return null
-  const numeric = Number(value)
-  return Number.isFinite(numeric) ? numeric : String(value)
-}
+import { normalizeFoldId, isIrregularHole, isHiddenHoleCandidate } from './lib/holes'
 
 function axisVectorForKey(key) {
   if (key === 'x') return new THREE.Vector3(1, 0, 0)
@@ -22,7 +17,7 @@ function toLocalPoint(point, center, normalVector, epsilon) {
   return new THREE.Vector3(
     Number(point[0] || 0) - center.x + normalVector.x * epsilon,
     Number(point[1] || 0) - center.y + normalVector.y * epsilon,
-    Number(point[2] || 0) - center.z + normalVector.z * epsilon
+    Number(point[2] || 0) - center.z + normalVector.z * epsilon,
   )
 }
 
@@ -54,15 +49,7 @@ function CameraFitter({ modelInfo, controlsRef }) {
 function SceneControls({ controlsRef }) {
   const { invalidate } = useThree()
 
-  return (
-    <OrbitControls
-      ref={controlsRef}
-      enableDamping
-      dampingFactor={0.08}
-      enablePan={false}
-      onChange={invalidate}
-    />
-  )
+  return <OrbitControls ref={controlsRef} enableDamping dampingFactor={0.08} enablePan={false} onChange={invalidate} />
 }
 
 function HoleFocusController({ selectedHole, modelInfo, controlsRef }) {
@@ -74,15 +61,15 @@ function HoleFocusController({ selectedHole, modelInfo, controlsRef }) {
     const target = new THREE.Vector3(
       selectedHole.position[0] - modelInfo.center.x,
       selectedHole.position[1] - modelInfo.center.y,
-      selectedHole.position[2] - modelInfo.center.z
+      selectedHole.position[2] - modelInfo.center.z,
     )
     const direction = new THREE.Vector3(...(selectedHole.axis || selectedHole.normal || [1, 0, 0])).normalize()
     const focusSize =
-      selectedHole.diameter ||
-      Math.max(...parseHoleSize(selectedHole.size || selectedHole.label || '', 12)) ||
-      12
+      selectedHole.diameter || Math.max(...parseHoleSize(selectedHole.size || selectedHole.label || '', 12)) || 12
     const distance = Math.max(focusSize * 6, modelInfo.boundingRadius * 0.14, 24)
-    const cameraOffset = direction.multiplyScalar(distance).add(new THREE.Vector3(distance * 0.25, distance * 0.12, distance * 0.22))
+    const cameraOffset = direction
+      .multiplyScalar(distance)
+      .add(new THREE.Vector3(distance * 0.25, distance * 0.12, distance * 0.22))
 
     camera.position.copy(target.clone().add(cameraOffset))
     controlsRef.current.target.copy(target)
@@ -102,7 +89,7 @@ function FoldFocusController({ selectedFold, modelInfo, controlsRef }) {
     const target = new THREE.Vector3(
       selectedFold.position[0] - modelInfo.center.x,
       selectedFold.position[1] - modelInfo.center.y,
-      selectedFold.position[2] - modelInfo.center.z
+      selectedFold.position[2] - modelInfo.center.z,
     )
     const axis = new THREE.Vector3(...(selectedFold.axis || [1, 0, 0])).normalize()
     const lateral = new THREE.Vector3(0, 0, 1).cross(axis)
@@ -110,7 +97,9 @@ function FoldFocusController({ selectedFold, modelInfo, controlsRef }) {
     lateral.normalize()
 
     const distance = Math.max((selectedFold.length || 0) * 0.9, modelInfo.boundingRadius * 0.18, 30)
-    const cameraOffset = lateral.multiplyScalar(distance).add(new THREE.Vector3(distance * 0.25, distance * 0.12, distance * 0.2))
+    const cameraOffset = lateral
+      .multiplyScalar(distance)
+      .add(new THREE.Vector3(distance * 0.25, distance * 0.12, distance * 0.2))
 
     camera.position.copy(target.clone().add(cameraOffset))
     controlsRef.current.target.copy(target)
@@ -187,12 +176,8 @@ function roundedRectPoints(width, height, radius = 4, cornerSegments = 10) {
     for (let segmentIndex = 0; segmentIndex <= cornerSegments; segmentIndex += 1) {
       if (cornerIndex > 0 && segmentIndex === 0) continue
       const progress = segmentIndex / cornerSegments
-      const angle = corner.start + ((corner.end - corner.start) * progress)
-      points.push([
-        corner.center[0] + (Math.cos(angle) * safeRadius),
-        corner.center[1] + (Math.sin(angle) * safeRadius),
-        0,
-      ])
+      const angle = corner.start + (corner.end - corner.start) * progress
+      points.push([corner.center[0] + Math.cos(angle) * safeRadius, corner.center[1] + Math.sin(angle) * safeRadius, 0])
     }
     return points
   })
@@ -202,26 +187,18 @@ function capsulePoints(length, width, arcSegments = 18) {
   const safeLength = Math.max(length, width, 2)
   const safeWidth = Math.max(width, 2)
   const radius = safeWidth / 2
-  const straightHalf = Math.max((safeLength / 2) - radius, 0.5)
+  const straightHalf = Math.max(safeLength / 2 - radius, 0.5)
   const points = []
 
   for (let index = 0; index <= arcSegments; index += 1) {
-    const angle = (-Math.PI / 2) + ((Math.PI * index) / arcSegments)
-    points.push([
-      straightHalf + (Math.cos(angle) * radius),
-      Math.sin(angle) * radius,
-      0,
-    ])
+    const angle = -Math.PI / 2 + (Math.PI * index) / arcSegments
+    points.push([straightHalf + Math.cos(angle) * radius, Math.sin(angle) * radius, 0])
   }
 
   for (let index = 0; index <= arcSegments; index += 1) {
-    const angle = (Math.PI / 2) + ((Math.PI * index) / arcSegments)
+    const angle = Math.PI / 2 + (Math.PI * index) / arcSegments
     if (index === 0) continue
-    points.push([
-      -straightHalf + (Math.cos(angle) * radius),
-      Math.sin(angle) * radius,
-      0,
-    ])
+    points.push([-straightHalf + Math.cos(angle) * radius, Math.sin(angle) * radius, 0])
   }
 
   return points
@@ -260,9 +237,12 @@ function buildDimensionLine(start, end, capSize = 6, capAxis = 'y') {
   )
 
   return new Float32Array([
-    ...positions[0], ...positions[1],
-    ...positions[2], ...positions[3],
-    ...positions[4], ...positions[5],
+    ...positions[0],
+    ...positions[1],
+    ...positions[2],
+    ...positions[3],
+    ...positions[4],
+    ...positions[5],
   ])
 }
 
@@ -290,8 +270,8 @@ function buildSectionContours(partType, size, thickness, axisKey) {
   }
 
   const contours = [rectanglePoints(width, height)]
-  const innerWidth = width - (2 * Math.max(thickness || 0, 0))
-  const innerHeight = height - (2 * Math.max(thickness || 0, 0))
+  const innerWidth = width - 2 * Math.max(thickness || 0, 0)
+  const innerHeight = height - 2 * Math.max(thickness || 0, 0)
   if (innerWidth > 2 && innerHeight > 2) {
     contours.push(rectanglePoints(innerWidth, innerHeight))
   }
@@ -341,11 +321,7 @@ function holePalette(hole, isSelected, hasSelection) {
 }
 
 function holeCenterPosition(hole, center) {
-  return [
-    hole.position[0] - center.x,
-    hole.position[1] - center.y,
-    hole.position[2] - center.z,
-  ]
+  return [hole.position[0] - center.x, hole.position[1] - center.y, hole.position[2] - center.z]
 }
 
 function holeFocusRadius(hole, modelInfo) {
@@ -414,9 +390,7 @@ function pointToSegmentDistance(point, start, end) {
 }
 
 function buildProbeAxes(normalVector) {
-  const fallback = Math.abs(normalVector.z) < 0.9
-    ? new THREE.Vector3(0, 0, 1)
-    : new THREE.Vector3(0, 1, 0)
+  const fallback = Math.abs(normalVector.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0)
   const axisX = new THREE.Vector3().crossVectors(normalVector, fallback).normalize()
   const axisY = new THREE.Vector3().crossVectors(normalVector, axisX).normalize()
   return { axisX, axisY }
@@ -427,9 +401,10 @@ function inferProbeContour(point, normal, mesh, center, modelInfo) {
   if (!edgeBuffer?.length || !center) return null
 
   const clickedPoint = point instanceof THREE.Vector3 ? point : new THREE.Vector3(point.x, point.y, point.z)
-  const normalVector = normal instanceof THREE.Vector3
-    ? normal.clone().normalize()
-    : new THREE.Vector3(...(normal || [0, 0, 1])).normalize()
+  const normalVector =
+    normal instanceof THREE.Vector3
+      ? normal.clone().normalize()
+      : new THREE.Vector3(...(normal || [0, 0, 1])).normalize()
   const searchRadius = Math.max(modelInfo?.boundingRadius * 0.032 || 0, 18)
   const planeTolerance = Math.max(searchRadius * 0.26, 2.5)
   const nearbyPoints = []
@@ -458,13 +433,15 @@ function inferProbeContour(point, normal, mesh, center, modelInfo) {
 
   if (nearbyPoints.length < 10) return null
 
-  const centroid = nearbyPoints.reduce((acc, current) => acc.add(current), new THREE.Vector3()).multiplyScalar(1 / nearbyPoints.length)
+  const centroid = nearbyPoints
+    .reduce((acc, current) => acc.add(current), new THREE.Vector3())
+    .multiplyScalar(1 / nearbyPoints.length)
   if (centroid.distanceTo(clickedPoint) > searchRadius * 0.95) return null
 
   const { axisX, axisY } = buildProbeAxes(normalVector)
   const radii = nearbyPoints.map((entry) => entry.distanceTo(centroid))
   const meanRadius = radii.reduce((sum, value) => sum + value, 0) / radii.length
-  const radiusVariance = radii.reduce((sum, value) => sum + ((value - meanRadius) ** 2), 0) / radii.length
+  const radiusVariance = radii.reduce((sum, value) => sum + (value - meanRadius) ** 2, 0) / radii.length
   const radiusStdDev = Math.sqrt(radiusVariance)
 
   const localPoints = nearbyPoints.map((entry) => {
@@ -480,11 +457,7 @@ function inferProbeContour(point, normal, mesh, center, modelInfo) {
   const height = Math.max(...ys) - Math.min(...ys)
   const aspectRatio = Math.max(width, height) / Math.max(Math.min(width, height), 1)
 
-  const absoluteCenter = [
-    centroid.x + center.x,
-    centroid.y + center.y,
-    centroid.z + center.z,
-  ]
+  const absoluteCenter = [centroid.x + center.x, centroid.y + center.y, centroid.z + center.z]
   const normalArray = [normalVector.x, normalVector.y, normalVector.z]
   const baseDebug = {
     edge_point_count: nearbyPoints.length,
@@ -510,7 +483,7 @@ function inferProbeContour(point, normal, mesh, center, modelInfo) {
       debug: {
         ...baseDebug,
         inferred_family: 'circular',
-        confidence: Number(Math.max(0, 1 - ((radiusStdDev / Math.max(meanRadius, 1)) * 2.2)).toFixed(3)),
+        confidence: Number(Math.max(0, 1 - (radiusStdDev / Math.max(meanRadius, 1)) * 2.2).toFixed(3)),
       },
     }
   }
@@ -527,7 +500,11 @@ function inferProbeContour(point, normal, mesh, center, modelInfo) {
       debug: {
         ...baseDebug,
         inferred_family: aspectRatio > 1.45 ? 'slot_like' : 'rounded_rect_like',
-        confidence: Number(Math.min(0.95, 0.52 + ((Math.min(major, minor) / Math.max(major, minor)) * 0.3) + (nearbySegments / 120)).toFixed(3)),
+        confidence: Number(
+          Math.min(0.95, 0.52 + (Math.min(major, minor) / Math.max(major, minor)) * 0.3 + nearbySegments / 120).toFixed(
+            3,
+          ),
+        ),
       },
     }
   }
@@ -535,16 +512,6 @@ function inferProbeContour(point, normal, mesh, center, modelInfo) {
   return null
 }
 
-function isIrregularHole(hole) {
-  const type = String(hole?.type || '').toLowerCase()
-  const label = String(hole?.label || '').toLowerCase()
-  const reason = String(hole?.reason || '').toLowerCase()
-  return type.includes('irregular') || label.includes('irregular') || reason.includes('irregular')
-}
-
-function isHiddenHoleCandidate(hole) {
-  return hole?.status === 'rejected' || isIrregularHole(hole)
-}
 
 function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSelect }) {
   const position = holeCenterPosition(hole, center)
@@ -564,10 +531,7 @@ function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSele
     return isClosed ? normalized : [...normalized, first]
   }, [center.x, center.y, center.z, hole.contour_points])
   const [rectWidth, rectHeight] = parseHoleSize(hole.size || hole.label, 14)
-  const contourPoints = useMemo(
-    () => getHoleContourPoints(hole, rectWidth, rectHeight),
-    [hole, rectWidth, rectHeight],
-  )
+  const contourPoints = useMemo(() => getHoleContourPoints(hole, rectWidth, rectHeight), [hole, rectWidth, rectHeight])
   const primaryLoop = useMemo(() => toFloat32(contourPoints), [contourPoints])
   const highlightLoop = useMemo(() => {
     const scale = isSelected ? 1.08 : 1.035
@@ -579,58 +543,74 @@ function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSele
   }, [contourPoints, hole.type])
   const palette = holePalette(hole, isSelected, hasSelection)
   const hitRadius = holeFocusRadius(hole, modelInfo)
-  const handleSelect = useCallback((event) => {
-    event.stopPropagation()
-    onSelect?.(hole.id)
-  }, [hole.id, onSelect])
+  const handleSelect = useCallback(
+    (event) => {
+      event.stopPropagation()
+      onSelect?.(hole.id)
+    },
+    [hole.id, onSelect],
+  )
 
   const explicitCenter = useMemo(() => {
     if (!explicitContour || explicitContour.length === 0) return [position[0], position[1], position[2]]
-    const totals = explicitContour.reduce((acc, point) => {
-      acc[0] += point[0]
-      acc[1] += point[1]
-      acc[2] += point[2]
-      return acc
-    }, [0, 0, 0])
-    return [
-      totals[0] / explicitContour.length,
-      totals[1] / explicitContour.length,
-      totals[2] / explicitContour.length,
-    ]
+    const totals = explicitContour.reduce(
+      (acc, point) => {
+        acc[0] += point[0]
+        acc[1] += point[1]
+        acc[2] += point[2]
+        return acc
+      },
+      [0, 0, 0],
+    )
+    return [totals[0] / explicitContour.length, totals[1] / explicitContour.length, totals[2] / explicitContour.length]
   }, [explicitContour, position])
 
   if (explicitContour) {
     const normal = new THREE.Vector3(...(hole.normal || hole.axis || [0, 0, 1])).normalize()
     const contourBase = toFloat32(explicitContour)
-    const contourHighlight = toFloat32(explicitContour.map(([x, y, z]) => [
-      x + normal.x * 0.2,
-      y + normal.y * 0.2,
-      z + normal.z * 0.2,
-    ]))
-    const contourInner = toFloat32(explicitContour.map(([x, y, z]) => [
-      x - normal.x * 0.2,
-      y - normal.y * 0.2,
-      z - normal.z * 0.2,
-    ]))
+    const contourHighlight = toFloat32(
+      explicitContour.map(([x, y, z]) => [x + normal.x * 0.2, y + normal.y * 0.2, z + normal.z * 0.2]),
+    )
+    const contourInner = toFloat32(
+      explicitContour.map(([x, y, z]) => [x - normal.x * 0.2, y - normal.y * 0.2, z - normal.z * 0.2]),
+    )
     return (
       <group renderOrder={20} onClick={handleSelect}>
         <lineLoop>
           <bufferGeometry>
             <bufferAttribute attach="attributes-position" args={[contourHighlight, 3]} />
           </bufferGeometry>
-          <lineBasicMaterial color={palette.secondary} transparent opacity={palette.echoOpacity} depthTest={false} depthWrite={false} />
+          <lineBasicMaterial
+            color={palette.secondary}
+            transparent
+            opacity={palette.echoOpacity}
+            depthTest={false}
+            depthWrite={false}
+          />
         </lineLoop>
         <lineLoop>
           <bufferGeometry>
             <bufferAttribute attach="attributes-position" args={[contourBase, 3]} />
           </bufferGeometry>
-          <lineBasicMaterial color={palette.primary} transparent opacity={palette.primaryOpacity} depthTest={false} depthWrite={false} />
+          <lineBasicMaterial
+            color={palette.primary}
+            transparent
+            opacity={palette.primaryOpacity}
+            depthTest={false}
+            depthWrite={false}
+          />
         </lineLoop>
         <lineLoop>
           <bufferGeometry>
             <bufferAttribute attach="attributes-position" args={[contourInner, 3]} />
           </bufferGeometry>
-          <lineBasicMaterial color={palette.secondary} transparent opacity={palette.selectionOpacity} depthTest={false} depthWrite={false} />
+          <lineBasicMaterial
+            color={palette.secondary}
+            transparent
+            opacity={palette.selectionOpacity}
+            depthTest={false}
+            depthWrite={false}
+          />
         </lineLoop>
         <mesh position={explicitCenter}>
           <sphereGeometry args={[hitRadius, 18, 18]} />
@@ -648,19 +628,37 @@ function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSele
           <bufferGeometry>
             <bufferAttribute attach="attributes-position" args={[highlightLoop, 3]} />
           </bufferGeometry>
-          <lineBasicMaterial color={palette.secondary} transparent opacity={palette.echoOpacity} depthTest={false} depthWrite={false} />
+          <lineBasicMaterial
+            color={palette.secondary}
+            transparent
+            opacity={palette.echoOpacity}
+            depthTest={false}
+            depthWrite={false}
+          />
         </lineLoop>
         <lineLoop>
           <bufferGeometry>
             <bufferAttribute attach="attributes-position" args={[primaryLoop, 3]} />
           </bufferGeometry>
-          <lineBasicMaterial color={palette.primary} transparent opacity={palette.primaryOpacity} depthTest={false} depthWrite={false} />
+          <lineBasicMaterial
+            color={palette.primary}
+            transparent
+            opacity={palette.primaryOpacity}
+            depthTest={false}
+            depthWrite={false}
+          />
         </lineLoop>
         <lineLoop position={[0, 0, 0.22]}>
           <bufferGeometry>
             <bufferAttribute attach="attributes-position" args={[innerLoop, 3]} />
           </bufferGeometry>
-          <lineBasicMaterial color={palette.secondary} transparent opacity={palette.selectionOpacity} depthTest={false} depthWrite={false} />
+          <lineBasicMaterial
+            color={palette.secondary}
+            transparent
+            opacity={palette.selectionOpacity}
+            depthTest={false}
+            depthWrite={false}
+          />
         </lineLoop>
         <mesh>
           <circleGeometry args={[hitRadius, 40]} />
@@ -677,19 +675,37 @@ function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSele
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[highlightLoop, 3]} />
         </bufferGeometry>
-        <lineBasicMaterial color={palette.secondary} transparent opacity={palette.echoOpacity} depthTest={false} depthWrite={false} />
+        <lineBasicMaterial
+          color={palette.secondary}
+          transparent
+          opacity={palette.echoOpacity}
+          depthTest={false}
+          depthWrite={false}
+        />
       </lineLoop>
       <lineLoop>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[primaryLoop, 3]} />
         </bufferGeometry>
-        <lineBasicMaterial color={palette.primary} transparent opacity={palette.primaryOpacity} depthTest={false} depthWrite={false} />
+        <lineBasicMaterial
+          color={palette.primary}
+          transparent
+          opacity={palette.primaryOpacity}
+          depthTest={false}
+          depthWrite={false}
+        />
       </lineLoop>
       <lineLoop position={[0, 0, 0.22]}>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[innerLoop, 3]} />
         </bufferGeometry>
-        <lineBasicMaterial color={palette.secondary} transparent opacity={palette.selectionOpacity} depthTest={false} depthWrite={false} />
+        <lineBasicMaterial
+          color={palette.secondary}
+          transparent
+          opacity={palette.selectionOpacity}
+          depthTest={false}
+          depthWrite={false}
+        />
       </lineLoop>
       <mesh>
         <planeGeometry args={[Math.max(rectWidth, hitRadius * 2), Math.max(rectHeight, hitRadius * 2)]} />
@@ -705,26 +721,46 @@ function HiddenHoleBeacon({ hole, center, modelInfo, onSelect, isSelected = fals
   if (!position) return null
   const quaternion = quaternionFromDirection(hole.normal || hole.axis || [0, 0, 1])
   const baseRadius = Math.max(holeFocusRadius(hole, modelInfo) * 0.62, 4)
-  const crossSegments = useMemo(() => new Float32Array([
-    -baseRadius, 0, 0,
-    baseRadius, 0, 0,
-    0, -baseRadius, 0,
-    0, baseRadius, 0,
-    -baseRadius * 0.72, -baseRadius * 0.72, 0,
-    baseRadius * 0.72, baseRadius * 0.72, 0,
-    -baseRadius * 0.72, baseRadius * 0.72, 0,
-    baseRadius * 0.72, -baseRadius * 0.72, 0,
-  ]), [baseRadius])
-  const ringSegments = useMemo(
-    () => toFloat32(circlePoints(baseRadius * 1.15, 56)),
+  const crossSegments = useMemo(
+    () =>
+      new Float32Array([
+        -baseRadius,
+        0,
+        0,
+        baseRadius,
+        0,
+        0,
+        0,
+        -baseRadius,
+        0,
+        0,
+        baseRadius,
+        0,
+        -baseRadius * 0.72,
+        -baseRadius * 0.72,
+        0,
+        baseRadius * 0.72,
+        baseRadius * 0.72,
+        0,
+        -baseRadius * 0.72,
+        baseRadius * 0.72,
+        0,
+        baseRadius * 0.72,
+        -baseRadius * 0.72,
+        0,
+      ]),
     [baseRadius],
   )
+  const ringSegments = useMemo(() => toFloat32(circlePoints(baseRadius * 1.15, 56)), [baseRadius])
   const statusColor = isIrregularHole(hole) ? '#d97706' : '#1d4ed8'
   const color = isSelected ? '#f5c542' : statusColor
-  const handleSelect = useCallback((event) => {
-    event.stopPropagation()
-    onSelect?.(hole.id)
-  }, [hole.id, onSelect])
+  const handleSelect = useCallback(
+    (event) => {
+      event.stopPropagation()
+      onSelect?.(hole.id)
+    },
+    [hole.id, onSelect],
+  )
 
   return (
     <group position={position} quaternion={quaternion} renderOrder={24} onClick={handleSelect}>
@@ -752,22 +788,14 @@ function ManualProbeOverlay({ probe, center, modelInfo }) {
   const inferredHole = probe?.inferredContour || null
   const baseHole = inferredHole
     ? {
-      ...inferredHole,
-      status: 'probe',
-      axis: inferredHole.normal || probe.normal,
-    }
+        ...inferredHole,
+        status: 'probe',
+        axis: inferredHole.normal || probe.normal,
+      }
     : null
 
   if (baseHole) {
-    return (
-      <HoleOutline
-        hole={baseHole}
-        center={center}
-        isSelected
-        hasSelection
-        modelInfo={modelInfo}
-      />
-    )
+    return <HoleOutline hole={baseHole} center={center} isSelected hasSelection modelInfo={modelInfo} />
   }
 
   const radius = Math.max(modelInfo?.boundingRadius * 0.018 || 0, 6)
@@ -795,13 +823,7 @@ function SectionContour({ points, position, quaternion, color }) {
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" args={[flatPoints, 3]} />
       </bufferGeometry>
-      <lineBasicMaterial
-        color={color}
-        transparent
-        opacity={1}
-        depthTest={false}
-        depthWrite={false}
-      />
+      <lineBasicMaterial color={color} transparent opacity={1} depthTest={false} depthWrite={false} />
     </lineLoop>
   )
 }
@@ -809,10 +831,14 @@ function SectionContour({ points, position, quaternion, color }) {
 // Renders a cross-section polygon using exact 3D world-space coordinates from the backend.
 // polygonLines is an array of rings, each ring is an array of [x,y,z] world-space points.
 function PolygonOutline3D({ polygonLines, color, isEndMarker = false }) {
-  const rings = useMemo(() => polygonLines.map((ring) => {
-    const closed = [...ring, ring[0]]
-    return new Float32Array(closed.flatMap((p) => p))
-  }), [polygonLines])
+  const rings = useMemo(
+    () =>
+      polygonLines.map((ring) => {
+        const closed = [...ring, ring[0]]
+        return new Float32Array(closed.flatMap((p) => p))
+      }),
+    [polygonLines],
+  )
 
   return (
     <group renderOrder={15}>
@@ -855,13 +881,7 @@ function SectionContours({ position, quaternion, contours, color }) {
       ))}
       <mesh>
         <circleGeometry args={[2.4, 24]} />
-        <meshBasicMaterial
-          color={color}
-          transparent
-          opacity={0.98}
-          depthTest={false}
-          depthWrite={false}
-        />
+        <meshBasicMaterial color={color} transparent opacity={0.98} depthTest={false} depthWrite={false} />
       </mesh>
     </group>
   )
@@ -884,9 +904,18 @@ function BoundingBoxGuide({ size, color = '#d97706' }) {
     [-half.x, half.y, half.z],
   ]
   const edges = [
-    [0, 1], [1, 2], [2, 3], [3, 0],
-    [4, 5], [5, 6], [6, 7], [7, 4],
-    [0, 4], [1, 5], [2, 6], [3, 7],
+    [0, 1],
+    [1, 2],
+    [2, 3],
+    [3, 0],
+    [4, 5],
+    [5, 6],
+    [6, 7],
+    [7, 4],
+    [0, 4],
+    [1, 5],
+    [2, 6],
+    [3, 7],
   ]
   const positions = new Float32Array(edges.flatMap(([a, b]) => [...corners[a], ...corners[b]]))
 
@@ -934,12 +963,21 @@ function ClassificationGuides({ modelInfo, classificationVisuals }) {
 
   const makeEndpoints = (axis, anchor) => {
     if (axis.key === 'x') {
-      return [[-extent.x, anchor.y, anchor.z], [extent.x, anchor.y, anchor.z]]
+      return [
+        [-extent.x, anchor.y, anchor.z],
+        [extent.x, anchor.y, anchor.z],
+      ]
     }
     if (axis.key === 'y') {
-      return [[anchor.x, -extent.y, anchor.z], [anchor.x, extent.y, anchor.z]]
+      return [
+        [anchor.x, -extent.y, anchor.z],
+        [anchor.x, extent.y, anchor.z],
+      ]
     }
-    return [[anchor.x, anchor.y, -extent.z], [anchor.x, anchor.y, extent.z]]
+    return [
+      [anchor.x, anchor.y, -extent.z],
+      [anchor.x, anchor.y, extent.z],
+    ]
   }
 
   const longEndpoints = makeEndpoints(longAxis, positions.long)
@@ -955,9 +993,24 @@ function ClassificationGuides({ modelInfo, classificationVisuals }) {
   return (
     <group>
       <BoundingBoxGuide size={size} color="#b45309" />
-      <DimensionGuide start={longEndpoints[0]} end={longEndpoints[1]} color="#f59e0b" capAxis={capAxisFor(longAxis.key)} />
-      <DimensionGuide start={middleEndpoints[0]} end={middleEndpoints[1]} color="#fb7185" capAxis={capAxisFor(middleAxis.key)} />
-      <DimensionGuide start={shortEndpoints[0]} end={shortEndpoints[1]} color="#facc15" capAxis={capAxisFor(shortAxis.key)} />
+      <DimensionGuide
+        start={longEndpoints[0]}
+        end={longEndpoints[1]}
+        color="#f59e0b"
+        capAxis={capAxisFor(longAxis.key)}
+      />
+      <DimensionGuide
+        start={middleEndpoints[0]}
+        end={middleEndpoints[1]}
+        color="#fb7185"
+        capAxis={capAxisFor(middleAxis.key)}
+      />
+      <DimensionGuide
+        start={shortEndpoints[0]}
+        end={shortEndpoints[1]}
+        color="#facc15"
+        capAxis={capAxisFor(shortAxis.key)}
+      />
     </group>
   )
 }
@@ -978,11 +1031,7 @@ function buildFallbackSections(modelInfo) {
 }
 
 function BendLineOverlay({ bend, center, isSelected, onSelect }) {
-  const position = [
-    bend.position[0] - center.x,
-    bend.position[1] - center.y,
-    bend.position[2] - center.z,
-  ]
+  const position = [bend.position[0] - center.x, bend.position[1] - center.y, bend.position[2] - center.z]
   const axis = new THREE.Vector3(...(bend.axis || [1, 0, 0])).normalize()
   const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis)
   const color = isSelected
@@ -1001,7 +1050,9 @@ function BendLineOverlay({ bend, center, isSelected, onSelect }) {
           onSelect?.(bend.id)
         }}
       >
-        <cylinderGeometry args={[isSelected ? 1.4 : 0.95, isSelected ? 1.4 : 0.95, Math.max(Number(bend.length) || 0, 10), 16]} />
+        <cylinderGeometry
+          args={[isSelected ? 1.4 : 0.95, isSelected ? 1.4 : 0.95, Math.max(Number(bend.length) || 0, 10), 16]}
+        />
         <meshBasicMaterial
           color={color}
           transparent
@@ -1044,10 +1095,8 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
       const detail = foldDetails[idx] || {}
       const logical = bends[idx] || {}
       const segment = bendSegments[idx] || {}
-      const id = normalizeFoldId(detail.id || logical.id || (idx + 1))
-      const detailCenter = Array.isArray(detail.center) && detail.center.length >= 3
-        ? detail.center
-        : [0, 0, 0]
+      const id = normalizeFoldId(detail.id || logical.id || idx + 1)
+      const detailCenter = Array.isArray(detail.center) && detail.center.length >= 3 ? detail.center : [0, 0, 0]
       const segmentAxis = String(detail.axis || segment.axis || '').toLowerCase()
       const lineAxis = inPlaneAxes.includes(segmentAxis) ? segmentAxis : inPlaneAxes[0]
       const varyingAxis = inPlaneAxes.find((axisKey) => axisKey !== lineAxis) || inPlaneAxes[1] || inPlaneAxes[0]
@@ -1057,14 +1106,13 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
       const quaternion = new THREE.Quaternion().setFromRotationMatrix(basis)
       const localStart = toLocalPoint(detail.start || segment.start, modelInfo?.center, normalVector, epsilon)
       const localEnd = toLocalPoint(detail.end || segment.end, modelInfo?.center, normalVector, epsilon)
-      const requestedLength = Number(detail.length || logical.length || segment.length) || Math.max(Math.min(length, width) * 0.9, 10)
-      const shouldPreferPrimaryAxis =
-        requestedLength > secondarySize * 1.35
-        && primarySize > secondarySize * 1.2
+      const requestedLength =
+        Number(detail.length || logical.length || segment.length) || Math.max(Math.min(length, width) * 0.9, 10)
+      const shouldPreferPrimaryAxis = requestedLength > secondarySize * 1.35 && primarySize > secondarySize * 1.2
       const fallbackAxis = shouldPreferPrimaryAxis ? primaryAxis : lineAxis
       const fallbackQuaternion = new THREE.Quaternion().setFromUnitVectors(
         new THREE.Vector3(1, 0, 0),
-        axisVectorForKey(fallbackAxis)
+        axisVectorForKey(fallbackAxis),
       )
       const position = modelInfo?.center
         ? [
@@ -1094,19 +1142,37 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
         <>
           <mesh>
             <planeGeometry args={[length, width]} />
-            <meshBasicMaterial color="#eef4fb" transparent opacity={0.95} side={THREE.DoubleSide} depthTest={false} depthWrite={false} />
+            <meshBasicMaterial
+              color="#eef4fb"
+              transparent
+              opacity={0.95}
+              side={THREE.DoubleSide}
+              depthTest={false}
+              depthWrite={false}
+            />
           </mesh>
 
           <lineLoop renderOrder={26}>
             <bufferGeometry>
               <bufferAttribute
                 attach="attributes-position"
-                args={[new Float32Array([
-                  -length / 2, -width / 2, 0.2,
-                  length / 2, -width / 2, 0.2,
-                  length / 2, width / 2, 0.2,
-                  -length / 2, width / 2, 0.2,
-                ]), 3]}
+                args={[
+                  new Float32Array([
+                    -length / 2,
+                    -width / 2,
+                    0.2,
+                    length / 2,
+                    -width / 2,
+                    0.2,
+                    length / 2,
+                    width / 2,
+                    0.2,
+                    -length / 2,
+                    width / 2,
+                    0.2,
+                  ]),
+                  3,
+                ]}
               />
             </bufferGeometry>
             <lineBasicMaterial color="#6b7280" transparent opacity={0.9} depthTest={false} depthWrite={false} />
@@ -1123,16 +1189,13 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
             : row.direction === 'down'
               ? '#ef4444'
               : '#8f0008'
-        const segmentVector = row.localStart && row.localEnd
-          ? row.localEnd.clone().sub(row.localStart)
-          : null
+        const segmentVector = row.localStart && row.localEnd ? row.localEnd.clone().sub(row.localStart) : null
         const exactLength = segmentVector?.length?.() || 0
-        const exactMidpoint = segmentVector
-          ? row.localStart.clone().add(row.localEnd).multiplyScalar(0.5)
-          : null
-        const exactQuaternion = segmentVector && exactLength > 1e-6
-          ? new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), segmentVector.clone().normalize())
-          : null
+        const exactMidpoint = segmentVector ? row.localStart.clone().add(row.localEnd).multiplyScalar(0.5) : null
+        const exactQuaternion =
+          segmentVector && exactLength > 1e-6
+            ? new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), segmentVector.clone().normalize())
+            : null
         const useExactSegment = !row.forceFallback && exactQuaternion && exactLength > 1e-6
 
         return (
@@ -1147,7 +1210,14 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
           >
             <mesh>
               <planeGeometry args={[useExactSegment ? exactLength : row.lineLength, selected ? 8 : 5]} />
-              <meshBasicMaterial color={color} transparent opacity={selected ? 1 : 0.86} side={THREE.DoubleSide} depthTest={false} depthWrite={false} />
+              <meshBasicMaterial
+                color={color}
+                transparent
+                opacity={selected ? 1 : 0.86}
+                side={THREE.DoubleSide}
+                depthTest={false}
+                depthWrite={false}
+              />
             </mesh>
           </group>
         )
@@ -1175,26 +1245,21 @@ function StageOverlays({
 
   const isHoleStage = focusedStage === MERGED_HOLES_STAGE || isPreUnfoldStageName(focusedStage)
   const holeItems = holeVisuals?.items || []
-  const visibleHoleVisuals = showHiddenHoles
-    ? holeItems
-    : holeItems.filter((hole) => !isHiddenHoleCandidate(hole))
-  const hiddenHoleVisuals = holeItems.filter((hole) => (
-    isHiddenHoleCandidate(hole)
-    && Array.isArray(hole?.position)
-    && hole.position.length >= 3
-    && hole.position.every((value) => Number.isFinite(Number(value)))
-  ))
+  const visibleHoleVisuals = showHiddenHoles ? holeItems : holeItems.filter((hole) => !isHiddenHoleCandidate(hole))
+  const hiddenHoleVisuals = holeItems.filter(
+    (hole) =>
+      isHiddenHoleCandidate(hole) &&
+      Array.isArray(hole?.position) &&
+      hole.position.length >= 3 &&
+      hole.position.every((value) => Number.isFinite(Number(value))),
+  )
   const routerVisuals = visuals?.router || null
   const classificationVisuals = visuals?.classification || null
   const unfoldVisuals = visuals?.unfold || null
   const size = modelInfo?.size
   const bend3dItems = unfoldVisuals?.bends_3d || []
 
-  const makePosition = (position) => [
-    position[0] - center.x,
-    position[1] - center.y,
-    position[2] - center.z,
-  ]
+  const makePosition = (position) => [position[0] - center.x, position[1] - center.y, position[2] - center.z]
 
   const planeQuaternion = new THREE.Quaternion()
   if (routerVisuals?.axis_direction) {
@@ -1241,77 +1306,88 @@ function StageOverlays({
   const sectionVisuals = routerSections.length > 0 ? routerSections : fallbackSections
 
   return (
-      <group>
-      {isHoleStage && visibleHoleVisuals.map((hole, index) => (
-        <HoleOutline
-          key={hole.id || `${hole.type}-${index}`}
-          hole={hole}
-          center={center}
-          hasSelection={Boolean(selectedHole?.id)}
-          modelInfo={modelInfo}
-          isSelected={selectedHole?.id === hole.id}
-          onSelect={onHoleSelect}
-        />
-      ))}
+    <group>
+      {isHoleStage &&
+        visibleHoleVisuals.map((hole, index) => (
+          <HoleOutline
+            key={hole.id || `${hole.type}-${index}`}
+            hole={hole}
+            center={center}
+            hasSelection={Boolean(selectedHole?.id)}
+            modelInfo={modelInfo}
+            isSelected={selectedHole?.id === hole.id}
+            onSelect={onHoleSelect}
+          />
+        ))}
 
-      {isHoleStage && highlightHiddenHoleLocations && hiddenHoleVisuals.map((hole, index) => (
-        <HiddenHoleBeacon
-          key={`hidden-hole-${hole.id || index}`}
-          hole={hole}
-          center={center}
-          modelInfo={modelInfo}
-          isSelected={selectedHole?.id === hole.id}
-          onSelect={onHoleSelect}
-        />
-      ))}
+      {isHoleStage &&
+        highlightHiddenHoleLocations &&
+        hiddenHoleVisuals.map((hole, index) => (
+          <HiddenHoleBeacon
+            key={`hidden-hole-${hole.id || index}`}
+            hole={hole}
+            center={center}
+            modelInfo={modelInfo}
+            isSelected={selectedHole?.id === hole.id}
+            onSelect={onHoleSelect}
+          />
+        ))}
 
       {isHoleStage && selectedProbe && (
         <ManualProbeOverlay probe={selectedProbe} center={center} modelInfo={modelInfo} />
       )}
 
-      {focusedStage === MERGED_HOLES_STAGE && !useFlatView && bend3dItems.map((bend) => (
-        <BendLineOverlay
-          key={`bend-line-${bend.id}`}
-          bend={bend}
-          center={center}
-          isSelected={normalizeFoldId(selectedFoldId) === normalizeFoldId(bend.id)}
-          onSelect={onFoldSelect}
-        />
-      ))}
+      {focusedStage === MERGED_HOLES_STAGE &&
+        !useFlatView &&
+        bend3dItems.map((bend) => (
+          <BendLineOverlay
+            key={`bend-line-${bend.id}`}
+            bend={bend}
+            center={center}
+            isSelected={normalizeFoldId(selectedFoldId) === normalizeFoldId(bend.id)}
+            onSelect={onFoldSelect}
+          />
+        ))}
 
-      {focusedStage === 'Profile Router' && sectionVisuals.map((section, index) => (
-        section.polygonLines3d
-          ? <PolygonOutline3D
+      {focusedStage === 'Profile Router' &&
+        sectionVisuals.map((section, index) =>
+          section.polygonLines3d ? (
+            <PolygonOutline3D
               key={`router-section-${index}`}
               polygonLines={section.polygonLines3d}
               color={section.isStart || section.isEnd ? '#ff6b35' : '#8f0008'}
               isEndMarker={section.isStart || section.isEnd}
             />
-          : <SectionContours
+          ) : (
+            <SectionContours
               key={`router-section-${index}`}
               position={section.position}
               quaternion={section.quaternion}
               contours={contours}
               color="#8f0008"
             />
-      ))}
+          ),
+        )}
 
-      {focusedStage === 'Classify geometry' && sectionVisuals.map((section, index) => (
-        section.polygonLines3d
-          ? <PolygonOutline3D
+      {focusedStage === 'Classify geometry' &&
+        sectionVisuals.map((section, index) =>
+          section.polygonLines3d ? (
+            <PolygonOutline3D
               key={`classify-section-${index}`}
               polygonLines={section.polygonLines3d}
               color={section.isStart || section.isEnd ? '#ff6b35' : '#6f0010'}
               isEndMarker={section.isStart || section.isEnd}
             />
-          : <SectionContours
+          ) : (
+            <SectionContours
               key={`classify-section-${index}`}
               position={section.position}
               quaternion={section.quaternion}
               contours={contours}
               color="#6f0010"
             />
-      ))}
+          ),
+        )}
 
       {focusedStage === 'Classify geometry' && (
         <ClassificationGuides modelInfo={modelInfo} classificationVisuals={classificationVisuals} />
@@ -1345,29 +1421,30 @@ export default function ViewerCanvas({
 }) {
   const renderMode = 'clean'
   const holeItems = activeHoleVisuals?.items || backendVisuals?.holes?.items || []
-  const visibleHoleItems = showHiddenHoles
-    ? holeItems
-    : holeItems.filter((hole) => !isHiddenHoleCandidate(hole))
+  const visibleHoleItems = showHiddenHoles ? holeItems : holeItems.filter((hole) => !isHiddenHoleCandidate(hole))
   const bend3dItems = backendVisuals?.unfold?.bends_3d || []
   const normalizedSelectedFoldId = normalizeFoldId(selectedFoldId)
   const selectedFold = useFlatView
     ? null
     : bend3dItems.find((bend) => normalizeFoldId(bend.id) === normalizedSelectedFoldId) || null
-  const handleSurfacePick = useCallback((sample, event) => {
-    if (!probeMode) return
-    const point = sample?.point || sample
-    if (!modelInfo?.center || !point) return
-    event?.stopPropagation?.()
-    const closest = findClosestHoleByPoint(point, visibleHoleItems, modelInfo.center)
-    const inferredContour = inferProbeContour(point, sample?.normal, activeMesh, modelInfo.center, modelInfo)
-    onSurfaceProbe?.({
-      point,
-      normal: sample?.normal || null,
-      nearestHole: closest?.hole || null,
-      nearestHoleDistance: closest?.distance || null,
-      inferredContour,
-    })
-  }, [activeMesh, modelInfo, onSurfaceProbe, probeMode, visibleHoleItems])
+  const handleSurfacePick = useCallback(
+    (sample, event) => {
+      if (!probeMode) return
+      const point = sample?.point || sample
+      if (!modelInfo?.center || !point) return
+      event?.stopPropagation?.()
+      const closest = findClosestHoleByPoint(point, visibleHoleItems, modelInfo.center)
+      const inferredContour = inferProbeContour(point, sample?.normal, activeMesh, modelInfo.center, modelInfo)
+      onSurfaceProbe?.({
+        point,
+        normal: sample?.normal || null,
+        nearestHole: closest?.hole || null,
+        nearestHoleDistance: closest?.distance || null,
+        inferredContour,
+      })
+    },
+    [activeMesh, modelInfo, onSurfaceProbe, probeMode, visibleHoleItems],
+  )
 
   return (
     <Canvas

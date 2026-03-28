@@ -21,10 +21,10 @@ export function isPreUnfoldStageName(stage) {
 export function isMergedHolesStageName(stage) {
   const normalized = String(stage || '').toLowerCase()
   return (
-    stage === MERGED_HOLES_STAGE
-    || normalized === 'detect holes'
-    || normalized === 'unfold'
-    || normalized === 'unfold / detect holes'
+    stage === MERGED_HOLES_STAGE ||
+    normalized === 'detect holes' ||
+    normalized === 'unfold' ||
+    normalized === 'unfold / detect holes'
   )
 }
 
@@ -111,9 +111,9 @@ export function groupEventsByStage(events) {
 
 export function getStageMeta(group, summary, liveActiveElapsed, pipelineStatus = null) {
   const requiresCompletedJob = group?.stage === 'Classify geometry'
-  const finishedEvent = [...(group?.events || [])].reverse().find((event) =>
-    ['stage_end', 'stage_failed', 'stage_skipped'].includes(event.type)
-  )
+  const finishedEvent = [...(group?.events || [])]
+    .reverse()
+    .find((event) => ['stage_end', 'stage_failed', 'stage_skipped'].includes(event.type))
 
   if (finishedEvent) {
     let stateLabel = 'Klaar'
@@ -123,9 +123,10 @@ export function getStageMeta(group, summary, liveActiveElapsed, pipelineStatus =
       stateLabel,
       elapsed: finishedEvent.payload?.elapsed_seconds,
       isSelectable: !requiresCompletedJob || pipelineStatus === 'completed',
-      pendingReason: requiresCompletedJob && pipelineStatus !== 'completed'
-        ? 'Pas beschikbaar zodra de hele pipeline klaar is.'
-        : null,
+      pendingReason:
+        requiresCompletedJob && pipelineStatus !== 'completed'
+          ? 'Pas beschikbaar zodra de hele pipeline klaar is.'
+          : null,
     }
   }
 

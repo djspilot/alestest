@@ -1,6 +1,5 @@
 const DEFAULT_API_BASE =
-  import.meta.env.VITE_PIPELINE_API_BASE_URL ||
-  `${window.location.protocol}//${window.location.hostname}:8000`
+  import.meta.env.VITE_PIPELINE_API_BASE_URL || `${window.location.protocol}//${window.location.hostname}:8000`
 
 function trimTrailingSlash(value) {
   return (value || '').replace(/\/$/, '')
@@ -90,7 +89,7 @@ function delay(ms, signal) {
         clearTimeout(id)
         reject(new DOMException('Aborted', 'AbortError'))
       },
-      { once: true }
+      { once: true },
     )
   })
 }
@@ -100,11 +99,7 @@ export function getDefaultPipelineApiBase() {
 }
 
 export async function checkPipelineConnection(options = {}) {
-  const {
-    apiBase = getDefaultPipelineApiBase(),
-    apiKey = '',
-    signal,
-  } = options
+  const { apiBase = getDefaultPipelineApiBase(), apiKey = '', signal } = options
 
   const base = trimTrailingSlash(apiBase)
   if (!base) {

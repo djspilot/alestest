@@ -18,9 +18,17 @@ export default defineConfig({
           if (id.includes('src/ViewerCanvas.jsx') || id.includes('src/StepModel.jsx') || id.includes('src/stepLoader.js')) {
             return 'viewer-runtime'
           }
+          if (id.includes('src/viewer/')) {
+            return 'viewer-runtime'
+          }
           return undefined
         },
       },
     },
+  },
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.js',
   },
 })

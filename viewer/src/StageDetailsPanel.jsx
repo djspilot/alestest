@@ -10,6 +10,7 @@ import {
   PRE_UNFOLD_HOLES_STAGE,
   summarizePayload,
 } from './pipelineUi'
+import { normalizeFoldId, isIrregularHole, isHiddenHoleCandidate } from './lib/holes'
 
 function getHoleStatusLabel(status) {
   if (status === 'accepted') return 'Geaccepteerd'
@@ -43,23 +44,6 @@ function getClassificationStatusClass(status) {
   return 'is-neutral'
 }
 
-function normalizeFoldId(value) {
-  if (value === null || value === undefined || value === '') return null
-  const numeric = Number(value)
-  return Number.isFinite(numeric) ? numeric : String(value)
-}
-
-function isIrregularHole(hole) {
-  const type = String(hole?.type || '').toLowerCase()
-  const label = String(hole?.label || '').toLowerCase()
-  const reason = String(hole?.reason || '').toLowerCase()
-  return type.includes('irregular') || label.includes('irregular') || reason.includes('irregular')
-}
-
-function isHiddenHoleCandidate(hole) {
-  return hole?.status === 'rejected' || isIrregularHole(hole)
-}
-
 export default function StageDetailsPanel({
   pipelineVisuals,
   groupedStages,
@@ -85,8 +69,7 @@ export default function StageDetailsPanel({
   const [showAdvancedHoleDebug, setShowAdvancedHoleDebug] = useState(false)
   const selectedStage = groupedStages[selectedStageIndex] || null
   const selectedEvent = selectedStage?.events?.[selectedEventIndex] || null
-  const selectedPayloadEntries = Object.entries(selectedEvent?.payload || {})
-    .filter(([, value]) => value !== undefined)
+  const selectedPayloadEntries = Object.entries(selectedEvent?.payload || {}).filter(([, value]) => value !== undefined)
 
   const routerVisuals = pipelineVisuals?.router || null
   const classificationVisuals = pipelineVisuals?.classification || null
@@ -96,8 +79,8 @@ export default function StageDetailsPanel({
   const isPreUnfoldHoleStage = isPreUnfoldStageName(selectedStage?.stage)
   const isMergedHoleStage = selectedStage?.stage === MERGED_HOLES_STAGE
   const holeVisuals = isPreUnfoldHoleStage
-    ? (pipelineVisuals?.holes_pre_unfold || pipelineVisuals?.holes || null)
-    : (pipelineVisuals?.holes || null)
+    ? pipelineVisuals?.holes_pre_unfold || pipelineVisuals?.holes || null
+    : pipelineVisuals?.holes || null
   const unfoldVisuals = pipelineVisuals?.unfold || null
   const holeItems = holeVisuals?.items || []
   const foldRows = useMemo(() => {
@@ -107,7 +90,7 @@ export default function StageDetailsPanel({
     return Array.from({ length: rowCount }, (_, i) => {
       const bend = bends[i] || {}
       const detail = foldDetails[i] || {}
-      const id = normalizeFoldId(detail.id || bend.id || (i + 1))
+      const id = normalizeFoldId(detail.id || bend.id || i + 1)
       return {
         id,
         direction: bend.type || '–',
@@ -128,20 +111,20 @@ export default function StageDetailsPanel({
   const selectedInspection = selectedHole || selectedProbe
   const preUnfoldGroup = useMemo(
     () => groupedStages.find((group) => isPreUnfoldStageName(group?.stage)) || null,
-    [groupedStages]
+    [groupedStages],
   )
   const preUnfoldEvents = preUnfoldGroup?.events || []
   const preUnfoldDebugPayload = useMemo(() => {
     const hasPreUnfold = Boolean(preUnfoldGroup)
-    const effectiveEvents = hasPreUnfold ? preUnfoldEvents : (selectedStage?.events || [])
+    const effectiveEvents = hasPreUnfold ? preUnfoldEvents : selectedStage?.events || []
     const effectiveVisuals = hasPreUnfold
-      ? (pipelineVisuals?.holes_pre_unfold || holeVisuals || null)
-      : (holeVisuals || null)
+      ? pipelineVisuals?.holes_pre_unfold || holeVisuals || null
+      : holeVisuals || null
     if (!effectiveVisuals && effectiveEvents.length === 0) return null
 
     return {
       generated_at: new Date().toISOString(),
-      source_stage: hasPreUnfold ? preUnfoldGroup.stage : (selectedStage?.stage || 'Unknown'),
+      source_stage: hasPreUnfold ? preUnfoldGroup.stage : selectedStage?.stage || 'Unknown',
       event_count: effectiveEvents.length,
       timeline_summary: summary || null,
       pre_unfold_hole_visuals: effectiveVisuals,
@@ -162,15 +145,24 @@ export default function StageDetailsPanel({
         payload: event.payload || null,
       })),
     }
-  }, [holeVisuals, pipelineVisuals?.holes_pre_unfold, preUnfoldEvents, preUnfoldGroup, selectedEvent, selectedStage?.events, selectedStage?.stage, summary])
+  }, [
+    holeVisuals,
+    pipelineVisuals?.holes_pre_unfold,
+    preUnfoldEvents,
+    preUnfoldGroup,
+    selectedEvent,
+    selectedStage?.events,
+    selectedStage?.stage,
+    summary,
+  ])
   const hiddenHoleItems = useMemo(() => holeItems.filter((hole) => isHiddenHoleCandidate(hole)), [holeItems])
   const normalHoleItems = useMemo(
     () => holeItems.filter((hole) => hole.status === 'accepted' && !isIrregularHole(hole)),
-    [holeItems]
+    [holeItems],
   )
   const irregularHoleItems = useMemo(
     () => holeItems.filter((hole) => isIrregularHole(hole) || hole.status === 'rejected'),
-    [holeItems]
+    [holeItems],
   )
   const baseVisibleHoleItems = useMemo(() => {
     if (showHiddenHoles) return holeItems
@@ -240,9 +232,7 @@ export default function StageDetailsPanel({
   if (!selectedStage) {
     return (
       <div className="details-panel">
-        <div className="details-placeholder">
-          Kies links een afgeronde pipeline-stap om hier de details te zien.
-        </div>
+        <div className="details-placeholder">Kies links een afgeronde pipeline-stap om hier de details te zien.</div>
       </div>
     )
   }
@@ -250,7 +240,10 @@ export default function StageDetailsPanel({
   const stageMeta = getStageMeta(selectedStage, summary, liveActiveElapsed, pipelineStatus)
   const previousSelectableIndex = groupedStages
     .slice(0, selectedStageIndex)
-    .map((group, index) => ({ index, selectable: getStageMeta(group, summary, liveActiveElapsed, pipelineStatus).isSelectable }))
+    .map((group, index) => ({
+      index,
+      selectable: getStageMeta(group, summary, liveActiveElapsed, pipelineStatus).isSelectable,
+    }))
     .filter((item) => item.selectable)
     .map((item) => item.index)
     .pop()
@@ -321,27 +314,32 @@ export default function StageDetailsPanel({
               <div className="visual-stage-card" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none' }}>
                 <div className="timeline-title">Hole Overlay</div>
                 <div className="timeline-text">
-                  Bron: {holeVisuals.source || '-'} | Geaccepteerd: {holeVisuals.accepted_total || 0} | Afgewezen: {holeVisuals.rejected_total || 0} | Kandidaten: {holeVisuals.total_candidates || 0}
+                  Bron: {holeVisuals.source || '-'} | Geaccepteerd: {holeVisuals.accepted_total || 0} | Afgewezen:{' '}
+                  {holeVisuals.rejected_total || 0} | Kandidaten: {holeVisuals.total_candidates || 0}
                 </div>
                 <div className="timeline-text">
                   Viewer: zichtbaar {baseVisibleHoleItems.length} | incl. verborgen {holeItems.length}
                   {hiddenHoleItems.length > 0 ? ` (verborgen: ${hiddenHoleItems.length})` : ''}
                 </div>
-                {holeVisuals.criteria_note && (
-                  <div className="timeline-text">{holeVisuals.criteria_note}</div>
-                )}
+                {holeVisuals.criteria_note && <div className="timeline-text">{holeVisuals.criteria_note}</div>}
                 <div className="timeline-text" style={{ marginTop: 8 }}>
-                  Snel overzicht: normale gaten {normalHoleItems.length} | irregulair/afgewezen {irregularHoleItems.length}
+                  Snel overzicht: normale gaten {normalHoleItems.length} | irregulair/afgewezen{' '}
+                  {irregularHoleItems.length}
                 </div>
                 <div className="hole-filter-row" style={{ marginTop: 8 }}>
-                  <button className={`hole-filter-btn ${showAdvancedHoleDebug ? 'is-active' : ''}`} onClick={() => setShowAdvancedHoleDebug((value) => !value)}>
+                  <button
+                    className={`hole-filter-btn ${showAdvancedHoleDebug ? 'is-active' : ''}`}
+                    onClick={() => setShowAdvancedHoleDebug((value) => !value)}
+                  >
                     {showAdvancedHoleDebug ? 'Verberg uitgebreide debug' : 'Toon uitgebreide debug'}
                   </button>
                 </div>
 
                 {!showAdvancedHoleDebug && (
                   <>
-                    <div className="timeline-title" style={{ marginTop: 8 }}>Normale gaten</div>
+                    <div className="timeline-title" style={{ marginTop: 8 }}>
+                      Normale gaten
+                    </div>
                     <div className="hole-list">
                       {normalHoleItems.map((hole) => (
                         <button
@@ -351,14 +349,18 @@ export default function StageDetailsPanel({
                         >
                           <div className="timeline-item-head">
                             <span className="timeline-stage">{hole.label || formatLabel(hole.type)}</span>
-                            <span className={`hole-status-pill is-${hole.status}`}>{getHoleStatusLabel(hole.status)}</span>
+                            <span className={`hole-status-pill is-${hole.status}`}>
+                              {getHoleStatusLabel(hole.status)}
+                            </span>
                           </div>
                           <div className="timeline-text">{hole.reason || 'Geen toelichting'}</div>
                         </button>
                       ))}
                     </div>
 
-                    <div className="timeline-title" style={{ marginTop: 8 }}>Irregulair / afgewezen</div>
+                    <div className="timeline-title" style={{ marginTop: 8 }}>
+                      Irregulair / afgewezen
+                    </div>
                     <div className="hole-list">
                       {irregularHoleItems.map((hole) => (
                         <button
@@ -368,7 +370,9 @@ export default function StageDetailsPanel({
                         >
                           <div className="timeline-item-head">
                             <span className="timeline-stage">{hole.label || formatLabel(hole.type)}</span>
-                            <span className={`hole-status-pill is-${hole.status}`}>{getHoleStatusLabel(hole.status)}</span>
+                            <span className={`hole-status-pill is-${hole.status}`}>
+                              {getHoleStatusLabel(hole.status)}
+                            </span>
                           </div>
                           <div className="timeline-text">{hole.reason || 'Geen toelichting'}</div>
                         </button>
@@ -386,15 +390,21 @@ export default function StageDetailsPanel({
                 {showAdvancedHoleDebug && (
                   <>
                     {Array.isArray(holeVisuals.method_order) && holeVisuals.method_order.length > 0 && (
-                      <div className="timeline-text">
-                        Methodiekvolgorde: {holeVisuals.method_order.join(' -> ')}
-                      </div>
+                      <div className="timeline-text">Methodiekvolgorde: {holeVisuals.method_order.join(' -> ')}</div>
                     )}
                     <div className="hole-filter-row" style={{ marginTop: 8 }}>
-                      <button className="hole-filter-btn" onClick={downloadPreUnfoldDebug} disabled={!preUnfoldDebugPayload}>
+                      <button
+                        className="hole-filter-btn"
+                        onClick={downloadPreUnfoldDebug}
+                        disabled={!preUnfoldDebugPayload}
+                      >
                         Download pre-unfold debug JSON
                       </button>
-                      <button className="hole-filter-btn" onClick={copyPreUnfoldDebug} disabled={!preUnfoldDebugPayload}>
+                      <button
+                        className="hole-filter-btn"
+                        onClick={copyPreUnfoldDebug}
+                        disabled={!preUnfoldDebugPayload}
+                      >
                         Kopieer pre-unfold debug
                       </button>
                     </div>
@@ -415,15 +425,33 @@ export default function StageDetailsPanel({
                       </div>
                     )}
                     <div className="timeline-text">
-                      Klik op een gat om exact de gedetecteerde hole-rand te highlighten en de camera erop te focussen. In `Probe mode` wordt elke klik op het model altijd een probe op exact die plek, zonder snap naar een bekende hole.
+                      Klik op een gat om exact de gedetecteerde hole-rand te highlighten en de camera erop te focussen.
+                      In `Probe mode` wordt elke klik op het model altijd een probe op exact die plek, zonder snap naar
+                      een bekende hole.
                     </div>
                     <div className="timeline-text">
-                      Kleurlegenda: goud = geselecteerde hole-edge, rood = geaccepteerde hole-edge, blauw = afgewezen hole-edge, gedimd = niet geselecteerd.
+                      Kleurlegenda: goud = geselecteerde hole-edge, rood = geaccepteerde hole-edge, blauw = afgewezen
+                      hole-edge, gedimd = niet geselecteerd.
                     </div>
                     <div className="hole-filter-row">
-                      <button className={`hole-filter-btn ${holeFilter === 'all' ? 'is-active' : ''}`} onClick={() => setHoleFilter('all')}>Alle</button>
-                      <button className={`hole-filter-btn ${holeFilter === 'accepted' ? 'is-active' : ''}`} onClick={() => setHoleFilter('accepted')}>Geaccepteerd</button>
-                      <button className={`hole-filter-btn ${holeFilter === 'rejected' ? 'is-active' : ''}`} onClick={() => setHoleFilter('rejected')}>Afgewezen</button>
+                      <button
+                        className={`hole-filter-btn ${holeFilter === 'all' ? 'is-active' : ''}`}
+                        onClick={() => setHoleFilter('all')}
+                      >
+                        Alle
+                      </button>
+                      <button
+                        className={`hole-filter-btn ${holeFilter === 'accepted' ? 'is-active' : ''}`}
+                        onClick={() => setHoleFilter('accepted')}
+                      >
+                        Geaccepteerd
+                      </button>
+                      <button
+                        className={`hole-filter-btn ${holeFilter === 'rejected' ? 'is-active' : ''}`}
+                        onClick={() => setHoleFilter('rejected')}
+                      >
+                        Afgewezen
+                      </button>
                     </div>
                     <div className="hole-toggle-row">
                       <button
@@ -443,7 +471,8 @@ export default function StageDetailsPanel({
                     </div>
                     {hiddenHoleItems.length > 0 && (
                       <div className="timeline-text">
-                        Extra locatie-markers staan op de afgewezen/irregulaire gaten zodat direct zichtbaar is waar de ontbrekende gaten op het model zitten.
+                        Extra locatie-markers staan op de afgewezen/irregulaire gaten zodat direct zichtbaar is waar de
+                        ontbrekende gaten op het model zitten.
                       </div>
                     )}
                     <div className="hole-list">
@@ -455,10 +484,14 @@ export default function StageDetailsPanel({
                         >
                           <div className="timeline-item-head">
                             <span className="timeline-stage">{hole.label || formatLabel(hole.type)}</span>
-                            <span className={`hole-status-pill is-${hole.status}`}>{getHoleStatusLabel(hole.status)}</span>
+                            <span className={`hole-status-pill is-${hole.status}`}>
+                              {getHoleStatusLabel(hole.status)}
+                            </span>
                           </div>
                           <div className="timeline-text">{hole.reason || 'Geen toelichting'}</div>
-                          <div className="timeline-text">{formatLabel(hole.type)} | {hole.source || '-'}</div>
+                          <div className="timeline-text">
+                            {formatLabel(hole.type)} | {hole.source || '-'}
+                          </div>
                         </button>
                       ))}
                     </div>
@@ -468,19 +501,24 @@ export default function StageDetailsPanel({
                   <div className="reasoning-list">
                     <div className="reasoning-card">
                       <div className="timeline-stage">
-                        {selectedInspection.label || formatLabel(selectedInspection.type)} | {getHoleStatusLabel(selectedInspection.status)}
+                        {selectedInspection.label || formatLabel(selectedInspection.type)} |{' '}
+                        {getHoleStatusLabel(selectedInspection.status)}
                       </div>
                       <div className="timeline-text">{selectedInspection.reason || 'Geen toelichting'}</div>
                       <div className="timeline-text">Methodiek: {getHoleMethodLabel(selectedInspection.method)}</div>
                       <pre className="timeline-payload-value">{formatDetailValue(selectedInspection.position)}</pre>
                       {selectedInspection.inferredContour && (
                         <div className="timeline-text">
-                          Inferred contour: {selectedInspection.inferredContour.label || formatLabel(selectedInspection.inferredContour.type)}
+                          Inferred contour:{' '}
+                          {selectedInspection.inferredContour.label ||
+                            formatLabel(selectedInspection.inferredContour.type)}
                         </div>
                       )}
                       {selectedInspection.nearestHole && (
                         <div className="timeline-text">
-                          Dichtstbijzijnde bekende kandidaat: {selectedInspection.nearestHole.label || formatLabel(selectedInspection.nearestHole.type)} op {formatDetailValue(selectedInspection.nearestHoleDistance)} mm.
+                          Dichtstbijzijnde bekende kandidaat:{' '}
+                          {selectedInspection.nearestHole.label || formatLabel(selectedInspection.nearestHole.type)} op{' '}
+                          {formatDetailValue(selectedInspection.nearestHoleDistance)} mm.
                         </div>
                       )}
                     </div>
@@ -495,11 +533,13 @@ export default function StageDetailsPanel({
                                 {criterion.passed ? 'Pass' : 'Fail'}
                               </span>
                             </div>
-                            <pre className="timeline-payload-value">{formatDetailValue({
-                              value: criterion.value,
-                              threshold: criterion.threshold,
-                              note: criterion.note,
-                            })}</pre>
+                            <pre className="timeline-payload-value">
+                              {formatDetailValue({
+                                value: criterion.value,
+                                threshold: criterion.threshold,
+                                note: criterion.note,
+                              })}
+                            </pre>
                           </div>
                         ))}
                       </div>
@@ -508,7 +548,8 @@ export default function StageDetailsPanel({
                       <div className="reasoning-card">
                         <div className="timeline-title">Probe Debug</div>
                         <div className="timeline-text">
-                          Viewer heuristic: {selectedInspection.inferredContour.debug.inferred_family} | confidence {formatDetailValue(selectedInspection.inferredContour.debug.confidence)}
+                          Viewer heuristic: {selectedInspection.inferredContour.debug.inferred_family} | confidence{' '}
+                          {formatDetailValue(selectedInspection.inferredContour.debug.confidence)}
                         </div>
                         <div className="timeline-payload-grid">
                           {Object.entries(selectedInspection.inferredContour.debug).map(([key, value]) => (
@@ -556,11 +597,13 @@ export default function StageDetailsPanel({
               <div className="visual-stage-card">
                 <div className="timeline-title">Classificatie Flow</div>
                 <div className="timeline-text">
-                  Categorie: {classificationVisuals.part_category || '-'} | Type: {classificationVisuals.part_type || '-'}
+                  Categorie: {classificationVisuals.part_category || '-'} | Type:{' '}
+                  {classificationVisuals.part_type || '-'}
                 </div>
                 <div className="timeline-text">Dikte: {classificationVisuals.thickness ?? '-'} mm</div>
                 <div className="timeline-text">
-                  Visualisatie: donkerrood = section contouren, oranje = buitenmaat, roze = tweede maat, geel = dikte-as.
+                  Visualisatie: donkerrood = section contouren, oranje = buitenmaat, roze = tweede maat, geel =
+                  dikte-as.
                 </div>
 
                 {routerVisuals && (
@@ -574,7 +617,8 @@ export default function StageDetailsPanel({
                         Router category: {routerVisuals.category || '-'} | Label: {routerVisuals.profile_label || '-'}
                       </div>
                       <div className="timeline-text">
-                        Confidence: {Math.round((routerVisuals.confidence || 0) * 100)}% | Methode: {routerVisuals.method || '-'}
+                        Confidence: {Math.round((routerVisuals.confidence || 0) * 100)}% | Methode:{' '}
+                        {routerVisuals.method || '-'}
                       </div>
                       <div className="timeline-text">
                         {routerVisuals.reason || routerVisuals.reasoning || 'Geen extra router-uitleg'}
@@ -598,16 +642,17 @@ export default function StageDetailsPanel({
                     <div className="reasoning-card">
                       <div className="timeline-item-head">
                         <div className="timeline-stage">Eindbesluit</div>
-                        <span className={`hole-status-pill ${classificationFinal.step0_only ? 'is-accepted' : 'is-warning'}`}>
+                        <span
+                          className={`hole-status-pill ${classificationFinal.step0_only ? 'is-accepted' : 'is-warning'}`}
+                        >
                           {classificationFinal.step0_only ? 'Step 0 only' : 'Step 0 -> legacy'}
                         </span>
                       </div>
                       <div className="timeline-text">
-                        Klasse: {formatLabel(classificationFinal.classification)} | Gestopt in: {classificationFinal.stopped_in || '-'}
+                        Klasse: {formatLabel(classificationFinal.classification)} | Gestopt in:{' '}
+                        {classificationFinal.stopped_in || '-'}
                       </div>
-                      <div className="timeline-text">
-                        Bron: {classificationFinal.source || '-'}
-                      </div>
+                      <div className="timeline-text">Bron: {classificationFinal.source || '-'}</div>
                     </div>
                   </div>
                 )}
@@ -622,19 +667,20 @@ export default function StageDetailsPanel({
                         </span>
                       </div>
                       <div className="timeline-text">
-                        Bron: {step0Review.doc || classificationVisuals.step0_doc || 'docs/classification_step_review.md'}
+                        Bron:{' '}
+                        {step0Review.doc || classificationVisuals.step0_doc || 'docs/classification_step_review.md'}
                       </div>
                       {step0Review.stopped_in && (
                         <div className="timeline-text">Stopte in: {step0Review.stopped_in}</div>
                       )}
-                      {step0Review.error && (
-                        <div className="timeline-text">Trace-fout: {step0Review.error}</div>
-                      )}
+                      {step0Review.error && <div className="timeline-text">Trace-fout: {step0Review.error}</div>}
                     </div>
                     {(step0Review.steps || []).map((step) => (
                       <div className="reasoning-card" key={`step0-${step.step}`}>
                         <div className="timeline-item-head">
-                          <div className="timeline-stage">{step.step} | {step.name}</div>
+                          <div className="timeline-stage">
+                            {step.step} | {step.name}
+                          </div>
                           <span className={`hole-status-pill ${getClassificationStatusClass(step.status)}`}>
                             {getClassificationStatusLabel(step.status)}
                           </span>
@@ -648,16 +694,17 @@ export default function StageDetailsPanel({
                               <div className="timeline-item-head">
                                 <div className="timeline-payload-key">{formatLabel(criterion.name)}</div>
                                 {typeof criterion.passed === 'boolean' && (
-                                  <span className={`hole-status-pill ${criterion.passed ? 'is-accepted' : 'is-rejected'}`}>
+                                  <span
+                                    className={`hole-status-pill ${criterion.passed ? 'is-accepted' : 'is-rejected'}`}
+                                  >
                                     {criterion.passed ? 'Pass' : 'Fail'}
                                   </span>
                                 )}
-                                {criterion.passed == null && (
-                                  <span className="hole-status-pill is-neutral">Info</span>
-                                )}
+                                {criterion.passed == null && <span className="hole-status-pill is-neutral">Info</span>}
                               </div>
                               <div className="timeline-text">
-                                Actual: {formatDetailValue(criterion.actual)} | Threshold: {formatDetailValue(criterion.threshold)}
+                                Actual: {formatDetailValue(criterion.actual)} | Threshold:{' '}
+                                {formatDetailValue(criterion.threshold)}
                               </div>
                             </div>
                           ))}
@@ -675,7 +722,10 @@ export default function StageDetailsPanel({
                         <span className="hole-status-pill is-warning">Actief</span>
                       </div>
                       <div className="timeline-text">
-                        Bron: {legacyClassification.doc || classificationVisuals.matrix_doc || 'docs/CLASSIFICATION_THRESHOLDS_MATRIX.md'}
+                        Bron:{' '}
+                        {legacyClassification.doc ||
+                          classificationVisuals.matrix_doc ||
+                          'docs/CLASSIFICATION_THRESHOLDS_MATRIX.md'}
                       </div>
                       {legacyClassification.winner_gate && (
                         <div className="timeline-text">Winnende gate: STEP {legacyClassification.winner_gate}</div>
@@ -689,7 +739,9 @@ export default function StageDetailsPanel({
                     {(legacyClassification.gates || []).map((gate) => (
                       <div className="reasoning-card" key={`legacy-${gate.step}`}>
                         <div className="timeline-item-head">
-                          <div className="timeline-stage">STEP {gate.step} | {gate.name}</div>
+                          <div className="timeline-stage">
+                            STEP {gate.step} | {gate.name}
+                          </div>
                           <span className={`hole-status-pill ${getClassificationStatusClass(gate.status)}`}>
                             {getClassificationStatusLabel(gate.status)}
                           </span>
@@ -698,17 +750,23 @@ export default function StageDetailsPanel({
                         {gate.rule && <div className="timeline-text">Winnende rule: {gate.rule}</div>}
                         <div className="timeline-payload-grid">
                           {(gate.criteria || []).map((criterion, index) => (
-                            <div className="timeline-payload-row" key={`legacy-${gate.step}-${criterion.name}-${index}`}>
+                            <div
+                              className="timeline-payload-row"
+                              key={`legacy-${gate.step}-${criterion.name}-${index}`}
+                            >
                               <div className="timeline-item-head">
                                 <div className="timeline-payload-key">{formatLabel(criterion.name)}</div>
                                 {typeof criterion.passed === 'boolean' && (
-                                  <span className={`hole-status-pill ${criterion.passed ? 'is-accepted' : 'is-rejected'}`}>
+                                  <span
+                                    className={`hole-status-pill ${criterion.passed ? 'is-accepted' : 'is-rejected'}`}
+                                  >
                                     {criterion.passed ? 'Pass' : 'Fail'}
                                   </span>
                                 )}
                               </div>
                               <div className="timeline-text">
-                                Actual: {formatDetailValue(criterion.actual)} | Threshold: {formatDetailValue(criterion.threshold)} | Delta: {formatDeviation(criterion.deviation)}
+                                Actual: {formatDetailValue(criterion.actual)} | Threshold:{' '}
+                                {formatDetailValue(criterion.threshold)} | Delta: {formatDeviation(criterion.deviation)}
                               </div>
                               {criterion.note && <div className="timeline-text">{criterion.note}</div>}
                             </div>
@@ -719,18 +777,19 @@ export default function StageDetailsPanel({
                   </div>
                 )}
 
-                {!step0Review && (classificationVisuals.matrix_doc || (classificationVisuals.rules || []).length > 0) && (
-                  <div className="timeline-text">
-                    Bron: {classificationVisuals.matrix_doc || '-'}
-                  </div>
-                )}
+                {!step0Review &&
+                  (classificationVisuals.matrix_doc || (classificationVisuals.rules || []).length > 0) && (
+                    <div className="timeline-text">Bron: {classificationVisuals.matrix_doc || '-'}</div>
+                  )}
 
                 {!step0Review && (classificationVisuals.criteria || []).length > 0 && (
                   <div className="reasoning-list">
                     {(classificationVisuals.criteria || []).map((criterion, index) => (
                       <div className="reasoning-card" key={`${criterion.step}-${criterion.name}-${index}`}>
                         <div className="timeline-item-head">
-                          <div className="timeline-stage">{criterion.step} | {criterion.name}</div>
+                          <div className="timeline-stage">
+                            {criterion.step} | {criterion.name}
+                          </div>
                           {typeof criterion.passed === 'boolean' && (
                             <span className={`hole-status-pill ${criterion.passed ? 'is-accepted' : 'is-rejected'}`}>
                               {criterion.passed ? 'Pass' : 'Fail'}
@@ -738,7 +797,8 @@ export default function StageDetailsPanel({
                           )}
                         </div>
                         <div className="timeline-text">
-                          Actual: {formatDetailValue(criterion.actual)} | Threshold: {formatDetailValue(criterion.threshold)} | Delta: {formatDeviation(criterion.deviation)}
+                          Actual: {formatDetailValue(criterion.actual)} | Threshold:{' '}
+                          {formatDetailValue(criterion.threshold)} | Delta: {formatDeviation(criterion.deviation)}
                         </div>
                         {criterion.note && <div className="timeline-text">{criterion.note}</div>}
                       </div>
@@ -782,24 +842,34 @@ export default function StageDetailsPanel({
                   ) : (
                     <div className="timeline-text" style={{ color: '#f44336', fontWeight: 600 }}>
                       ✗ Unfold niet geslaagd{unfoldVisuals.error ? `: ${unfoldVisuals.error}` : ''}
-                      {unfoldVisuals.skipped && <span style={{ color: '#aaa', fontWeight: 400 }}> (overgeslagen – {unfoldVisuals.reason})</span>}
+                      {unfoldVisuals.skipped && (
+                        <span style={{ color: '#aaa', fontWeight: 400 }}> (overgeslagen – {unfoldVisuals.reason})</span>
+                      )}
                     </div>
                   )
                 ) : (
-                  <div className="timeline-text" style={{ color: '#aaa' }}>Geen unfold data beschikbaar</div>
+                  <div className="timeline-text" style={{ color: '#aaa' }}>
+                    Geen unfold data beschikbaar
+                  </div>
                 )}
 
                 {/* ── Afmetingen uitslag ── */}
                 {unfoldVisuals?.success && (
                   <div style={{ marginTop: 10 }}>
-                    <div className="timeline-stage" style={{ marginBottom: 4 }}>Uitslag afmetingen</div>
+                    <div className="timeline-stage" style={{ marginBottom: 4 }}>
+                      Uitslag afmetingen
+                    </div>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                       <tbody>
                         <tr>
                           <td style={{ padding: '2px 8px 2px 0', color: '#aaa' }}>Lengte</td>
-                          <td style={{ fontWeight: 600 }}>{unfoldVisuals.flat_length ? `${Math.round(unfoldVisuals.flat_length)} mm` : '–'}</td>
+                          <td style={{ fontWeight: 600 }}>
+                            {unfoldVisuals.flat_length ? `${Math.round(unfoldVisuals.flat_length)} mm` : '–'}
+                          </td>
                           <td style={{ padding: '2px 0 2px 16px', color: '#aaa' }}>Breedte</td>
-                          <td style={{ fontWeight: 600 }}>{unfoldVisuals.flat_width ? `${Math.round(unfoldVisuals.flat_width)} mm` : '–'}</td>
+                          <td style={{ fontWeight: 600 }}>
+                            {unfoldVisuals.flat_width ? `${Math.round(unfoldVisuals.flat_width)} mm` : '–'}
+                          </td>
                         </tr>
                         <tr>
                           <td style={{ color: '#aaa' }}>Zetlijnen</td>
@@ -815,7 +885,9 @@ export default function StageDetailsPanel({
 
                 {/* ── Criteria / thresholds ── */}
                 <div style={{ marginTop: 12 }}>
-                  <div className="timeline-stage" style={{ marginBottom: 4 }}>Criteria &amp; thresholds (freecad_unfold)</div>
+                  <div className="timeline-stage" style={{ marginBottom: 4 }}>
+                    Criteria &amp; thresholds (freecad_unfold)
+                  </div>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, color: '#ccc' }}>
                     <tbody>
                       {[
@@ -838,80 +910,100 @@ export default function StageDetailsPanel({
                 </div>
 
                 {/* ── Zetlijnen tabel ── */}
-                {unfoldVisuals?.success && (() => {
-                  if (foldRows.length === 0) return null
-                  return (
-                    <div style={{ marginTop: 12 }}>
-                      <div className="timeline-stage" style={{ marginBottom: 6 }}>
-                        Zetlijnen ({foldRows.length} gevonden)
+                {unfoldVisuals?.success &&
+                  (() => {
+                    if (foldRows.length === 0) return null
+                    return (
+                      <div style={{ marginTop: 12 }}>
+                        <div className="timeline-stage" style={{ marginBottom: 6 }}>
+                          Zetlijnen ({foldRows.length} gevonden)
+                        </div>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                          <thead>
+                            <tr style={{ color: '#888', borderBottom: '1px solid #333' }}>
+                              <th style={{ textAlign: 'left', padding: '2px 6px 4px 0', fontWeight: 400 }}>#</th>
+                              <th style={{ textAlign: 'left', padding: '2px 6px 4px 0', fontWeight: 400 }}>Richting</th>
+                              <th style={{ textAlign: 'right', padding: '2px 6px 4px 0', fontWeight: 400 }}>
+                                Hoek (°)
+                              </th>
+                              <th style={{ textAlign: 'right', padding: '2px 6px 4px 0', fontWeight: 400 }}>
+                                Radius (mm)
+                              </th>
+                              <th style={{ textAlign: 'right', padding: '2px 0 4px 0', fontWeight: 400 }}>
+                                Lengte (mm)
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {foldRows.map((row, i) => {
+                              const dir = row.direction || '–'
+                              const angle = row.angle != null ? Math.round(row.angle * 10) / 10 : '–'
+                              const radius = row.radius != null ? Math.round(row.radius * 10) / 10 : '–'
+                              const length = row.length != null ? Math.round(row.length * 10) / 10 : '–'
+                              const dirColor = dir === 'up' ? '#81c784' : dir === 'down' ? '#e57373' : '#aaa'
+                              return (
+                                <tr
+                                  key={row.id ?? i}
+                                  style={{
+                                    borderBottom: '1px solid #222',
+                                    cursor: 'pointer',
+                                    background:
+                                      normalizedSelectedFoldId === row.id ? 'rgba(255, 59, 48, 0.15)' : 'transparent',
+                                  }}
+                                  onClick={() => onFoldSelect?.(row.id)}
+                                >
+                                  <td style={{ padding: '3px 6px 3px 0', color: '#888' }}>{row.id}</td>
+                                  <td style={{ padding: '3px 6px 3px 0', fontWeight: 600, color: dirColor }}>
+                                    {dir === 'up' ? '▲ Op' : dir === 'down' ? '▼ Neer' : dir}
+                                  </td>
+                                  <td style={{ textAlign: 'right', padding: '3px 6px 3px 0', fontFamily: 'monospace' }}>
+                                    {angle}
+                                  </td>
+                                  <td style={{ textAlign: 'right', padding: '3px 6px 3px 0', fontFamily: 'monospace' }}>
+                                    {radius}
+                                  </td>
+                                  <td style={{ textAlign: 'right', padding: '3px 0 3px 0', fontFamily: 'monospace' }}>
+                                    {length}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
                       </div>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-                        <thead>
-                          <tr style={{ color: '#888', borderBottom: '1px solid #333' }}>
-                            <th style={{ textAlign: 'left', padding: '2px 6px 4px 0', fontWeight: 400 }}>#</th>
-                            <th style={{ textAlign: 'left', padding: '2px 6px 4px 0', fontWeight: 400 }}>Richting</th>
-                            <th style={{ textAlign: 'right', padding: '2px 6px 4px 0', fontWeight: 400 }}>Hoek (°)</th>
-                            <th style={{ textAlign: 'right', padding: '2px 6px 4px 0', fontWeight: 400 }}>Radius (mm)</th>
-                            <th style={{ textAlign: 'right', padding: '2px 0 4px 0', fontWeight: 400 }}>Lengte (mm)</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {foldRows.map((row, i) => {
-                            const dir = row.direction || '–'
-                            const angle = row.angle != null ? Math.round(row.angle * 10) / 10 : '–'
-                            const radius = row.radius != null ? Math.round(row.radius * 10) / 10 : '–'
-                            const length = row.length != null ? Math.round(row.length * 10) / 10 : '–'
-                            const dirColor = dir === 'up' ? '#81c784' : dir === 'down' ? '#e57373' : '#aaa'
-                            return (
-                              <tr
-                                key={row.id ?? i}
-                                style={{
-                                  borderBottom: '1px solid #222',
-                                  cursor: 'pointer',
-                                  background: normalizedSelectedFoldId === row.id ? 'rgba(255, 59, 48, 0.15)' : 'transparent',
-                                }}
-                                onClick={() => onFoldSelect?.(row.id)}
-                              >
-                                <td style={{ padding: '3px 6px 3px 0', color: '#888' }}>{row.id}</td>
-                                <td style={{ padding: '3px 6px 3px 0', fontWeight: 600, color: dirColor }}>
-                                  {dir === 'up' ? '▲ Op' : dir === 'down' ? '▼ Neer' : dir}
-                                </td>
-                                <td style={{ textAlign: 'right', padding: '3px 6px 3px 0', fontFamily: 'monospace' }}>{angle}</td>
-                                <td style={{ textAlign: 'right', padding: '3px 6px 3px 0', fontFamily: 'monospace' }}>{radius}</td>
-                                <td style={{ textAlign: 'right', padding: '3px 0 3px 0', fontFamily: 'monospace' }}>{length}</td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
-                })()}
+                    )
+                  })()}
 
                 {selectedFold && (
                   <div className="reasoning-list" style={{ marginTop: 12 }}>
                     <div className="reasoning-card">
                       <div className="timeline-stage">Geselecteerde zetlijn #{selectedFold.id}</div>
                       <div className="timeline-text">
-                        Richting: {selectedFold.direction || 'onbekend'} | Hoek: {selectedFold.angle != null ? `${Math.round(selectedFold.angle * 10) / 10}°` : '–'} | Radius: {selectedFold.radius != null ? `${Math.round(selectedFold.radius * 10) / 10} mm` : '–'}
+                        Richting: {selectedFold.direction || 'onbekend'} | Hoek:{' '}
+                        {selectedFold.angle != null ? `${Math.round(selectedFold.angle * 10) / 10}°` : '–'} | Radius:{' '}
+                        {selectedFold.radius != null ? `${Math.round(selectedFold.radius * 10) / 10} mm` : '–'}
                       </div>
                       <div className="timeline-text">
                         Lengte: {selectedFold.length != null ? `${Math.round(selectedFold.length * 10) / 10} mm` : '–'}
                       </div>
-                      <pre className="timeline-payload-value">{formatDetailValue({
-                        center: selectedFold.center,
-                        axis: selectedFold.axis,
-                        start: selectedFold.start,
-                        end: selectedFold.end,
-                        segment_indices: selectedFold.segmentIndices,
-                      })}</pre>
+                      <pre className="timeline-payload-value">
+                        {formatDetailValue({
+                          center: selectedFold.center,
+                          axis: selectedFold.axis,
+                          start: selectedFold.start,
+                          end: selectedFold.end,
+                          segment_indices: selectedFold.segmentIndices,
+                        })}
+                      </pre>
                     </div>
                   </div>
                 )}
 
                 {/* ── Error handling codes ── */}
                 <div style={{ marginTop: 12 }}>
-                  <div className="timeline-stage" style={{ marginBottom: 4 }}>SheetMetalUnfolder foutcodes</div>
+                  <div className="timeline-stage" style={{ marginBottom: 4 }}>
+                    SheetMetalUnfolder foutcodes
+                  </div>
                   <div style={{ fontSize: 11, color: '#777', lineHeight: 1.6 }}>
                     {[
                       [1, 'Volume onbruikbaar'],
@@ -923,11 +1015,13 @@ export default function StageDetailsPanel({
                       [21, 'Section wire niet gesloten'],
                       [26, 'Niet-ondersteund curve type in unbendFace'],
                     ].map(([code, msg]) => (
-                      <div key={code}><span style={{ color: '#555', fontFamily: 'monospace', marginRight: 8 }}>{code}</span>{msg}</div>
+                      <div key={code}>
+                        <span style={{ color: '#555', fontFamily: 'monospace', marginRight: 8 }}>{code}</span>
+                        {msg}
+                      </div>
                     ))}
                   </div>
                 </div>
-
               </div>
             )}
           </div>

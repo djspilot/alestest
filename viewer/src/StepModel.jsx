@@ -35,14 +35,16 @@ function createThreeData(meshes) {
 function buildBackendMeshes(mesh) {
   if (!mesh?.vertices?.length || !mesh?.indices?.length) return null
 
-  return [{
-    positions: new Float32Array(mesh.vertices),
-    indices: new Uint32Array(mesh.indices),
-    normals: mesh.normals?.length ? new Float32Array(mesh.normals) : null,
-    edgeSegments: mesh.display_edges?.length ? new Float32Array(mesh.display_edges) : null,
-    color: null,
-    name: 'pipeline-mesh',
-  }]
+  return [
+    {
+      positions: new Float32Array(mesh.vertices),
+      indices: new Uint32Array(mesh.indices),
+      normals: mesh.normals?.length ? new Float32Array(mesh.normals) : null,
+      edgeSegments: mesh.display_edges?.length ? new Float32Array(mesh.display_edges) : null,
+      color: null,
+      name: 'pipeline-mesh',
+    },
+  ]
 }
 
 function summarizeMeshes(meshes) {
@@ -89,7 +91,16 @@ function disposeThreeData(threeData) {
   })
 }
 
-function StepGeometry({ buffer, mesh, onLoaded, onError, onStatus, onSurfacePick, parseMode = 'auto', renderMode = 'clean' }) {
+function StepGeometry({
+  buffer,
+  mesh,
+  onLoaded,
+  onError,
+  onStatus,
+  onSurfacePick,
+  parseMode = 'auto',
+  renderMode = 'clean',
+}) {
   const [meshData, setMeshData] = useState(null)
 
   useEffect(() => {
@@ -158,10 +169,13 @@ function StepGeometry({ buffer, mesh, onLoaded, onError, onStatus, onSurfacePick
                 if (worldNormal) {
                   worldNormal.transformDirection(event.object.matrixWorld)
                 }
-                onSurfacePick?.({
-                  point: event.point?.clone?.() || event.point,
-                  normal: worldNormal,
-                }, event)
+                onSurfacePick?.(
+                  {
+                    point: event.point?.clone?.() || event.point,
+                    normal: worldNormal,
+                  },
+                  event,
+                )
               }}
             >
               <meshStandardMaterial

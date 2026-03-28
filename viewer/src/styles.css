@@ -4,7 +4,9 @@
   box-sizing: border-box;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   width: 100%;
   height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -106,8 +108,12 @@ html, body, #root {
   font-size: 0.88rem;
 }
 
-.sidebar-row .label { color: #666; }
-.sidebar-row .value { font-weight: 600; }
+.sidebar-row .label {
+  color: #666;
+}
+.sidebar-row .value {
+  font-weight: 600;
+}
 
 .sidebar-toggle {
   display: flex;
@@ -136,12 +142,15 @@ html, body, #root {
   border: 1px solid #ccd3dc;
 }
 
-.status-idle, .status-disabled {
+.status-idle,
+.status-disabled {
   color: #5f6b78;
   background: #f2f5f8;
 }
 
-.status-checking, .status-queued, .status-processing {
+.status-checking,
+.status-queued,
+.status-processing {
   color: #245f8f;
   background: #e9f4ff;
 }
@@ -151,7 +160,9 @@ html, body, #root {
   background: #e9f7ef;
 }
 
-.status-failed, .status-unavailable, .status-auth_required {
+.status-failed,
+.status-unavailable,
+.status-auth_required {
   color: #8a1f1f;
   background: #fdeceb;
 }
@@ -506,16 +517,31 @@ html, body, #root {
   transition: background 0.2s;
 }
 
-.dropzone-overlay:hover { background: rgba(240, 242, 245, 0.98); }
+.dropzone-overlay:hover {
+  background: rgba(240, 242, 245, 0.98);
+}
 .dropzone-overlay.dragging {
   background: rgba(230, 240, 255, 0.98);
   border: 3px dashed #333;
 }
 
-.dropzone-icon { font-size: 3rem; opacity: 0.25; margin-bottom: 16px; }
-.dropzone-text { font-size: 1.1rem; color: #555; margin-bottom: 6px; }
-.dropzone-hint { font-size: 0.82rem; color: #999; }
-.dropzone-overlay input[type="file"] { display: none; }
+.dropzone-icon {
+  font-size: 3rem;
+  opacity: 0.25;
+  margin-bottom: 16px;
+}
+.dropzone-text {
+  font-size: 1.1rem;
+  color: #555;
+  margin-bottom: 6px;
+}
+.dropzone-hint {
+  font-size: 0.82rem;
+  color: #999;
+}
+.dropzone-overlay input[type='file'] {
+  display: none;
+}
 
 .loading-overlay {
   position: absolute;
@@ -538,9 +564,20 @@ html, body, #root {
   margin-bottom: 16px;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
-.loading-text { font-size: 0.95rem; color: #333; }
-.loading-sub { font-size: 0.8rem; color: #999; margin-top: 4px; }
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.loading-text {
+  font-size: 0.95rem;
+  color: #333;
+}
+.loading-sub {
+  font-size: 0.8rem;
+  color: #999;
+  margin-top: 4px;
+}
 
 .viewer-toolbar {
   position: absolute;
@@ -632,7 +669,9 @@ html, body, #root {
 }
 
 @media (max-width: 768px) {
-  .main-content { flex-direction: column; }
+  .main-content {
+    flex-direction: column;
+  }
   .sidebar {
     width: 100%;
     border-right: none;

@@ -4,12 +4,15 @@ export default function Dropzone({ onFile }) {
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef()
 
-  const handleDrop = useCallback((e) => {
-    e.preventDefault()
-    setDragging(false)
-    const file = e.dataTransfer?.files?.[0]
-    if (file) onFile(file)
-  }, [onFile])
+  const handleDrop = useCallback(
+    (e) => {
+      e.preventDefault()
+      setDragging(false)
+      const file = e.dataTransfer?.files?.[0]
+      if (file) onFile(file)
+    },
+    [onFile],
+  )
 
   const handleDragOver = useCallback((e) => {
     e.preventDefault()
@@ -19,10 +22,13 @@ export default function Dropzone({ onFile }) {
   const handleDragLeave = useCallback(() => setDragging(false), [])
   const handleClick = useCallback(() => inputRef.current?.click(), [])
 
-  const handleChange = useCallback((e) => {
-    const file = e.target.files?.[0]
-    if (file) onFile(file)
-  }, [onFile])
+  const handleChange = useCallback(
+    (e) => {
+      const file = e.target.files?.[0]
+      if (file) onFile(file)
+    },
+    [onFile],
+  )
 
   return (
     <div

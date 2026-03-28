@@ -1,0 +1,38 @@
+.dropzone-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(248, 249, 250, 0.95);
+  z-index: 10;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.dropzone-overlay:hover {
+  background: rgba(240, 242, 245, 0.98);
+}
+.dropzone-overlay.dragging {
+  background: rgba(230, 240, 255, 0.98);
+  border: 3px dashed #333;
+}
+
+.dropzone-icon {
+  font-size: 3rem;
+  opacity: 0.25;
+  margin-bottom: 16px;
+}
+.dropzone-text {
+  font-size: 1.1rem;
+  color: #555;
+  margin-bottom: 6px;
+}
+.dropzone-hint {
+  font-size: 0.82rem;
+  color: #999;
+}
+.dropzone-overlay input[type='file'] {
+  display: none;
+}
