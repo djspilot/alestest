@@ -470,3 +470,36 @@ Next phase handoff:
 - Risks to watch:
 	- Requirement trimming must keep actual quick-mode runtime dependencies in place.
 	- Docs are currently out-of-sync with removed API/full features and need coherent quick-only updates.
+
+## Phase 10 - Final Cleanup
+Date: 2026-03-28 18:34:28 CET
+Commit: 8c11fa7 phase 10: final cleanup, update docs, trim requirements
+Pytest command: python -m pytest
+Pytest result: pass (34 passed, 2 skipped)
+CLI command: python /Users/ds/AIdoel/alestest/manufacturing_pipeline/cli.py -f /Users/ds/AIdoel/alestest/nieuwmodel.step
+Exit code: 0
+Automated result: pass
+Key output:
+- Mode: Quick
+- TOTAL 41.00s
+- COMPLETE
+Manual test result: pending
+Manual notes:
+- Please run your manual validation checklist for Phase 10.
+Next action:
+- Overhaul phases complete.
+
+Phase completion summary:
+- runtime_reporting opgeschoond naar debug-only helper.
+- requirements.txt teruggebracht naar quick-mode kerndependencies.
+- README.md en CLAUDE.md aangevuld met expliciete quick-only status.
+- run_viewer.sh verwijderd; run_viewer.py geconsolideerd naar viewer-only launcher.
+- __pycache__/pyc runtime artifacts opgeschoond in workspace.
+Ready-for-next-phase checklist:
+- [x] commit created
+- [x] pytest run result recorded
+- [x] CLI model test result recorded
+- [ ] manual test result recorded or marked pending
+Final handoff:
+- All planned phases (1-10) are completed and committed.
+- Branch remains: overhaul-of-shit-code.
