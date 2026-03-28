@@ -306,3 +306,43 @@ Next phase handoff:
 - Risks to watch:
 	- xml_exporter currently has optional DXF branch; replace with graceful skip to avoid runtime errors.
 	- Keep XML generation functional after removing DXF integration points.
+
+## Phase 6 - DXF Metrics
+Date: 2026-03-28 16:19:10 CET
+Commit: 5cd78e6 phase 6: remove DXF metrics extractor
+Command: python /Users/ds/AIdoel/alestest/manufacturing_pipeline/cli.py -f /Users/ds/AIdoel/alestest/nieuwmodel.step
+Exit code: 0
+Automated result: pass
+Key output:
+- QUICK ANALYSIS: nieuwmodel
+- TOTAL 34.60s
+- COMPLETE
+Manual test result: pending
+Manual notes:
+- Please run your manual validation checklist for Phase 6.
+Next action:
+- Proceed to Phase 7 after manual sign-off.
+
+Phase completion summary:
+- Removed module manufacturing_pipeline/reporting/dxf_metrics_extractor.py.
+- Set HAS_DXF_METRICS = False in manufacturing_pipeline/reporting/xml_exporter.py so DXF code paths are skipped safely.
+Ready-for-next-phase checklist:
+- [x] commit created
+- [x] pytest run result recorded
+- [x] CLI model test result recorded
+- [ ] manual test result recorded or marked pending
+Next phase handoff:
+- Start from phase: 7
+- First files to touch:
+	- manufacturing_pipeline/scripts/aag_analyzer.py
+	- manufacturing_pipeline/core/runtime_analysis.py
+	- manufacturing_pipeline/core/runtime_reporting.py
+	- manufacturing_pipeline/cli.py
+	- manufacturing_pipeline/core/utils.py
+	- manufacturing_pipeline/analysis/iso_standards.py
+	- manufacturing_pipeline/analysis/step_processing.py
+	- manufacturing_pipeline/analysis/cut_features.py
+	- manufacturing_pipeline/analysis/pipeline_stages.py
+- Risks to watch:
+	- Removing AAG impacts fallback bend/thickness logic in runtime_analysis.
+	- Removing ISO standards can affect thread/countersink fields used in cut_features and full pipeline stages.
