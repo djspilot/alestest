@@ -224,3 +224,48 @@ Next phase handoff:
 - Risks to watch:
 	- Keep deploy/Dockerfile and deploy/docker-compose.yml for now (Phase 8 removes API/Docker).
 	- Re-run pytest and CLI model test after commit even for deploy-only deletions.
+
+## Phase 4 - Deploy Scripts and Watcher Tooling
+Date: 2026-03-28 16:17:18 CET
+Commit: 0696e49 phase 4: remove deploy scripts, watcher, VPS tooling
+Command: python /Users/ds/AIdoel/alestest/manufacturing_pipeline/cli.py -f /Users/ds/AIdoel/alestest/nieuwmodel.step
+Exit code: 0
+Automated result: pass
+Key output:
+- QUICK ANALYSIS: nieuwmodel
+- TOTAL 34.71s
+- COMPLETE with report and output files generated
+Manual test result: pending
+Manual notes:
+- Please run your manual validation checklist for Phase 4.
+Next action:
+- Proceed to Phase 5 after manual sign-off.
+
+Phase completion summary:
+- Removed deploy watcher and VPS helper files:
+	- deploy/file_watcher_service.py
+	- deploy/install_windows_service.bat
+	- deploy/requirements-watcher.txt
+	- deploy/install.sh
+	- deploy/deploy.sh
+	- deploy/nginx.conf
+	- deploy/.env.example
+- Kept deploy/Dockerfile and deploy/docker-compose.yml as planned.
+Ready-for-next-phase checklist:
+- [x] commit created
+- [x] pytest run result recorded
+- [x] CLI model test result recorded
+- [ ] manual test result recorded or marked pending
+Next phase handoff:
+- Start from phase: 5
+- First files to touch:
+	- manufacturing_pipeline/reporting/report_generator.py
+	- manufacturing_pipeline/reporting/excel_exporter.py
+	- manufacturing_pipeline/core/report_generation.py
+	- manufacturing_pipeline/core/runtime_reporting.py
+	- manufacturing_pipeline/cli.py
+	- manufacturing_pipeline/core/utils.py
+	- manufacturing_pipeline/api/routes.py
+- Risks to watch:
+	- Removing PDF/excel paths changes user-facing outputs; keep core analysis intact.
+	- Ensure quick-mode still runs after stripping report generation calls.
