@@ -19,7 +19,7 @@ from datetime import datetime
 from manufacturing_pipeline.core.utils import (
     PROJECT_ROOT, DATA_DIR, DB_DIR, PARTS_DIR, OUTPUT_DIR,
     find_step_files, select_step_file, get_output_dir,
-    run_analysis, run_aag_analysis, run_debug,
+    run_analysis, run_debug,
     process_single_file,
     get_file_hash, load_cache, save_cache, cache_result,
 )
@@ -33,7 +33,6 @@ def _import_full_pipeline():
     """Lazy import of full pipeline modules (only needed for --full mode)."""
     from manufacturing_pipeline.analysis.step_processing import load_step_file
     from manufacturing_pipeline.data.database import DatabaseManager
-    from manufacturing_pipeline.analysis import iso_standards  # noqa: F841
     from manufacturing_pipeline.data.cache_manager import CacheManager, PipelineRunner, PipelineStage
     from manufacturing_pipeline.core.config import PipelineConfig
     from manufacturing_pipeline.core.pipeline_init import (
@@ -260,43 +259,6 @@ def run_quick(step_file, args):
     try:
         analysis, total_holes = run_analysis(step_file, output_dir, args)
 
-        # Run AAG analysis if requested
-        if args.aag:
-            print("\n[AAG] Running Attributed Adjacency Graph analysis...")
-            aag_result = run_aag_analysis(step_file)
-
-            if aag_result.get("success"):
-                print(f"\n--- AAG Analyse Resultaat ---")
-                print(f"Type:             {aag_result.get('part_type', 'ONBEKEND')}")
-                print(f"Gaten (AAG):      {aag_result['hole_count']}")
-                print(f"Slots (AAG):      {aag_result['slot_count']}")
-                print(f"Zettingen:        {aag_result['bend_count']}")
-                print(f"Tegenzettingen:   {aag_result.get('counter_bend_count', 0)}")
-                print(f"Dikte (AAG):      {aag_result['thickness']:.2f} mm")
-                print(f"Snijlengte:       {aag_result['total_cut_length']:.0f} mm")
-                print(f"Pierces:          {aag_result['pierce_count']}")
-                if args.verbose:
-                    print(f"Faces/Edges:      {aag_result['face_count']}/{aag_result['edge_count']}")
-                    print(f"Skin/Thickness:   {aag_result['skin_faces']}/{aag_result['thickness_faces']}")
-                    print(f"Raw bends/Prod:   {aag_result.get('all_bend_count', '?')}/{aag_result.get('production_bend_count', '?')}")
-                if args.verbose and aag_result.get("holes_detail"):
-                    print(f"\n--- Gaten Detail (AAG) ---")
-                    for h in aag_result["holes_detail"][:10]:
-                        q_str = f"Q={h['isoperimetric_quotient']:.2f}" if h.get("isoperimetric_quotient") else ""
-                        diam = h.get("diameter") or 0
-                        print(f"  {h['type']}: \u00d8{diam:.1f}mm, P={h['perimeter']:.0f}mm {q_str}")
-                if args.verbose and aag_result.get("bends_detail"):
-                    print(f"\n--- Zettingen Detail (AAG) ---")
-                    for b in aag_result["bends_detail"][:10]:
-                        print(f"  {b['type']}: {b['angle']:.0f}\u00b0, R={b['radius']:.1f}mm, L={b['length']:.0f}mm, K={b['k_factor']:.2f}")
-
-                aag_json_path = os.path.join(output_dir, f"{part_name}_aag.json")
-                with open(aag_json_path, "w") as f:
-                    json.dump(aag_result, f, indent=2)
-                print(f"\n  AAG JSON: {aag_json_path}")
-            else:
-                print(f"  AAG analyse gefaald: {aag_result.get('error', 'Unknown error')}")
-
         print(f"\n{'=' * 60}")
         print(f"COMPLETE")
         print(f"{'=' * 60}")
@@ -331,7 +293,6 @@ def run_batch(step_files, args, cache):
 
     args_dict = {
         "analyze": args.analyze,
-        "aag": args.aag,
         "verbose": args.verbose,
         "debug": args.debug,
         "no_unfold": args.no_unfold,
@@ -448,8 +409,7 @@ Modes:
 Examples - Quick Mode:
   python run.py                              Interactive file selection
   python run.py -f mypart.step               Analyze specific file
-  python run.py -f mypart.step --aag         With AAG topology analysis
-  python run.py -f mypart.step --aag -v      AAG with verbose details
+    python run.py -f mypart.step -v            Verbose output
 
 Examples - Batch Mode:
   python run.py -f ./folder --batch -p 4     Parallel batch (4 workers)
@@ -480,7 +440,6 @@ Full Mode - Module Control:
 
     # Quick mode options
     parser.add_argument("--analyze", action="store_true", help="Show detailed analysis with reasoning")
-    parser.add_argument("--aag", action="store_true", help="Run AAG (Attributed Adjacency Graph) analysis")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--debug", action="store_true", help="Debug hole detection")
     parser.add_argument("--no-unfold", action="store_true", help="Skip automatic unfolding")

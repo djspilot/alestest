@@ -53,7 +53,17 @@ from OCP.GeomAbs import GeomAbs_Plane, GeomAbs_Cone
 
 # Import bestaande detectiefuncties (NIET wijzigen in step_processing.py!)
 from .step_processing import detect_holes, detect_shaped_holes, deduplicate_holes
-from . import iso_standards
+
+
+class _IsoStandardsFallback:
+    """Minimal fallback used after removing analysis/iso_standards.py."""
+
+    @staticmethod
+    def identify_thread_from_diameter(_diameter, _tolerance=0.2):
+        return []
+
+
+iso_standards = _IsoStandardsFallback()
 
 logger = logging.getLogger(__name__)
 

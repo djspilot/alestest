@@ -87,7 +87,6 @@ from manufacturing_pipeline.core.unfold_integration import (
 
 
 # Runtime cross-module calls used by run_analysis
-from manufacturing_pipeline.core.runtime_reporting import run_aag_analysis
 from manufacturing_pipeline.core.runtime_unfold import run_unfold_to_step
 
 def run_analysis(step_file, output_dir, args, progress_callback=None):
@@ -107,13 +106,6 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
     from manufacturing_pipeline.analysis.cut_features import _detect_closed_inner_contours
     from manufacturing_pipeline.analysis.part_analyzer import analyze_part_geometry, format_analysis_report, PartType
     from manufacturing_pipeline.core.profiler import AnalysisProfiler
-
-    # Import AAG Analyzer
-    try:
-        from manufacturing_pipeline.scripts.aag_analyzer import AAGAnalyzer
-    except ImportError as e:
-        print(f"Warning: Could not import AAGAnalyzer: {e}")
-        AAGAnalyzer = None
 
     part_name = os.path.splitext(os.path.basename(step_file))[0]
 
@@ -620,35 +612,11 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
         analysis.bend_count_erp > 0 or analysis.is_sheet_metal
     )
 
-    # AAG as fallback: only run if standard analysis lacks thickness or classification
-    force_aag = bool(getattr(args, "aag", False)) and "aag" not in disabled_stages
-    allow_aag_fallback = bool(getattr(args, "aag_fallback", True)) and "aag" not in disabled_stages
-    use_aag = force_aag
-    if allow_aag_fallback and not standard_has_thickness and not standard_has_classification:
-        use_aag = True  # Auto-fallback only when explicitly enabled
-
-    aag_result = AAGResult({"success": False})  # Default: no AAG
-
-    if use_aag:
-        if force_aag:
-            print("[3b/7] AAG: handmatig geforceerd, AAG analyse draaien...")
-        else:
-            print("[3b/7] AAG Fallback: standard analysis incomplete, running AAG...")
-        with profiler.step("AAG Fallback", None, None):
-            aag_data = run_aag_analysis(step_file)
-        aag_result = AAGResult(aag_data)
-
-        if not aag_result.success:
-            print(f"  AAG also failed, using standard analysis only")
-        else:
-            print(f"  [OK] AAG: {aag_result.bend_count} bends, t={aag_result.thickness:.2f}mm")
-    else:
-        if allow_aag_fallback:
-            print("[3b/7] AAG: Overgeslagen (standard analyse voldoende)")
-        else:
-            print("[3b/7] AAG: Uitgeschakeld via flag")
-        with profiler.step("AAG Fallback", None, None) as s:
-            s["status"] = "SKIP"
+    # Phase 7: AAG fallback removed
+    aag_result = AAGResult({"success": False})
+    print("[3b/7] AAG: Uitgeschakeld (fase 7)")
+    with profiler.step("AAG Fallback", None, None) as s:
+        s["status"] = "SKIP"
 
     # ================================================================
     # STEP 4: Merge classification
