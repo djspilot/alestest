@@ -20,7 +20,6 @@ from manufacturing_pipeline.core.utils import (
     PROJECT_ROOT, DATA_DIR, DB_DIR, PARTS_DIR, OUTPUT_DIR,
     find_step_files, select_step_file, get_output_dir,
     run_analysis, run_aag_analysis, run_debug,
-    generate_simple_pdf, generate_compact_pdf,
     process_single_file,
     get_file_hash, load_cache, save_cache, cache_result,
 )
@@ -34,7 +33,6 @@ def _import_full_pipeline():
     """Lazy import of full pipeline modules (only needed for --full mode)."""
     from manufacturing_pipeline.analysis.step_processing import load_step_file
     from manufacturing_pipeline.data.database import DatabaseManager
-    from manufacturing_pipeline.reporting.report_generator import PDFReportGenerator
     from manufacturing_pipeline.analysis import iso_standards  # noqa: F841
     from manufacturing_pipeline.data.cache_manager import CacheManager, PipelineRunner, PipelineStage
     from manufacturing_pipeline.core.config import PipelineConfig
@@ -110,7 +108,6 @@ def run_full_pipeline(step_file, pdf_file, db_path, schema_path, args, config, c
     DatabaseManager = mods["DatabaseManager"]
     PipelineRunner = mods["PipelineRunner"]
     PipelineStage = mods["PipelineStage"]
-    PDFReportGenerator = mods["PDFReportGenerator"]
     run_geometry_and_topology_stages = mods["run_geometry_and_topology_stages"]
     run_iso_standards_stages = mods["run_iso_standards_stages"]
     run_werkvoorbereiding_stage = mods["run_werkvoorbereiding_stage"]
@@ -227,13 +224,6 @@ def run_full_pipeline(step_file, pdf_file, db_path, schema_path, args, config, c
             verbose=not production_only,
         )
 
-        if not getattr(args, "no_report", False):
-            output_pdf = f"{part_name}_report.pdf"
-            if not production_only:
-                print(f"Generating PDF report: {output_pdf}")
-            report_gen = PDFReportGenerator(json_file)
-            report_gen.generate_report(output_pdf)
-
         if not args.no_cache:
             runner.cache.save_stage(PipelineStage.COMPLETE, True, step_file)
 
@@ -241,8 +231,6 @@ def run_full_pipeline(step_file, pdf_file, db_path, schema_path, args, config, c
             print("\n" + "=" * 60)
             print("ANALYSIS COMPLETE")
             print(f"  JSON: {json_file}")
-            if not getattr(args, "no_report", False):
-                print(f"  PDF:  {output_pdf}")
             print("=" * 60)
             print("\n" + runner.status())
 
@@ -308,57 +296,6 @@ def run_quick(step_file, args):
                 print(f"\n  AAG JSON: {aag_json_path}")
             else:
                 print(f"  AAG analyse gefaald: {aag_result.get('error', 'Unknown error')}")
-
-        if not args.no_pdf:
-            print("\nGenerating PDF report...")
-            generate_compact_pdf(step_file, output_dir, part_name, analysis, total_holes)
-
-        # Excel export (SpaceClaim format)
-        if args.excel:
-            from pathlib import Path
-            from manufacturing_pipeline.reporting.excel_exporter import export_to_excel
-
-            # Build enriched result dict
-            result_dict = {
-                "file": os.path.basename(step_file),
-                "success": True,
-                "category": getattr(analysis, "part_category", "UNKNOWN"),
-                "part_type": str(getattr(analysis, "part_type", "").value)
-                    if hasattr(getattr(analysis, "part_type", None), "value")
-                    else str(getattr(analysis, "part_type", "")),
-                "thickness": getattr(analysis, "thickness", 0),
-                "dimensions": {
-                    "length": getattr(analysis, "length", 0),
-                    "width": getattr(analysis, "width", 0),
-                    "height": getattr(analysis, "height", 0),
-                },
-                "flat_dimensions": None,
-                "production": {
-                    "holes_total": total_holes,
-                    "bends_total": getattr(analysis, "bend_count_erp", 0),
-                    "bends_up": 0,
-                    "bends_down": 0,
-                },
-                "aag_details": {},
-            }
-
-            # Add flat dimensions if available
-            flat_l = getattr(analysis, "flat_length", 0)
-            flat_w = getattr(analysis, "flat_width", 0)
-            if flat_l > 0 and flat_w > 0:
-                result_dict["flat_dimensions"] = {"length": flat_l, "width": flat_w}
-
-            # Add AAG details if available
-            if args.aag and aag_result and aag_result.get("success"):
-                result_dict["aag_details"] = {
-                    "total_cut_length": aag_result.get("total_cut_length", 0),
-                    "counter_bend_count": aag_result.get("counter_bend_count", 0),
-                }
-
-            excel_path = Path(output_dir) / f"{part_name}.xlsx"
-            ref_path = Path(args.reference) if args.reference else None
-            export_to_excel([result_dict], excel_path, reference_path=ref_path)
-            print(f"\n  Excel: {excel_path}")
 
         print(f"\n{'=' * 60}")
         print(f"COMPLETE")
@@ -493,19 +430,6 @@ def run_batch(step_files, args, cache):
                     cache_mark = "\u2713" if r.get("cached") else ""
                     print(f"{r['file']:<35} {r['category']:<20} {r['holes']:>6} {r['bends']:>6} {cache_mark:>6}")
 
-    # Excel export for batch (one combined Excel with all results)
-    if args.excel and results:
-        from pathlib import Path
-        from manufacturing_pipeline.reporting.excel_exporter import export_to_excel
-
-        successful = [r for r in results if r.get("success")]
-        if successful:
-            excel_path = Path(OUTPUT_DIR) / "batch_results.xlsx"
-            ref_path = Path(args.reference) if args.reference else None
-            export_to_excel(successful, excel_path, reference_path=ref_path)
-            print(f"\n  Excel: {excel_path}")
-
-
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
@@ -612,12 +536,6 @@ Full Mode - Module Control:
 
     # Utility
     parser.add_argument("--list", action="store_true", help="List available STEP files")
-
-    # Export options
-    parser.add_argument("--excel", action="store_true",
-                        help="Export results to Excel in SpaceClaim column format")
-    parser.add_argument("--reference", metavar="FILE",
-                        help="SpaceClaim reference file (.xlsx/.xml) for comparison sheet")
 
     return parser.parse_args()
 

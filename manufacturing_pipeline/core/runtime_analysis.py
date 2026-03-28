@@ -81,19 +81,6 @@ from manufacturing_pipeline.core.unfold_integration import (
     validate_unfold_dimensions,
     build_unfold_event_payload,
 )
-from manufacturing_pipeline.core.report_generation import (
-    REPORT_FORMAT_SIMPLE,
-    REPORT_FORMAT_COMPACT,
-    build_part_summary,
-    calculate_unfold_summary,
-    build_hole_report,
-    build_classification_report,
-    build_csv_export,
-    build_json_export,
-    calculate_report_completeness,
-)
-
-
 # =============================================================================
 # Main Analysis Pipeline
 # =============================================================================

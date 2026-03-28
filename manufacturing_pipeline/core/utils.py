@@ -12,4 +12,3 @@ from manufacturing_pipeline.core.file_utils import *  # noqa: F401,F403
 from manufacturing_pipeline.core.analysis_pipeline import *  # noqa: F401,F403
 from manufacturing_pipeline.core.hole_detection_fallback import *  # noqa: F401,F403
 from manufacturing_pipeline.core.unfold_integration import *  # noqa: F401,F403
-from manufacturing_pipeline.core.report_generation import *  # noqa: F401,F403

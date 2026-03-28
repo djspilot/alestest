@@ -152,7 +152,7 @@ async def list_jobs(
 @router.get("/jobs/{job_id}", response_model=JobStatus)
 async def get_job(
     job_id: str,
-    format: str = Query("json", description="Response format: json, csv, xml, or excel"),
+    format: str = Query("json", description="Response format: json, csv, or xml"),
 ):
     """Get the status and result of an analysis job."""
     job = jobs.get(job_id)
@@ -165,8 +165,6 @@ async def get_job(
     if format == "xml" and job.status == "completed" and job.result:
         return _result_to_xml(job.result)
 
-    if format == "excel" and job.status == "completed" and job.result:
-        return _result_to_excel(job.result)
 
     if job.status == "completed":
         timeline_raw = (job.result or {}).get("timeline") or []
@@ -307,27 +305,3 @@ def _result_to_xml(result: dict) -> str:
         raise HTTPException(status_code=500, detail=f"XML export failed: {str(e)}")
 
 
-def _result_to_excel(result: dict):
-    """Convert analysis result dict to Excel (SpaceClaim format) response."""
-    from fastapi.responses import Response
-    from manufacturing_pipeline.reporting.excel_exporter import export_to_excel
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
-        tmp_path = Path(tmp.name)
-
-    try:
-        export_to_excel([result], tmp_path)
-        excel_content = tmp_path.read_bytes()
-        tmp_path.unlink()
-
-        filename = Path(result.get('file', 'result')).stem
-        return Response(
-            content=excel_content,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f"attachment; filename={filename}.xlsx"},
-        )
-
-    except Exception as e:
-        if tmp_path.exists():
-            tmp_path.unlink()
-        raise HTTPException(status_code=500, detail=f"Excel export failed: {str(e)}")
