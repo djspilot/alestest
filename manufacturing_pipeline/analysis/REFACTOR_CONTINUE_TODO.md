@@ -70,7 +70,7 @@ Still large / not properly split:
 ### 5. Refactor `freecad_unfold.py`
 
 - [x] Split FreeCAD path discovery / environment probing from unfold geometry logic
-- [ ] Move process execution helpers behind an internal module
+- [x] Move process execution helpers behind an internal module
 - [x] Keep the public unfold functions unchanged
 
 ## STEP Smoke Coverage

@@ -6,6 +6,7 @@ from manufacturing_pipeline.analysis.features import manufacturing_features
 from manufacturing_pipeline.analysis.bom import assembly_analysis as bom_assembly_analysis
 from manufacturing_pipeline.analysis.sheetmetal import orchestration as sheetmetal_orchestration
 from manufacturing_pipeline.analysis.sheetmetal import freecad_environment
+from manufacturing_pipeline.analysis.sheetmetal import freecad_process
 from manufacturing_pipeline.analysis.classification_core import step0 as classification_core_step0
 from manufacturing_pipeline.analysis.classification_core import geometry_metrics as classification_geometry_metrics
 from manufacturing_pipeline.analysis.classification_core import hollow_closed as classification_hollow_closed
@@ -140,6 +141,28 @@ def test_cut_features_public_extractors_remain_available():
 def test_freecad_unfold_delegates_environment_probing():
     assert freecad_unfold._candidate_freecad_paths() == freecad_environment._candidate_freecad_paths()
     assert freecad_unfold._should_prefer_freecadcmd() == freecad_environment._should_prefer_freecadcmd()
+
+
+def test_freecad_unfold_delegates_process_execution(monkeypatch):
+    captured = {}
+
+    def fake_find_freecadcmd():
+        return "/tmp/freecadcmd"
+
+    def fake_run_freecadcmd_script(executable, script, timeout_seconds=300):
+        captured["executable"] = executable
+        captured["timeout_seconds"] = timeout_seconds
+        captured["script_has_payload"] = "run(" in script
+        return {"success": True, "attempts": 1, "error_details": []}
+
+    monkeypatch.setattr(freecad_unfold, "_find_freecadcmd_executable", fake_find_freecadcmd)
+    monkeypatch.setattr(freecad_process, "run_freecadcmd_script", fake_run_freecadcmd_script)
+
+    result = freecad_unfold._unfold_via_freecadcmd("demo.step")
+    assert result["success"] is True
+    assert captured["executable"] == "/tmp/freecadcmd"
+    assert captured["timeout_seconds"] == 300
+    assert captured["script_has_payload"] is True
 
 
 def test_classification_step0_reuses_internal_metric_and_result_helpers():
