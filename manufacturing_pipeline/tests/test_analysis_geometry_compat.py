@@ -26,6 +26,14 @@ def test_step0_section_tools_reexports_shared_profile_geometry():
     assert step0_section_tools.normalize is shared.normalize
     assert step0_section_tools.normalize_section_polygon is shared.normalize_section_polygon
     assert step0_section_tools.match_templates is shared.match_templates
+    assert step0_section_tools.make_round_bar is shared.make_round_bar
+    assert step0_section_tools.make_pipe is shared.make_pipe
+    assert step0_section_tools.make_flat_bar is shared.make_flat_bar
+    assert step0_section_tools.make_rectangular_tube is shared.make_rectangular_tube
+    assert step0_section_tools.make_i_section is shared.make_i_section
+    assert step0_section_tools.make_u_section is shared.make_u_section
+    assert step0_section_tools.make_l_section is shared.make_l_section
+    assert step0_section_tools.make_t_section is shared.make_t_section
 
 
 def test_profile_classifier_reexports_shared_profile_geometry():
@@ -35,6 +43,14 @@ def test_profile_classifier_reexports_shared_profile_geometry():
     assert profile_classifier.normalize is shared.normalize
     assert profile_classifier.extract_section_features is shared.extract_section_features
     assert profile_classifier.make_i_section is shared.make_i_section
+    assert profile_classifier.make_round_bar is shared.make_round_bar
+    assert profile_classifier.make_pipe is shared.make_pipe
+    assert profile_classifier.make_flat_bar is shared.make_flat_bar
+    assert profile_classifier.make_rectangular_tube is shared.make_rectangular_tube
+    assert profile_classifier.make_u_section is shared.make_u_section
+    assert profile_classifier.make_l_section is shared.make_l_section
+    assert profile_classifier.make_t_section is shared.make_t_section
+    assert profile_classifier.match_templates is shared.match_templates
 
 
 def test_classification_reexports_internal_step0_module():

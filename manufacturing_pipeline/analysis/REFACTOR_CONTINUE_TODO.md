@@ -58,7 +58,7 @@ Still large / not properly split:
 ### 3. Split remaining duplicated profile logic
 
 - [ ] Move remaining shared 2D/profile logic out of `profile_classifier.py`
-- [ ] Make `step0_section_tools.py` and `profile_classifier.py` delegate to the same canonical geometry helpers
+- [x] Make `step0_section_tools.py` and `profile_classifier.py` delegate to the same canonical geometry helpers
 - [ ] Remove duplicated template generation only after wrapper tests prove identity
 
 ### 4. Refactor `cut_features.py`
