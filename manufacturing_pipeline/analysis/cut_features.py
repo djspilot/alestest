@@ -52,6 +52,7 @@ from OCP.BRepAdaptor import BRepAdaptor_Surface
 from OCP.GeomAbs import GeomAbs_Plane, GeomAbs_Cone
 
 # Import bestaande detectiefuncties (NIET wijzigen in step_processing.py!)
+from .features import cut_features_profile_helpers as _profile_helpers
 from .step_processing import detect_holes, detect_shaped_holes, deduplicate_holes
 
 
@@ -1366,3 +1367,35 @@ def _infer_profile_countersink_pairs(cylindrical_holes, countersink_matches: Dic
             suppressed.add(best_j)
 
     return inferred, suppressed
+
+
+_get_bounding_box = _profile_helpers._get_bounding_box
+_parse_dimensions_from_string = _profile_helpers._parse_dimensions_from_string
+
+
+def _filter_profile_end_opening_shaped_holes(
+    shaped_holes: List[Dict[str, Any]],
+    bbox_min: Tuple[float, float, float],
+    bbox_max: Tuple[float, float, float],
+) -> List[Dict[str, Any]]:
+    return _profile_helpers._filter_profile_end_opening_shaped_holes(
+        shaped_holes,
+        bbox_min,
+        bbox_max,
+        normalize_vector=_normalize_vector,
+        as_point_tuple=_as_point_tuple,
+        dot=_dot,
+        parse_dimensions=_parse_dimensions_from_string,
+    )
+
+
+def _infer_profile_countersink_pairs(cylindrical_holes, countersink_matches: Dict[int, float]) -> Tuple[set, set]:
+    return _profile_helpers._infer_profile_countersink_pairs(
+        cylindrical_holes,
+        countersink_matches,
+        normalize_vector=_normalize_vector,
+        dot=_dot,
+        as_point_tuple=_as_point_tuple,
+        distance_point_to_axis=_distance_point_to_axis,
+        signed_axis_distance=_signed_axis_distance,
+    )

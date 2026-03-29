@@ -1,6 +1,7 @@
 from manufacturing_pipeline.analysis.geometry import profile_sections as shared
 from manufacturing_pipeline.analysis.io import step_file_io
 from manufacturing_pipeline.analysis.features import hole_detection
+from manufacturing_pipeline.analysis.features import cut_features_profile_helpers
 from manufacturing_pipeline.analysis.features import manufacturing_features
 from manufacturing_pipeline.analysis.bom import assembly_analysis as bom_assembly_analysis
 from manufacturing_pipeline.analysis.sheetmetal import orchestration as sheetmetal_orchestration
@@ -14,6 +15,7 @@ from manufacturing_pipeline.analysis.classification_core import solid_profile_fa
 from manufacturing_pipeline.analysis.classification_core import validation as classification_validation
 from manufacturing_pipeline.analysis import assembly_analysis
 from manufacturing_pipeline.analysis import classification
+from manufacturing_pipeline.analysis import cut_features
 from manufacturing_pipeline.analysis import profile_classifier
 from manufacturing_pipeline.analysis import step_processing
 from manufacturing_pipeline.analysis import step0_section_tools
@@ -90,6 +92,11 @@ def test_assembly_analysis_reexports_internal_bom_module():
     assert assembly_analysis.get_solid_topology_counts is bom_assembly_analysis.get_solid_topology_counts
     assert assembly_analysis._get_solid_surface_area is bom_assembly_analysis._get_solid_surface_area
     assert assembly_analysis._is_plate_by_face_analysis is bom_assembly_analysis._is_plate_by_face_analysis
+
+
+def test_cut_features_reexports_profile_helper_ownership():
+    assert cut_features._get_bounding_box is cut_features_profile_helpers._get_bounding_box
+    assert cut_features._parse_dimensions_from_string is cut_features_profile_helpers._parse_dimensions_from_string
 
 
 def test_classification_step0_reuses_internal_metric_and_result_helpers():
