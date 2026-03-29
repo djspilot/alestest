@@ -42,9 +42,9 @@ Still large / not properly split:
 ### 1. Finish `classification_core/step0.py`
 
 - [x] Extract `_step_0_2_hollow_closed` into `classification_core/hollow_closed.py`
-- [ ] Extract `_step_0_3_open_profile` into `classification_core/open_profile.py`
-- [ ] Extract `_step_0_4a_flat_plate` and `_step_0_4b_constant_thickness_open` into `classification_core/plate_rules.py`
-- [ ] Extract `_step_0_5_solid_profile_fallback` into `classification_core/solid_profile_fallback.py`
+- [x] Extract `_step_0_3_open_profile` into `classification_core/open_profile.py`
+- [x] Extract `_step_0_4a_flat_plate` and `_step_0_4b_constant_thickness_open` into `classification_core/plate_rules.py`
+- [x] Extract `_step_0_5_solid_profile_fallback` into `classification_core/solid_profile_fallback.py`
 - [ ] Keep `classify_step0` and `classify_step0_detailed_trace` in `classification_core/step0.py` as the orchestration layer
 - [ ] Add compatibility assertions when internal helper ownership changes
 

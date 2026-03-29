@@ -5,7 +5,10 @@ from manufacturing_pipeline.analysis.bom import assembly_analysis as bom_assembl
 from manufacturing_pipeline.analysis.classification_core import step0 as classification_core_step0
 from manufacturing_pipeline.analysis.classification_core import geometry_metrics as classification_geometry_metrics
 from manufacturing_pipeline.analysis.classification_core import hollow_closed as classification_hollow_closed
+from manufacturing_pipeline.analysis.classification_core import open_profile as classification_open_profile
+from manufacturing_pipeline.analysis.classification_core import plate_rules as classification_plate_rules
 from manufacturing_pipeline.analysis.classification_core import result_types as classification_result_types
+from manufacturing_pipeline.analysis.classification_core import solid_profile_fallback as classification_solid_profile_fallback
 from manufacturing_pipeline.analysis.classification_core import validation as classification_validation
 from manufacturing_pipeline.analysis import assembly_analysis
 from manufacturing_pipeline.analysis import classification
@@ -76,3 +79,14 @@ def test_classification_step0_reuses_internal_metric_and_result_helpers():
     assert classification_core_step0._step_0_1_slice_validation is classification_validation._step_0_1_slice_validation
     assert classification_core_step0._check_hollow_tube_consistency is classification_hollow_closed._check_hollow_tube_consistency
     assert classification_core_step0._step_0_2_hollow_closed is classification_hollow_closed._step_0_2_hollow_closed
+    assert classification_core_step0._step_0_3_open_profile is classification_open_profile._step_0_3_open_profile
+    assert classification_core_step0._step_0_4a_flat_plate is classification_plate_rules._step_0_4a_flat_plate
+    assert classification_core_step0._select_step_0_4b_features is classification_plate_rules._select_step_0_4b_features
+    assert (
+        classification_core_step0._step_0_4b_constant_thickness_open
+        is classification_plate_rules._step_0_4b_constant_thickness_open
+    )
+    assert (
+        classification_core_step0._step_0_5_solid_profile_fallback
+        is classification_solid_profile_fallback._step_0_5_solid_profile_fallback
+    )

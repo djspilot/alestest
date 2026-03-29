@@ -76,7 +76,10 @@ from manufacturing_pipeline.analysis.classification_variables import (
 )
 from manufacturing_pipeline.analysis.classification_core import geometry_metrics as _geometry_metrics
 from manufacturing_pipeline.analysis.classification_core import hollow_closed as _hollow_closed
+from manufacturing_pipeline.analysis.classification_core import open_profile as _open_profile
+from manufacturing_pipeline.analysis.classification_core import plate_rules as _plate_rules
 from manufacturing_pipeline.analysis.classification_core.result_types import Step0Result, _result
+from manufacturing_pipeline.analysis.classification_core import solid_profile_fallback as _solid_profile_fallback
 from manufacturing_pipeline.analysis.classification_core import validation as _validation
 
 # ===========================================================================
@@ -1543,3 +1546,16 @@ _evaluate_round_shaft_axial_slice = _validation._evaluate_round_shaft_axial_slic
 _step_0_1_slice_validation = _validation._step_0_1_slice_validation
 _check_hollow_tube_consistency = _hollow_closed._check_hollow_tube_consistency
 _step_0_2_hollow_closed = _hollow_closed._step_0_2_hollow_closed
+_step_0_3_open_profile = _open_profile._step_0_3_open_profile
+_step_0_4a_flat_plate = _plate_rules._step_0_4a_flat_plate
+_select_step_0_4b_features = _plate_rules._select_step_0_4b_features
+_step_0_4b_constant_thickness_open = _plate_rules._step_0_4b_constant_thickness_open
+_step_0_5_solid_profile_fallback = _solid_profile_fallback._step_0_5_solid_profile_fallback
+
+
+# Compatibility assertions: underscore-prefixed helpers are part of de-facto public surface.
+assert _step_0_3_open_profile is _open_profile._step_0_3_open_profile
+assert _step_0_4a_flat_plate is _plate_rules._step_0_4a_flat_plate
+assert _select_step_0_4b_features is _plate_rules._select_step_0_4b_features
+assert _step_0_4b_constant_thickness_open is _plate_rules._step_0_4b_constant_thickness_open
+assert _step_0_5_solid_profile_fallback is _solid_profile_fallback._step_0_5_solid_profile_fallback
