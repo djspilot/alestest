@@ -7,6 +7,7 @@ import { SelectionProvider, useSelectionContext } from './context/SelectionConte
 import { useViewer } from './hooks/useViewer'
 import { readFileAsArrayBuffer } from './lib/files'
 import { normalizeStageName, MERGED_HOLES_STAGE } from './pipelineUi'
+import { getDefaultPipelineApiBase } from './pipelineClient'
 
 import { normalizeFoldId } from './lib/holes'
 
@@ -26,7 +27,7 @@ function ViewerCanvasFallback() {
   )
 }
 
-export default function App() {
+function AppContent() {
   const controlsRef = useRef()
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
@@ -269,5 +270,30 @@ export default function App() {
         )}
       </div>
     </div>
+  )
+}
+
+function AppWithSelectionProvider() {
+  const pipeline = usePipelineContext()
+
+  return (
+    <SelectionProvider
+      pipelineVisuals={pipeline.pipelineVisuals}
+      flatMesh={pipeline.flatMesh}
+      backendMesh={pipeline.backendMesh}
+      groupedStages={pipeline.groupedStages}
+      pipelineEnabled={pipeline.pipelineEnabled}
+      pipelineState={pipeline.pipelineState}
+    >
+      <AppContent />
+    </SelectionProvider>
+  )
+}
+
+export default function App() {
+  return (
+    <PipelineProvider>
+      <AppWithSelectionProvider />
+    </PipelineProvider>
   )
 }

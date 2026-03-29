@@ -6,8 +6,8 @@ import {
 } from '../pipelineUi'
 import { normalizeFoldId, isHiddenHoleCandidate } from '../lib/holes'
 
-export function useSelection({ pipelineVisuals, flatMesh, backendMesh, groupedStages, pipelineEnabled, pipelineState, showHiddenHoles }) {
- // Selection state
+export function useSelection({ pipelineVisuals, flatMesh, backendMesh, groupedStages, pipelineEnabled, pipelineState }) {
+  // Selection state
   const [focusedStage, setFocusedStage] = useState(null)
   const [selectedHoleId, setSelectedHoleId] = useState(null)
   const [selectedFoldId, setSelectedFoldId] = useState(null)
@@ -15,6 +15,8 @@ export function useSelection({ pipelineVisuals, flatMesh, backendMesh, groupedSt
   const [probeMode, setProbeMode] = useState(false)
   const [selectedStageIndex, setSelectedStageIndex] = useState(0)
   const [selectedEventIndex, setSelectedEventIndex] = useState(0)
+  const [showHiddenHoles, setShowHiddenHoles] = useState(true)
+  const [highlightHiddenHoleLocations, setHighlightHiddenHoleLocations] = useState(true)
 
   // Derived values
   const selectedStage = groupedStages[selectedStageIndex] || null
@@ -147,13 +149,7 @@ export function useSelection({ pipelineVisuals, flatMesh, backendMesh, groupedSt
           : 'Geen gedetecteerde hole-candidate op deze kliklocatie binnen de detectieradius.',
         position:
           inferredContour?.position ||
-          (modelInfo?.center
-            ? [
-                sample.point.x + modelInfo.center.x,
-                sample.point.y + modelInfo.center.y,
-                sample.point.z + modelInfo.center.z,
-              ]
-            : [sample.point.x, sample.point.y, sample.point.z]),
+          [sample.point.x, sample.point.y, sample.point.z],
         normal:
           inferredContour?.normal || (sample.normal ? [sample.normal.x, sample.normal.y, sample.normal.z] : [0, 0, 1]),
         nearestHole: sample.nearestHole || null,
@@ -206,7 +202,7 @@ export function useSelection({ pipelineVisuals, flatMesh, backendMesh, groupedSt
         ],
       })
     },
-    [modelInfo?.center, selectDetectHolesStage, useFlatView],
+    [selectDetectHolesStage, useFlatView],
   )
 
   return {
@@ -232,6 +228,10 @@ export function useSelection({ pipelineVisuals, flatMesh, backendMesh, groupedSt
     activeMesh,
     parseMode,
     canUseProbeMode,
+    showHiddenHoles,
+    setShowHiddenHoles,
+    highlightHiddenHoleLocations,
+    setHighlightHiddenHoleLocations,
     handleSelectStageIndex,
     selectDetectHolesStage,
     selectHole,
