@@ -56,6 +56,14 @@ def test_profile_classifier_reexports_shared_profile_geometry():
     assert profile_classifier.make_l_section is shared.make_l_section
     assert profile_classifier.make_t_section is shared.make_t_section
     assert profile_classifier.match_templates is shared.match_templates
+    assert profile_classifier.TEMPLATE_BUILDERS["round_bar"] is shared.make_round_bar
+    assert profile_classifier.TEMPLATE_BUILDERS["pipe"] is shared.make_pipe
+    assert profile_classifier.TEMPLATE_BUILDERS["flat_bar"] is shared.make_flat_bar
+    assert profile_classifier.TEMPLATE_BUILDERS["rect_tube"] is shared.make_rectangular_tube
+    assert profile_classifier.TEMPLATE_BUILDERS["i_section"] is shared.make_i_section
+    assert profile_classifier.TEMPLATE_BUILDERS["u_section"] is shared.make_u_section
+    assert profile_classifier.TEMPLATE_BUILDERS["l_section"] is shared.make_l_section
+    assert profile_classifier.TEMPLATE_BUILDERS["t_section"] is shared.make_t_section
 
 
 def test_classification_reexports_internal_step0_module():

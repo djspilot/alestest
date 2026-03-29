@@ -1495,3 +1495,24 @@ make_u_section = shared_profile_sections.make_u_section
 make_l_section = shared_profile_sections.make_l_section
 make_t_section = shared_profile_sections.make_t_section
 match_templates = shared_profile_sections.match_templates
+
+# Keep template builder registry aligned with canonical shared helper ownership.
+TEMPLATE_BUILDERS = {
+    "round_bar": make_round_bar,
+    "pipe": make_pipe,
+    "flat_bar": make_flat_bar,
+    "rect_tube": make_rectangular_tube,
+    "i_section": make_i_section,
+    "u_section": make_u_section,
+    "l_section": make_l_section,
+    "t_section": make_t_section,
+}
+
+assert TEMPLATE_BUILDERS["round_bar"] is shared_profile_sections.make_round_bar
+assert TEMPLATE_BUILDERS["pipe"] is shared_profile_sections.make_pipe
+assert TEMPLATE_BUILDERS["flat_bar"] is shared_profile_sections.make_flat_bar
+assert TEMPLATE_BUILDERS["rect_tube"] is shared_profile_sections.make_rectangular_tube
+assert TEMPLATE_BUILDERS["i_section"] is shared_profile_sections.make_i_section
+assert TEMPLATE_BUILDERS["u_section"] is shared_profile_sections.make_u_section
+assert TEMPLATE_BUILDERS["l_section"] is shared_profile_sections.make_l_section
+assert TEMPLATE_BUILDERS["t_section"] is shared_profile_sections.make_t_section
