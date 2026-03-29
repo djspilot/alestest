@@ -432,123 +432,7 @@ def extract_display_edges(mesh_data, angle_threshold_deg=32.0, min_length_ratio=
 
 
 def analyze_sheet_metal(solid):
-    """
-    Analyze a solid to determine if it's a sheet metal part.
-    Returns thickness, bend count, and standard compliance.
-    """
-    # 1. Get all faces
-    exp = TopExp_Explorer(solid, TopAbs_FACE)
-    faces = []
-    while exp.More():
-        faces.append(TopoDS.Face_s(exp.Current()))
-        exp.Next()
-
-    planar_faces = []
-    cylindrical_faces = []
-    
-    total_area = 0.0
-    
-    for f in faces:
-        props = GProp_GProps()
-        BRepGProp.SurfaceProperties_s(f, props)
-        area = props.Mass()
-        total_area += area
-        
-        surf = BRepAdaptor_Surface(f, True)
-        stype = surf.GetType()
-        if stype == GeomAbs_Plane:
-            planar_faces.append((f, area))
-        elif stype == GeomAbs_Cylinder:
-            cylindrical_faces.append((f, area, surf.Cylinder().Radius()))
-
-    # 2. Detect Thickness (Parallel Planar Faces)
-    thickness_counts = {} # thickness -> area
-    
-    planes = []
-    for f, area in planar_faces:
-        surf = BRepAdaptor_Surface(f, True)
-        pln = surf.Plane()
-        ax = pln.Axis().Direction()
-        normal = (ax.X(), ax.Y(), ax.Z())
-        loc = pln.Location()
-        d_val = -(normal[0]*loc.X() + normal[1]*loc.Y() + normal[2]*loc.Z())
-        planes.append({"normal": normal, "d": d_val, "area": area})
-
-    for i in range(len(planes)):
-        for j in range(i + 1, len(planes)):
-            p1 = planes[i]
-            p2 = planes[j]
-            dot = p1["normal"][0]*p2["normal"][0] + p1["normal"][1]*p2["normal"][1] + p1["normal"][2]*p2["normal"][2]
-            
-            if abs(dot + 1.0) < 0.01: # Opposite normals
-                dist = abs(p1["d"] + p2["d"])
-                if dist > 0.1: 
-                    t_val = round(dist, 2)
-                    if t_val not in thickness_counts: thickness_counts[t_val] = 0
-                    thickness_counts[t_val] += min(p1["area"], p2["area"])
-    
-    # DEBUG: Print thickness counts
-    # print(f"DEBUG: Thickness counts: {thickness_counts}")
-
-    detected_thickness = 0.0
-    is_sheet = False
-    
-    if thickness_counts:
-        # Prefer reasonable sheet thicknesses (< 25mm)
-        sheet_candidates = {t: area for t, area in thickness_counts.items() if t < 25.0}
-        
-        if sheet_candidates:
-            best_t = max(sheet_candidates, key=sheet_candidates.get)
-        else:
-            best_t = max(thickness_counts, key=thickness_counts.get)
-            
-        coverage = thickness_counts[best_t] * 2 
-        # Lower threshold to 0.1 to detect complex bent parts
-        if coverage / total_area > 0.1: 
-            detected_thickness = best_t
-            is_sheet = True
-
-    # 3. Detect Bends
-    # Use the centralized logic in sheetmetal_analysis
-    is_closed_profile = False
-    counter_bend_count = 0
-    try:
-        # Pass detected_thickness only if it's valid (>0), otherwise None to let analysis detect it
-        t_arg = detected_thickness if detected_thickness > 0 else None
-        sm_result = sheetmetal_analysis.analyze_sheet_metal_geometry(solid, thickness=t_arg)
-
-        # Use bend_count_for_erp for ERP/werkvoorbereiding purposes
-        # This is 0 for closed profiles (koker) since they're purchased as profile
-        bend_count = sm_result.get("bend_count_for_erp", sm_result.get("bend_count", 0))
-        is_closed_profile = sm_result.get("is_closed_profile", False)
-        counter_bend_count = sm_result.get("counter_bend_count", 0)
-
-        # If we didn't detect thickness before, but sheetmetal analysis did:
-        if detected_thickness == 0.0 and sm_result.get("thickness"):
-            detected_thickness = sm_result.get("thickness")
-            is_sheet = True
-
-    except Exception as e:
-        print(f"Error in sheetmetal analysis: {e}")
-        bend_count = 0
-
-    # 4. ISO Standard Check
-    iso_thicknesses = [0.5, 0.6, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 15.0, 20.0]
-    is_standard = False
-    if is_sheet:
-        for iso_t in iso_thicknesses:
-            if abs(detected_thickness - iso_t) < 0.05:
-                is_standard = True
-                break
-
-    return {
-        "is_sheet_metal": is_sheet,
-        "thickness": detected_thickness,
-        "bend_count": bend_count,
-        "counter_bend_count": counter_bend_count,
-        "is_closed_profile": is_closed_profile,
-        "is_standard": is_standard
-    }
+    return sheetmetal_orchestration.analyze_sheet_metal(solid)
 
 def _analyze_part_manufacturing(cq_part, volume, part_holes):
     """
@@ -2171,159 +2055,26 @@ def is_turned_part(cq_object):
 # =============================================================================
 
 def detect_threads(cq_object, tolerance=0.15):
-    """
-    Detect potential threaded features by analyzing cylindrical holes
-    and matching to ISO metric thread standards.
-    """
-    holes = detect_holes(cq_object)
-    thread_candidates = []
-
-    for hole in holes:
-        diameter = hole.diameter
-        matches = iso_standards.identify_thread_from_diameter(diameter, tolerance)
-
-        if matches:
-            # Prefer coarse thread match
-            coarse_matches = [m for m in matches if m.is_coarse]
-            best_match = coarse_matches[0] if coarse_matches else matches[0]
-
-            thread_candidates.append({
-                "diameter": diameter,
-                "depth": hole.depth,
-                "position": hole.position,
-                "thread_designation": best_match.designation,
-                "pitch": best_match.pitch,
-                "is_coarse": best_match.is_coarse,
-                "minor_diameter": best_match.minor_diameter,
-                "tap_drill": iso_standards.get_tap_drill_size(best_match.designation),
-                "all_matches": [m.designation for m in matches[:3]],  # Top 3 matches
-            })
-
-    return thread_candidates
+    return manufacturing_features.detect_threads(
+        cq_object,
+        detect_holes_fn=detect_holes,
+        iso_provider=iso_standards,
+        tolerance=tolerance,
+    )
 
 
 def detect_shafts(cq_object):
-    """
-    Detect external cylindrical features (shafts) for fit analysis.
-    """
-    shafts = []
-    all_faces = cq_object.faces().vals()
-
-    # Group cylindrical faces by axis and analyze
-    cylinder_data = []
-
-    for face in all_faces:
-        surf = BRepAdaptor_Surface(face.wrapped, True)
-        if surf.GetType() == GeomAbs_Cylinder:
-            cylinder = surf.Cylinder()
-            radius = cylinder.Radius()
-            location = cylinder.Location()
-            axis = cylinder.Axis().Direction()
-
-            props = GProp_GProps()
-            BRepGProp.SurfaceProperties_s(face.wrapped, props)
-            area = props.Mass()
-            circumference = 2 * math.pi * radius
-            length = area / circumference
-
-            # Check if this is likely an external surface (shaft) vs internal (hole)
-            # by checking face orientation
-            cylinder_data.append({
-                "diameter": radius * 2,
-                "length": length,
-                "position": (location.X(), location.Y(), location.Z()),
-                "axis": (axis.X(), axis.Y(), axis.Z()),
-            })
-
-    # Group by similar diameters and analyze
-    if cylinder_data:
-        # Sort by diameter
-        cylinder_data.sort(key=lambda x: x["diameter"], reverse=True)
-
-        # Take unique diameters (potential shafts are typically larger)
-        seen_diameters = set()
-        for cyl in cylinder_data:
-            d = round(cyl["diameter"], 1)
-            if d not in seen_diameters and d > 3.0:  # Min 3mm for shaft
-                seen_diameters.add(d)
-                fit_analysis = iso_standards.analyze_hole_fit(cyl["diameter"])
-                shafts.append({
-                    "diameter": cyl["diameter"],
-                    "length": cyl["length"],
-                    "position": cyl["position"],
-                    "fit_recommendation": fit_analysis["primary_recommendation"],
-                })
-
-    return shafts
+    return manufacturing_features.detect_shafts(
+        cq_object,
+        iso_provider=iso_standards,
+    )
 
 
 def analyze_chamfers_and_fillets(cq_object):
-    """
-    Detect chamfers (conical faces) and fillets (torus faces) in the geometry.
-    """
-    chamfers = []
-    fillets = []
-
-    all_faces = cq_object.faces().vals()
-
-    for face in all_faces:
-        surf = BRepAdaptor_Surface(face.wrapped, True)
-        stype = surf.GetType()
-
-        props = GProp_GProps()
-        BRepGProp.SurfaceProperties_s(face.wrapped, props)
-        area = props.Mass()
-
-        if stype == GeomAbs_Cone:
-            cone = surf.Cone()
-            half_angle = cone.SemiAngle()
-            angle_deg = math.degrees(half_angle)
-
-            # Chamfers typically have 45° angle
-            if 40 <= angle_deg <= 50:
-                # Estimate chamfer size from area
-                ref_radius = cone.RefRadius()
-                chamfers.append({
-                    "angle": round(angle_deg, 1),
-                    "estimated_size": round(ref_radius * 0.3, 2),  # Approximate
-                    "area": area,
-                })
-
-        elif stype == GeomAbs_Torus:
-            torus = surf.Torus()
-            minor_radius = torus.MinorRadius()
-            major_radius = torus.MajorRadius()
-
-            # Fillets have small minor radius relative to major
-            if minor_radius < major_radius * 0.5 and minor_radius < 20:
-                fillets.append({
-                    "radius": round(minor_radius, 2),
-                    "area": area,
-                    "standard_radius": iso_standards.get_nearest_standard_fillet(minor_radius),
-                })
-
-    # Summarize
-    chamfer_sizes = [c["estimated_size"] for c in chamfers]
-    fillet_radii = [f["radius"] for f in fillets]
-
-    avg_chamfer = sum(chamfer_sizes) / len(chamfer_sizes) if chamfer_sizes else 1.0
-    avg_fillet = sum(fillet_radii) / len(fillet_radii) if fillet_radii else 2.0
-
-    return {
-        "chamfers": {
-            "count": len(chamfers),
-            "sizes": list(set(round(s, 1) for s in chamfer_sizes)),
-            "average_size": round(avg_chamfer, 2),
-            "recommended_standard": iso_standards.get_nearest_standard_chamfer(avg_chamfer),
-        },
-        "fillets": {
-            "count": len(fillets),
-            "radii": list(set(round(r, 1) for r in fillet_radii)),
-            "average_radius": round(avg_fillet, 2),
-            "recommended_standard": iso_standards.get_nearest_standard_fillet(avg_fillet),
-        },
-        "edge_note": "All edges to be deburred and broken 0.2-0.5mm unless otherwise specified (ISO 13715)",
-    }
+    return manufacturing_features.analyze_chamfers_and_fillets(
+        cq_object,
+        iso_provider=iso_standards,
+    )
 
 
 def analyze_manufacturing_requirements(cq_object, face_analysis=None):
@@ -2811,30 +2562,4 @@ def deduplicate_holes(circular_holes, shaped_holes, return_debug=False):
         circular_holes,
         shaped_holes,
         return_debug=return_debug,
-    )
-
-
-analyze_sheet_metal = sheetmetal_orchestration.analyze_sheet_metal
-
-
-def detect_threads(cq_object, tolerance=0.15):
-    return manufacturing_features.detect_threads(
-        cq_object,
-        detect_holes_fn=detect_holes,
-        iso_provider=iso_standards,
-        tolerance=tolerance,
-    )
-
-
-def detect_shafts(cq_object):
-    return manufacturing_features.detect_shafts(
-        cq_object,
-        iso_provider=iso_standards,
-    )
-
-
-def analyze_chamfers_and_fillets(cq_object):
-    return manufacturing_features.analyze_chamfers_and_fillets(
-        cq_object,
-        iso_provider=iso_standards,
     )

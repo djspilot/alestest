@@ -46,14 +46,14 @@ Still large / not properly split:
 - [x] Extract `_step_0_4a_flat_plate` and `_step_0_4b_constant_thickness_open` into `classification_core/plate_rules.py`
 - [x] Extract `_step_0_5_solid_profile_fallback` into `classification_core/solid_profile_fallback.py`
 - [ ] Keep `classify_step0` and `classify_step0_detailed_trace` in `classification_core/step0.py` as the orchestration layer
-- [ ] Add compatibility assertions when internal helper ownership changes
+- [x] Add compatibility assertions when internal helper ownership changes
 
 ### 2. Keep thinning `step_processing.py`
 
 - [x] Extract thread / shaft / chamfer / fillet helpers into `features/`
 - [x] Extract sheet analysis orchestration helpers into `sheetmetal/`
 - [ ] Leave only compatibility wrappers plus orchestration in `step_processing.py`
-- [ ] Make sure wrappers pass any required legacy callbacks explicitly
+- [x] Make sure wrappers pass any required legacy callbacks explicitly
 
 ### 3. Split remaining duplicated profile logic
 
@@ -65,13 +65,13 @@ Still large / not properly split:
 
 - [x] Move sheet cut-feature helpers into `features/`
 - [x] Move profile cut-feature helpers into `features/`
-- [ ] Keep `extract_cut_features_for_sheet` and `extract_cut_features_for_profile` as top-level compatibility exports
+- [x] Keep `extract_cut_features_for_sheet` and `extract_cut_features_for_profile` as top-level compatibility exports
 
 ### 5. Refactor `freecad_unfold.py`
 
 - [x] Split FreeCAD path discovery / environment probing from unfold geometry logic
 - [ ] Move process execution helpers behind an internal module
-- [ ] Keep the public unfold functions unchanged
+- [x] Keep the public unfold functions unchanged
 
 ## STEP Smoke Coverage
 

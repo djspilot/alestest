@@ -81,10 +81,41 @@ def test_step_processing_reexports_internal_hole_helpers():
 
 
 def test_step_processing_reexports_internal_sheetmetal_and_manufacturing_helpers():
-    assert step_processing.analyze_sheet_metal is sheetmetal_orchestration.analyze_sheet_metal
+    assert callable(step_processing.analyze_sheet_metal)
     assert step_processing.detect_threads is not None
     assert step_processing.detect_shafts is not None
     assert step_processing.analyze_chamfers_and_fillets is not None
+
+
+def test_step_processing_wrappers_pass_legacy_callbacks(monkeypatch):
+    captured = {}
+
+    def fake_sheetmetal(solid):
+        captured["sheet_solid"] = solid
+        return {"is_sheet_metal": False}
+
+    def fake_detect_threads(cq_object, detect_holes_fn, iso_provider, tolerance=0.15):
+        captured["thread_obj"] = cq_object
+        captured["detect_holes_fn"] = detect_holes_fn
+        captured["iso_provider"] = iso_provider
+        captured["thread_tolerance"] = tolerance
+        return ["ok"]
+
+    def fake_detect_holes(_cq_object):
+        return []
+
+    monkeypatch.setattr(sheetmetal_orchestration, "analyze_sheet_metal", fake_sheetmetal)
+    monkeypatch.setattr(manufacturing_features, "detect_threads", fake_detect_threads)
+    monkeypatch.setattr(step_processing, "detect_holes", fake_detect_holes)
+
+    assert step_processing.analyze_sheet_metal("solid") == {"is_sheet_metal": False}
+    assert captured["sheet_solid"] == "solid"
+
+    assert step_processing.detect_threads("shape", tolerance=0.2) == ["ok"]
+    assert captured["thread_obj"] == "shape"
+    assert captured["detect_holes_fn"] is fake_detect_holes
+    assert captured["iso_provider"] is step_processing.iso_standards
+    assert captured["thread_tolerance"] == 0.2
 
 
 def test_assembly_analysis_reexports_internal_bom_module():
