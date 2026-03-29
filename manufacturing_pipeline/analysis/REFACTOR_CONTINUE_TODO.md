@@ -66,6 +66,7 @@ Still large / not properly split:
 - [x] Move sheet cut-feature helpers into `features/`
 - [x] Move profile cut-feature helpers into `features/`
 - [x] Keep `extract_cut_features_for_sheet` and `extract_cut_features_for_profile` as top-level compatibility exports
+- [x] Remove duplicated in-module helper bodies and keep delegated compatibility wrappers
 
 ### 5. Refactor `freecad_unfold.py`
 
