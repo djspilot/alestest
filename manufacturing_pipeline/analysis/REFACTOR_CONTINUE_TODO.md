@@ -4,12 +4,12 @@ This file is the working checklist for continuing the `manufacturing_pipeline/an
 
 ## Rules
 
-- [ ] Keep all current public import paths working
-- [ ] Treat underscore-prefixed imports used outside their module as compatibility surface
-- [ ] Prefer extracting code into internal modules first, then turning the old top-level module into a wrapper
-- [ ] Run tests serially, not in parallel
-- [ ] Use `pytest -q` and `PYTHONPATH=/Users/ds/AIdoel/alestest pytest -q` as acceptance checks
-- [ ] Keep the local STEP smoke manifest green while refactoring internals
+- [x] Keep all current public import paths working
+- [x] Treat underscore-prefixed imports used outside their module as compatibility surface
+- [x] Prefer extracting code into internal modules first, then turning the old top-level module into a wrapper
+- [x] Run tests serially, not in parallel
+- [x] Use `pytest -q` and `PYTHONPATH=/Users/ds/AIdoel/alestest pytest -q` as acceptance checks
+- [x] Keep the local STEP smoke manifest green while refactoring internals
 
 ## Current State
 
@@ -28,10 +28,10 @@ Already extracted:
 
 Still large / not properly split:
 
-- [ ] `classification_core/step0.py`
-- [ ] `step_processing.py`
-- [ ] `cut_features.py`
-- [ ] `freecad_unfold.py`
+- [x] `classification_core/step0.py`
+- [x] `step_processing.py`
+- [x] `cut_features.py`
+- [x] `freecad_unfold.py`
 - [ ] `profile_classifier.py`
 - [ ] `profile_features.py`
 - [ ] `part_analyzer.py`
@@ -73,6 +73,12 @@ Still large / not properly split:
 - [x] Move process execution helpers behind an internal module
 - [x] Keep the public unfold functions unchanged
 
+### 6. Refactor `part_analyzer.py`
+
+- [x] Extract profile classification rules into `part_analysis/rules.py`
+- [x] Extract unfold decision rules into `part_analysis/rules.py`
+- [x] Keep `analyze_part_geometry` public API unchanged while delegating internal decisions
+
 ## STEP Smoke Coverage
 
 Current tracked manifest cases:
@@ -92,10 +98,10 @@ Expand next:
 
 Run after each refactor slice:
 
-- [ ] `python3 -m compileall manufacturing_pipeline/analysis`
-- [ ] targeted pytest for touched modules
-- [ ] `pytest -q`
-- [ ] `PYTHONPATH=/Users/ds/AIdoel/alestest pytest -q`
+- [x] `python3 -m compileall manufacturing_pipeline/analysis`
+- [x] targeted pytest for touched modules
+- [x] `pytest -q`
+- [x] `PYTHONPATH=/Users/ds/AIdoel/alestest pytest -q`
 
 If STEP-related code changed:
 
