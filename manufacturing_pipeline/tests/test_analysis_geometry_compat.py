@@ -1,7 +1,9 @@
 from manufacturing_pipeline.analysis.geometry import profile_sections as shared
 from manufacturing_pipeline.analysis.io import step_file_io
 from manufacturing_pipeline.analysis.features import hole_detection
+from manufacturing_pipeline.analysis.features import manufacturing_features
 from manufacturing_pipeline.analysis.bom import assembly_analysis as bom_assembly_analysis
+from manufacturing_pipeline.analysis.sheetmetal import orchestration as sheetmetal_orchestration
 from manufacturing_pipeline.analysis.classification_core import step0 as classification_core_step0
 from manufacturing_pipeline.analysis.classification_core import geometry_metrics as classification_geometry_metrics
 from manufacturing_pipeline.analysis.classification_core import hollow_closed as classification_hollow_closed
@@ -56,6 +58,13 @@ def test_step_processing_reexports_internal_hole_helpers():
     assert step_processing._sample_edge_points is hole_detection._sample_edge_points
     assert step_processing._edge_end_keys is hole_detection._edge_end_keys
     assert step_processing._recover_contours_from_bucket is hole_detection._recover_contours_from_bucket
+
+
+def test_step_processing_reexports_internal_sheetmetal_and_manufacturing_helpers():
+    assert step_processing.analyze_sheet_metal is sheetmetal_orchestration.analyze_sheet_metal
+    assert step_processing.detect_threads is not None
+    assert step_processing.detect_shafts is not None
+    assert step_processing.analyze_chamfers_and_fillets is not None
 
 
 def test_assembly_analysis_reexports_internal_bom_module():

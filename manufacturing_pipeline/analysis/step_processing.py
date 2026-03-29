@@ -16,7 +16,9 @@ from OCP.BRep import BRep_Tool
 from manufacturing_pipeline.analysis import sheetmetal_analysis
 from manufacturing_pipeline.analysis import assembly_analysis
 from manufacturing_pipeline.analysis.features import hole_detection
+from manufacturing_pipeline.analysis.features import manufacturing_features
 from manufacturing_pipeline.analysis.io import step_file_io
+from manufacturing_pipeline.analysis.sheetmetal import orchestration as sheetmetal_orchestration
 import os
 import uuid
 from collections import Counter
@@ -2809,4 +2811,30 @@ def deduplicate_holes(circular_holes, shaped_holes, return_debug=False):
         circular_holes,
         shaped_holes,
         return_debug=return_debug,
+    )
+
+
+analyze_sheet_metal = sheetmetal_orchestration.analyze_sheet_metal
+
+
+def detect_threads(cq_object, tolerance=0.15):
+    return manufacturing_features.detect_threads(
+        cq_object,
+        detect_holes_fn=detect_holes,
+        iso_provider=iso_standards,
+        tolerance=tolerance,
+    )
+
+
+def detect_shafts(cq_object):
+    return manufacturing_features.detect_shafts(
+        cq_object,
+        iso_provider=iso_standards,
+    )
+
+
+def analyze_chamfers_and_fillets(cq_object):
+    return manufacturing_features.analyze_chamfers_and_fillets(
+        cq_object,
+        iso_provider=iso_standards,
     )

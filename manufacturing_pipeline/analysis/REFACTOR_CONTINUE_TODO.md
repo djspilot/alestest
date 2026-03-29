@@ -50,8 +50,8 @@ Still large / not properly split:
 
 ### 2. Keep thinning `step_processing.py`
 
-- [ ] Extract thread / shaft / chamfer / fillet helpers into `features/`
-- [ ] Extract sheet analysis orchestration helpers into `sheetmetal/`
+- [x] Extract thread / shaft / chamfer / fillet helpers into `features/`
+- [x] Extract sheet analysis orchestration helpers into `sheetmetal/`
 - [ ] Leave only compatibility wrappers plus orchestration in `step_processing.py`
 - [ ] Make sure wrappers pass any required legacy callbacks explicitly
 
