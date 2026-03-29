@@ -45,14 +45,14 @@ Still large / not properly split:
 - [x] Extract `_step_0_3_open_profile` into `classification_core/open_profile.py`
 - [x] Extract `_step_0_4a_flat_plate` and `_step_0_4b_constant_thickness_open` into `classification_core/plate_rules.py`
 - [x] Extract `_step_0_5_solid_profile_fallback` into `classification_core/solid_profile_fallback.py`
-- [ ] Keep `classify_step0` and `classify_step0_detailed_trace` in `classification_core/step0.py` as the orchestration layer
+- [x] Keep `classify_step0` and `classify_step0_detailed_trace` in `classification_core/step0.py` as the orchestration layer
 - [x] Add compatibility assertions when internal helper ownership changes
 
 ### 2. Keep thinning `step_processing.py`
 
 - [x] Extract thread / shaft / chamfer / fillet helpers into `features/`
 - [x] Extract sheet analysis orchestration helpers into `sheetmetal/`
-- [ ] Leave only compatibility wrappers plus orchestration in `step_processing.py`
+- [x] Leave only compatibility wrappers plus orchestration in `step_processing.py`
 - [x] Make sure wrappers pass any required legacy callbacks explicitly
 
 ### 3. Split remaining duplicated profile logic
