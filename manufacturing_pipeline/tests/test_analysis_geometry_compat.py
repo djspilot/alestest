@@ -5,6 +5,7 @@ from manufacturing_pipeline.analysis.features import cut_features_profile_helper
 from manufacturing_pipeline.analysis.features import manufacturing_features
 from manufacturing_pipeline.analysis.bom import assembly_analysis as bom_assembly_analysis
 from manufacturing_pipeline.analysis.sheetmetal import orchestration as sheetmetal_orchestration
+from manufacturing_pipeline.analysis.sheetmetal import freecad_environment
 from manufacturing_pipeline.analysis.classification_core import step0 as classification_core_step0
 from manufacturing_pipeline.analysis.classification_core import geometry_metrics as classification_geometry_metrics
 from manufacturing_pipeline.analysis.classification_core import hollow_closed as classification_hollow_closed
@@ -16,6 +17,7 @@ from manufacturing_pipeline.analysis.classification_core import validation as cl
 from manufacturing_pipeline.analysis import assembly_analysis
 from manufacturing_pipeline.analysis import classification
 from manufacturing_pipeline.analysis import cut_features
+from manufacturing_pipeline.analysis import freecad_unfold
 from manufacturing_pipeline.analysis import profile_classifier
 from manufacturing_pipeline.analysis import step_processing
 from manufacturing_pipeline.analysis import step0_section_tools
@@ -97,6 +99,11 @@ def test_assembly_analysis_reexports_internal_bom_module():
 def test_cut_features_reexports_profile_helper_ownership():
     assert cut_features._get_bounding_box is cut_features_profile_helpers._get_bounding_box
     assert cut_features._parse_dimensions_from_string is cut_features_profile_helpers._parse_dimensions_from_string
+
+
+def test_freecad_unfold_delegates_environment_probing():
+    assert freecad_unfold._candidate_freecad_paths() == freecad_environment._candidate_freecad_paths()
+    assert freecad_unfold._should_prefer_freecadcmd() == freecad_environment._should_prefer_freecadcmd()
 
 
 def test_classification_step0_reuses_internal_metric_and_result_helpers():

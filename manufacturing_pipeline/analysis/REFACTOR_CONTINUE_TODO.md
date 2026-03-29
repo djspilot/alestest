@@ -64,12 +64,12 @@ Still large / not properly split:
 ### 4. Refactor `cut_features.py`
 
 - [ ] Move sheet cut-feature helpers into `features/`
-- [ ] Move profile cut-feature helpers into `features/`
+- [x] Move profile cut-feature helpers into `features/`
 - [ ] Keep `extract_cut_features_for_sheet` and `extract_cut_features_for_profile` as top-level compatibility exports
 
 ### 5. Refactor `freecad_unfold.py`
 
-- [ ] Split FreeCAD path discovery / environment probing from unfold geometry logic
+- [x] Split FreeCAD path discovery / environment probing from unfold geometry logic
 - [ ] Move process execution helpers behind an internal module
 - [ ] Keep the public unfold functions unchanged
 

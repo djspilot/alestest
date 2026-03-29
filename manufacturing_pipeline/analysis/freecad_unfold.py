@@ -15,6 +15,7 @@ import math
 import json
 import tempfile
 import subprocess
+from manufacturing_pipeline.analysis.sheetmetal import freecad_environment as _freecad_environment
 
 FreeCAD = None
 Part = None
@@ -1615,6 +1616,31 @@ def calculate_theoretical_unfold(step_path, k_factor=0.44):
         result['error'] = str(e)
 
     return result
+
+
+def _sync_freecad_bindings() -> None:
+    global FreeCAD, Part, _FREECAD_IMPORT_ERROR
+    FreeCAD = _freecad_environment.FreeCAD
+    Part = _freecad_environment.Part
+    _FREECAD_IMPORT_ERROR = _freecad_environment._FREECAD_IMPORT_ERROR
+
+
+def _candidate_freecad_paths():
+    return _freecad_environment._candidate_freecad_paths()
+
+
+def _should_prefer_freecadcmd() -> bool:
+    return _freecad_environment._should_prefer_freecadcmd()
+
+
+def _ensure_freecad_imported() -> bool:
+    imported = _freecad_environment._ensure_freecad_imported()
+    _sync_freecad_bindings()
+    return imported
+
+
+def _find_freecadcmd_executable() -> str:
+    return _freecad_environment._find_freecadcmd_executable()
 
 
 # Command line interface
