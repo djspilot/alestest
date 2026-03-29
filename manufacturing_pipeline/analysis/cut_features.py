@@ -53,6 +53,7 @@ from OCP.GeomAbs import GeomAbs_Plane, GeomAbs_Cone
 
 # Import bestaande detectiefuncties (NIET wijzigen in step_processing.py!)
 from .features import cut_features_profile_helpers as _profile_helpers
+from .features import cut_features_sheet_helpers as _sheet_helpers
 from .step_processing import detect_holes, detect_shaped_holes, deduplicate_holes
 
 
@@ -1398,4 +1399,55 @@ def _infer_profile_countersink_pairs(cylindrical_holes, countersink_matches: Dic
         as_point_tuple=_as_point_tuple,
         distance_point_to_axis=_distance_point_to_axis,
         signed_axis_distance=_signed_axis_distance,
+    )
+
+
+def _collect_conical_faces(cq_object) -> List[Dict[str, Any]]:
+    return _sheet_helpers._collect_conical_faces(
+        cq_object,
+        normalize_vector=_normalize_vector,
+    )
+
+
+def _group_conical_countersink_faces(conical_faces: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return _sheet_helpers._group_conical_countersink_faces(
+        conical_faces,
+        dot=_dot,
+        distance_point_to_axis=_distance_point_to_axis,
+        signed_axis_distance=_signed_axis_distance,
+    )
+
+
+def _candidate_matches_cylindrical_hole(candidate: Dict[str, Any], cylindrical_holes) -> bool:
+    return _sheet_helpers._candidate_matches_cylindrical_hole(
+        candidate,
+        cylindrical_holes,
+        normalize_vector=_normalize_vector,
+        as_point_tuple=_as_point_tuple,
+        dot=_dot,
+        distance_point_to_axis=_distance_point_to_axis,
+        signed_axis_distance=_signed_axis_distance,
+    )
+
+
+def _detect_countersunk_holes(cq_object, cylindrical_holes) -> Dict[int, float]:
+    return _sheet_helpers._detect_countersunk_holes(
+        cq_object,
+        cylindrical_holes,
+        collect_conical_faces=_collect_conical_faces,
+        normalize_vector=_normalize_vector,
+        as_point_tuple=_as_point_tuple,
+        dot=_dot,
+        distance_point_to_axis=_distance_point_to_axis,
+        signed_axis_distance=_signed_axis_distance,
+    )
+
+
+def _detect_standalone_countersunk_holes(cq_object, cylindrical_holes) -> List[Dict[str, float]]:
+    return _sheet_helpers._detect_standalone_countersunk_holes(
+        cq_object,
+        cylindrical_holes,
+        collect_conical_faces=_collect_conical_faces,
+        group_conical_countersink_faces=_group_conical_countersink_faces,
+        candidate_matches_cylindrical_hole=_candidate_matches_cylindrical_hole,
     )

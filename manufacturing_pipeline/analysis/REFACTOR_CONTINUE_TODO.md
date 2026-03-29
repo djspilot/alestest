@@ -63,7 +63,7 @@ Still large / not properly split:
 
 ### 4. Refactor `cut_features.py`
 
-- [ ] Move sheet cut-feature helpers into `features/`
+- [x] Move sheet cut-feature helpers into `features/`
 - [x] Move profile cut-feature helpers into `features/`
 - [ ] Keep `extract_cut_features_for_sheet` and `extract_cut_features_for_profile` as top-level compatibility exports
 

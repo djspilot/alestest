@@ -101,6 +101,11 @@ def test_cut_features_reexports_profile_helper_ownership():
     assert cut_features._parse_dimensions_from_string is cut_features_profile_helpers._parse_dimensions_from_string
 
 
+def test_cut_features_public_extractors_remain_available():
+    assert callable(cut_features.extract_cut_features_for_sheet)
+    assert callable(cut_features.extract_cut_features_for_profile)
+
+
 def test_freecad_unfold_delegates_environment_probing():
     assert freecad_unfold._candidate_freecad_paths() == freecad_environment._candidate_freecad_paths()
     assert freecad_unfold._should_prefer_freecadcmd() == freecad_environment._should_prefer_freecadcmd()
