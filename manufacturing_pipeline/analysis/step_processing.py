@@ -15,6 +15,8 @@ from OCP.TopoDS import TopoDS
 from OCP.BRep import BRep_Tool
 from manufacturing_pipeline.analysis import sheetmetal_analysis
 from manufacturing_pipeline.analysis import assembly_analysis
+from manufacturing_pipeline.analysis.features import hole_detection
+from manufacturing_pipeline.analysis.io import step_file_io
 import os
 import uuid
 from collections import Counter
@@ -2758,4 +2760,53 @@ def analyze_assembly_bom(cq_object, assembly_name: str = "Assembly", material: s
         assembly_name=assembly_name,
         material=material,
         step_file_path=step_file_path
+    )
+
+
+# Canonical ownership for STEP loading and display-mesh helpers now lives in
+# analysis.io.step_file_io. Keep legacy names here for compatibility while
+# later refactors remove the duplicated local implementations above.
+STEP_HEADER = step_file_io.STEP_HEADER
+_normalize_step_file = step_file_io._normalize_step_file
+_load_step_via_xcaf = step_file_io._load_step_via_xcaf
+load_step_file = step_file_io.load_step_file
+tessellate_shape = step_file_io.tessellate_shape
+extract_display_edges = step_file_io.extract_display_edges
+
+# Canonical ownership for hole and shaped-contour detection now lives in
+# analysis.features.hole_detection. Keep legacy names here for compatibility.
+HoleFeature = hole_detection.HoleFeature
+precompute_face_properties = hole_detection.precompute_face_properties
+_classify_shaped_inner_wire = hole_detection._classify_shaped_inner_wire
+_sample_edge_points = hole_detection._sample_edge_points
+_edge_end_keys = hole_detection._edge_end_keys
+_recover_contours_from_bucket = hole_detection._recover_contours_from_bucket
+
+
+def detect_holes(cq_object, filter_bores=True, is_flat_pattern=False, is_turned=None, face_data=None, return_debug=False):
+    return hole_detection.detect_holes(
+        cq_object,
+        filter_bores=filter_bores,
+        is_flat_pattern=is_flat_pattern,
+        is_turned=is_turned,
+        face_data=face_data,
+        return_debug=return_debug,
+        turned_part_detector=is_turned_part,
+    )
+
+
+def detect_shaped_holes(shape, face_data=None, is_flat_pattern=False, return_debug=False):
+    return hole_detection.detect_shaped_holes(
+        shape,
+        face_data=face_data,
+        is_flat_pattern=is_flat_pattern,
+        return_debug=return_debug,
+    )
+
+
+def deduplicate_holes(circular_holes, shaped_holes, return_debug=False):
+    return hole_detection.deduplicate_holes(
+        circular_holes,
+        shaped_holes,
+        return_debug=return_debug,
     )

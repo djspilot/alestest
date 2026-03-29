@@ -1,0 +1,42 @@
+[
+  {
+    "name": "testcase_10040878",
+    "path": "data/input/testcase/10040878_1.stp",
+    "expected": {
+      "classify_solid": "anders",
+      "part_type": "complex",
+      "hole_count": 6,
+      "bend_count_erp": 14
+    }
+  },
+  {
+    "name": "profile_10015088",
+    "path": "data/input/10015088_3.stp",
+    "expected": {
+      "classify_solid": "profiel",
+      "part_type": "complex",
+      "hole_count": 197,
+      "bend_count_erp": 77
+    }
+  },
+  {
+    "name": "plate_md_22_08183",
+    "path": "data/input/20253440/MD-22-08183_1.stp",
+    "expected": {
+      "classify_solid": "plaat",
+      "part_type": "hoekprofiel",
+      "hole_count": 1,
+      "bend_count_erp": 1
+    }
+  },
+  {
+    "name": "plate_10000890096",
+    "path": "data/input/fwofferte20253515bestanden/10000890096_Rev_00.step",
+    "expected": {
+      "classify_solid": "plaat",
+      "part_type": "plaat",
+      "hole_count": 3,
+      "bend_count_erp": 0
+    }
+  }
+]

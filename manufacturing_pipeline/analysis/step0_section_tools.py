@@ -10,6 +10,7 @@ from shapely import affinity
 from shapely.geometry import MultiPolygon, Point, Polygon, LinearRing
 
 from manufacturing_pipeline.analysis.classification_variables import STEP0_CLUSTER_RATIO_MIN
+from manufacturing_pipeline.analysis.geometry import profile_sections as shared_profile_sections
 
 try:
     from OCP.BRep import BRep_Tool
@@ -852,3 +853,36 @@ def find_extrusion_axis(
         return max(fallback_valid, key=lambda c: c.score)
 
     return None
+
+
+# Canonical shared ownership for duplicated 2D/profile helpers now lives in
+# analysis.geometry.profile_sections. Keep the legacy names here for
+# compatibility while later refactors trim the duplicated local bodies.
+AxisCandidate = shared_profile_sections.AxisCandidate
+Section2D = shared_profile_sections.Section2D
+SectionFeatures = shared_profile_sections.SectionFeatures
+TemplateMatch = shared_profile_sections.TemplateMatch
+ProfileTemplate = shared_profile_sections.ProfileTemplate
+ProfileRegistry = shared_profile_sections.ProfileRegistry
+normalize = shared_profile_sections.normalize
+unique_rows_rounded = shared_profile_sections.unique_rows_rounded
+orthonormal_basis_from_normal = shared_profile_sections.orthonormal_basis_from_normal
+project_points_to_plane = shared_profile_sections.project_points_to_plane
+polygon_signed_area = shared_profile_sections.polygon_signed_area
+simplify_relative = shared_profile_sections.simplify_relative
+normalize_section_polygon = shared_profile_sections.normalize_section_polygon
+section_distance = shared_profile_sections.section_distance
+count_reentrant_corners = shared_profile_sections.count_reentrant_corners
+reflect_polygon_about_axis = shared_profile_sections.reflect_polygon_about_axis
+symmetry_score = shared_profile_sections.symmetry_score
+detect_symmetry_axes = shared_profile_sections.detect_symmetry_axes
+extract_section_features = shared_profile_sections.extract_section_features
+make_round_bar = shared_profile_sections.make_round_bar
+make_pipe = shared_profile_sections.make_pipe
+make_flat_bar = shared_profile_sections.make_flat_bar
+make_rectangular_tube = shared_profile_sections.make_rectangular_tube
+make_i_section = shared_profile_sections.make_i_section
+make_u_section = shared_profile_sections.make_u_section
+make_l_section = shared_profile_sections.make_l_section
+make_t_section = shared_profile_sections.make_t_section
+match_templates = shared_profile_sections.match_templates
