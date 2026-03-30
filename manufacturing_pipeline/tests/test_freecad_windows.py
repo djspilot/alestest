@@ -31,6 +31,12 @@ def test_windows_unfold_prefers_subprocess_mode_by_default() -> None:
         assert freecad_unfold._should_prefer_freecadcmd() is True
 
 
+def test_macos_unfold_prefers_subprocess_mode_by_default() -> None:
+    """macOS should also prefer the external FreeCADCmd route in auto mode."""
+    with patch("manufacturing_pipeline.analysis.freecad_unfold.sys.platform", "darwin"):
+        assert freecad_unfold._should_prefer_freecadcmd() is True
+
+
 def test_run_unfold_uses_host_python_wrapper(tmp_path) -> None:
     """The legacy unfold wrapper should start with the current Python interpreter."""
     output_dir = tmp_path / "out"

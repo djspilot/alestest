@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import sys
 
+from manufacturing_pipeline.core import freecad_runtime
+
 FreeCAD = None
 Part = None
 _FREECAD_IMPORT_ERROR = None
@@ -17,6 +19,16 @@ class MockFreeCADGui:
 
 def _candidate_freecad_paths():
     candidates = []
+
+    runtime_info = freecad_runtime.configured_runtime()
+    candidates.extend(
+        [
+            str(runtime_info.get("freecad_path") or ""),
+            str(runtime_info.get("freecad_lib") or ""),
+            str(runtime_info.get("freecad_mod") or ""),
+            str(runtime_info.get("runtime_root") or ""),
+        ]
+    )
 
     freecad_path = os.getenv("FREECAD_PATH")
     if freecad_path:
@@ -70,7 +82,7 @@ def _should_prefer_freecadcmd() -> bool:
         return True
     if mode == "direct":
         return False
-    return sys.platform.startswith("win")
+    return sys.platform.startswith("win") or sys.platform == "darwin"
 
 
 def _ensure_freecad_imported() -> bool:
@@ -107,6 +119,11 @@ def _find_freecadcmd_executable() -> str:
     env_path = os.getenv("FREECAD_CMD")
     if env_path and os.path.exists(env_path):
         return env_path
+
+    runtime_info = freecad_runtime.configured_runtime()
+    managed_cmd = str(runtime_info.get("freecad_cmd") or "")
+    if managed_cmd and os.path.exists(managed_cmd):
+        return managed_cmd
 
     candidates = [
         r"C:\Program Files\FreeCAD 1.0\bin\freecadcmd.exe",
