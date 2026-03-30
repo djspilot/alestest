@@ -8,13 +8,7 @@ import json
 import hashlib
 from datetime import datetime
 
-# Cache file location
-CACHE_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "data",
-    "db",
-    "pipeline_cache.json"
-)
+from manufacturing_pipeline.core.paths import CACHE_FILE
 
 
 def get_file_hash(filepath):
