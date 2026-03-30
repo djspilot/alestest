@@ -19,6 +19,10 @@ from manufacturing_pipeline.core.file_utils import find_step_files, select_step_
 from manufacturing_pipeline.core.runtime_analysis import run_analysis
 from manufacturing_pipeline.core.runtime_reporting import run_debug
 from manufacturing_pipeline.core.cache import get_file_hash, load_cache, save_cache, cache_result, CACHE_FILE
+from manufacturing_pipeline.core.python_dependencies import (
+    auto_install_python_dependencies_enabled,
+    ensure_host_python_dependencies,
+)
 
 # ---------------------------------------------------------------------------
 # Quick-mode single-file runner
@@ -298,6 +302,16 @@ def main():
 
     # --- Batch mode ---
     if args.batch:
+        dep_result = ensure_host_python_dependencies(
+            install_if_missing=auto_install_python_dependencies_enabled(),
+        )
+        if not dep_result.get("success"):
+            command = dep_result.get("command") or []
+            if command:
+                print(f"Missing Python dependencies. Install with: {' '.join(command)}")
+            else:
+                print(dep_result.get("error") or "Missing Python dependencies.")
+            return
         if not step_files:
             loc = search_dir or PARTS_DIR
             if args.json:
@@ -312,6 +326,17 @@ def main():
     # --- Single file mode ---
     step_file = resolve_step_file(args, step_files)
     if not step_file:
+        return
+
+    dep_result = ensure_host_python_dependencies(
+        install_if_missing=auto_install_python_dependencies_enabled(),
+    )
+    if not dep_result.get("success"):
+        command = dep_result.get("command") or []
+        if command:
+            print(f"Missing Python dependencies. Install with: {' '.join(command)}")
+        else:
+            print(dep_result.get("error") or "Missing Python dependencies.")
         return
 
     if args.debug:

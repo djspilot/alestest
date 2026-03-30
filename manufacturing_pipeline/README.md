@@ -6,12 +6,18 @@ The project has been updated to use `cadquery` instead of `pythonocc-core`, whic
 
 1.  Install dependencies:
     ```bash
-    pip install -r manufacturing_pipeline/requirements.txt
+    pip install -r requirements.txt
     ```
 
 2.  Run the pipeline:
     ```bash
-    python manufacturing_pipeline/main.py
+    python run.py
+    ```
+
+3.  Verify or install host Python dependencies such as `cadquery`:
+    ```bash
+    python -m manufacturing_pipeline.tools.ensure_python_deps --doctor
+    python -m manufacturing_pipeline.tools.ensure_python_deps
     ```
 
 ## Headless FreeCAD unfold runtime
@@ -51,5 +57,5 @@ If you encounter issues with pip, installing via Conda is more robust for engine
 3.  Install dependencies:
     ```bash
     conda install -c conda-forge cadquery
-    pip install -r manufacturing_pipeline/requirements.txt
+    pip install -r requirements.txt
     ```

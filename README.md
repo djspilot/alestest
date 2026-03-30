@@ -30,6 +30,21 @@ Analyseert STEP CAD-bestanden: classificeert onderdelen, detecteert features (ga
 pip install -r requirements.txt
 ```
 
+### Host Python dependencies
+
+De pipeline gebruikt `cadquery` in de host Python omgeving. Controleer of installeer die dependencies met:
+
+```bash
+python -m manufacturing_pipeline.tools.ensure_python_deps --doctor
+python -m manufacturing_pipeline.tools.ensure_python_deps
+```
+
+Automatisch installeren tijdens pipeline-runs kan met:
+
+```bash
+PIPELINE_AUTO_INSTALL_PY_DEPS=1 python run.py -f data/input/part.step
+```
+
 ### Headless unfold runtime
 
 Voor ontvouwen is de desktop-app niet meer de aanbevolen route. Gebruik een beheerde headless runtime:
