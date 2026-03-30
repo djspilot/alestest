@@ -1,60 +1,16 @@
-"""
-Cut Features Extraction for Sheet Metal Parts and Profiles
-===========================================================
+"""Compatibility wrapper for extracted cut-feature helpers."""
 
-Fase 1: Gaten en snijdata voor plaat + gezette_plaat classificaties.
-Fase 2: Gaten en snijdata voor profielen (buis, koker, hoekstaal).
-
-WANNEER wordt dit uitgevoerd?
-------------------------------
-- Alleen voor parts met classification = "plaat" OF "gezette_plaat"
-- Wordt aangeroepen vanuit xml_exporter._process_plaat_item()
-- Na unfold poging (als gezette_plaat), vóór XML field population
-
-WAT wordt er gedetecteerd?
----------------------------
-1. Gaten (cylindrisch): detect_holes() uit step_processing.py
-2. Vormgaten (sleuven/rectangles): detect_shaped_holes() uit step_processing.py
-3. Gatcontourlengtes: perimeter van elke hole inner wire
-4. Buitencontour: outer wire perimeter van grootste planar face
-5. Totale snijlengte: sum(gatcontours) + buitencontour
-6. Box dimensions: X en Y van bounding box
-
-FLAT vs 3D strategie:
----------------------
-- Als unfold succesvol → analyseer flat pattern (nauwkeuriger voor gezette plaat)
-- Als unfold mislukt / niet geprobeerd → analyseer 3D solid
-
-VEILIGHEID:
------------
-- Gebruikt ALLEEN bestaande detectiefuncties (geen nieuwe algoritmes)
-- Faalt gracefully: bij exceptions retourneer None i.p.v. crash
-- Backwards compatible: caller kan fallback naar placeholders
-
-Auteur: ALES Manufacturing Pipeline
-Datum: 3 maart 2026
-Fase: 1 (plaat + gezette_plaat)
-"""
-
-from typing import Dict, List, Optional, Any, Tuple
-import logging
-import math
 from dataclasses import dataclass
+import logging
+from typing import Any, Dict, List, Optional
 
 import cadquery as cq
-from OCP.TopAbs import TopAbs_FACE
-from OCP.BRepGProp import BRepGProp
-from OCP.GProp import GProp_GProps
-from OCP.BRepTools import BRepTools
-from OCP.TopoDS import TopoDS_Shape, TopoDS_Face
-from OCP.BRep import BRep_Tool
-from OCP.BRepAdaptor import BRepAdaptor_Surface
-from OCP.GeomAbs import GeomAbs_Plane, GeomAbs_Cone
 
-# Import bestaande detectiefuncties (NIET wijzigen in step_processing.py!)
+from .features import cut_features_extractors as _cut_features_extractors
+from .features import cut_features_geometry_helpers as _geometry_helpers
 from .features import cut_features_profile_helpers as _profile_helpers
 from .features import cut_features_sheet_helpers as _sheet_helpers
-from .step_processing import detect_holes, detect_shaped_holes, deduplicate_holes
+from .step_processing import deduplicate_holes, detect_holes, detect_shaped_holes
 
 
 class _IsoStandardsFallback:
@@ -66,37 +22,28 @@ class _IsoStandardsFallback:
 
 
 iso_standards = _IsoStandardsFallback()
-
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class CutFeatures:
-    """
-    Result container voor cut features extractie.
-    
-    Alle lengtes in millimeters.
-    """
-    nr_holes: int                      # Totaal aantal gaten (cilindrisch + vorm)
-    hole_contours: List[float]         # Perimeter van elk gat (mm)
-    hole_radii: List[float]            # Radius/halve-breedte per gat (mm)
-    outer_contour: float               # Buitencontour lengte (mm)
-    total_contour: float               # Totale snijlengte (mm)
-    box_x: float                       # X-dimensie bounding box (mm)
-    box_y: float                       # Y-dimensie bounding box (mm)
-    source: str                        # "flat" of "3d"
-    hole_types: List[str] = None       # ["round", "thread", "countersunk", "slot", ...]
+    nr_holes: int
+    hole_contours: List[float]
+    hole_radii: List[float]
+    outer_contour: float
+    total_contour: float
+    box_x: float
+    box_y: float
+    source: str
+    hole_types: List[str] = None
     threaded_holes: int = 0
     countersunk_holes: int = 0
     countersunk_angles: List[float] = None
-    
-    # Detail info voor debugging
     nr_cylindrical: int = 0
     nr_shaped: int = 0
-    shaped_types: List[str] = None     # ["Slot", "Rect", ...]
-    
+    shaped_types: List[str] = None
+
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dict voor logging/debugging."""
         return {
             "nr_holes": self.nr_holes,
             "hole_contours": self.hole_contours,
@@ -112,839 +59,106 @@ class CutFeatures:
             "countersunk_angles": self.countersunk_angles or [],
             "nr_cylindrical": self.nr_cylindrical,
             "nr_shaped": self.nr_shaped,
-            "shaped_types": self.shaped_types or []
+            "shaped_types": self.shaped_types or [],
         }
 
 
 def extract_cut_features_for_sheet(
-    solid: TopoDS_Shape,
+    solid,
     unfold_result: Optional[Dict[str, Any]] = None,
-    part_classification: str = "plaat"
+    part_classification: str = "plaat",
 ) -> Optional[CutFeatures]:
-    """
-    Extraheer gaten, snijlengtes en box dimensions voor plaatwerk.
-    
-    FLOW:
-    -----
-    1. Bepaal analyse domain (flat pattern of 3D solid)
-    2. Detect cylindrische gaten via detect_holes()
-    3. Detect vormgaten via detect_shaped_holes()
-    4. Dedupliceer overlappende gaten
-    5. Bereken hole contours (inner wire perimeters)
-    6. Bereken outer contour (grootste face outer wire)
-    7. Bereken bounding box dimensions
-    8. Return CutFeatures object
-    
-    Parameters:
-    -----------
-    solid : TopoDS_Shape
-        De te analyseren solid (3D) of flat pattern
-    unfold_result : dict, optional
-        Als unfold is uitgevoerd: {"success": bool, "flat_pattern": TopoDS_Shape, ...}
-    part_classification : str
-        "plaat" of "gezette_plaat" (voor logging)
-    
-    Returns:
-    --------
-    CutFeatures of None bij falen
-    
-    VEILIGHEID:
-    -----------
-    - Faalt gracefully bij exceptions
-    - Gebruikt alleen gevalideerde bestaande functies
-    - Geen side effects op input shapes
-    """
-    try:
-        logger.info(f"[CutFeatures] Start extractie voor {part_classification}")
-        
-        # STAP 1: Bepaal analyse domain
-        # ==============================
-        # Als unfold succesvol: gebruik flat pattern (nauwkeuriger)
-        # Anders: gebruik 3D solid
-        analysis_shape = solid
-        source = "3d"
-        
-        if unfold_result and unfold_result.get("success") and unfold_result.get("flat_pattern"):
-            logger.info("[CutFeatures] Gebruik flat pattern voor analyse")
-            analysis_shape = unfold_result["flat_pattern"]
-            source = "flat"
-        else:
-            logger.info("[CutFeatures] Gebruik 3D solid voor analyse (geen unfold)")
-        
-        # Convert naar CadQuery object voor detect_holes()
-        cq_solid = cq.Solid(analysis_shape)
-        cq_object = cq.Workplane("XY").newObject([cq_solid])
-        closed_contours = _detect_closed_inner_contours(analysis_shape) if analysis_shape else []
-        logger.info(f"[CutFeatures] Gesloten binnencontouren: {len(closed_contours)}")
-        
-        # STAP 2: Detect cylindrische gaten
-        # ==================================
-        # Gebruikt detect_holes() uit step_processing.py
-        # filter_bores=True: sluit draaideel boring gaten uit
-        # is_flat_pattern: geeft aan of we flat of 3D analyseren
-        is_flat = (source == "flat")
-        logger.info(f"[CutFeatures] Detect cylindrische gaten (flat={is_flat})...")
-        
-        cylindrical_holes = detect_holes(
-            cq_object,
-            filter_bores=True,
-            is_flat_pattern=is_flat
-        )
-        logger.info(f"[CutFeatures] Gevonden: {len(cylindrical_holes)} cylindrische gaten")
-        
-        # STAP 3: Detect vormgaten (sleuven, rectangles, polygonen)
-        # ==========================================================
-        # Gebruikt detect_shaped_holes() uit step_processing.py
-        # BELANGRIJK: detect_shaped_holes verwacht CadQuery Workplane
-        logger.info("[CutFeatures] Detect vormgaten (sleuven/rectangles)...")
-        
-        # Create Workplane object for detect_shaped_holes
-        cq_workplane = cq.Workplane(obj=cq_solid)
-        shaped_holes = detect_shaped_holes(cq_workplane)
-        logger.info(f"[CutFeatures] Gevonden: {len(shaped_holes)} vormgaten")
-        
-        # STAP 4: Dedupliceer overlappende gaten
-        # ========================================
-        # detect_shaped_holes kan cirkels detecteren die al door detect_holes gevonden zijn
-        logger.info("[CutFeatures] Dedupliceer overlappende detecties...")
-        cylindrical_holes = deduplicate_holes(cylindrical_holes, shaped_holes)
-        logger.info(f"[CutFeatures] Na dedup: {len(cylindrical_holes)} cylindrisch, {len(shaped_holes)} vorm")
-        
-        # STAP 5: Bereken hole contours (perimeters)
-        # ===========================================
-        hole_contours = []
-        hole_radii = []
-        hole_types = []
-        shaped_types = []
-        threaded_holes = 0
-        countersunk_holes = 0
-        countersunk_angles = []
-
-        # Match conische faces op cilindrische gaten om verzonken gaten te markeren.
-        countersink_matches = _detect_countersunk_holes(cq_object, cylindrical_holes)
-        
-        # Cylindrische gaten: contour = 2*pi*r, radius = diameter/2
-        for idx, hole in enumerate(cylindrical_holes):
-            radius = hole.diameter / 2.0
-            perimeter = 2.0 * 3.14159265359 * radius
-            hole_contours.append(perimeter)
-            hole_radii.append(radius)
-
-            hole_type = "round"
-            cs_angle = countersink_matches.get(idx)
-            if cs_angle is not None:
-                hole_type = "countersunk"
-                countersunk_holes += 1
-                countersunk_angles.append(cs_angle)
-            else:
-                # Use a slightly wider tolerance because modeled tap-hole diameters
-                # often follow drill sizes and can deviate from ideal minor diameter.
-                thread_matches = iso_standards.identify_thread_from_diameter(hole.diameter, 0.20)
-                tapped_matches = [m for m in thread_matches if "tapped" in m.designation.lower()]
-                major_matches = [m for m in thread_matches if "tapped" not in m.designation.lower()]
-
-                # Disambiguatie: als diameter matcht op zowel major (=clearance)
-                # als tapped, is het waarschijnlijk een clearance gat.
-                if tapped_matches and major_matches:
-                    tapped_matches = []
-
-                # Plausibility check: for sheet/plate parts, very large nominal
-                # thread sizes relative to hole depth are typically clearance holes.
-                hole_depth = float(getattr(hole, "depth", 0.0) or 0.0)
-                if tapped_matches and hole_depth > 0:
-                    plausible_matches = [
-                        m for m in tapped_matches
-                        if float(getattr(m, "major_diameter", 0.0) or 0.0) <= (hole_depth * 1.35)
-                    ]
-                    if plausible_matches:
-                        tapped_matches = plausible_matches
-                    else:
-                        tapped_matches = []
-
-                if tapped_matches:
-                    hole_type = "thread"
-                    threaded_holes += 1
-
-            hole_types.append(hole_type)
-        
-        # Vormgaten: bereken perimeter uit dimensions
-        for shaped in shaped_holes:
-            perimeter = float(shaped.get("perimeter", 0.0) or 0.0)
-            if perimeter <= 0:
-                # shaped bevat "dim" string zoals "120.5x50.0" (length x width)
-                # of "type" zoals "Slot", "Rect", "Poly"
-                dim_str = shaped.get("dim", "")
-                dimensions = _parse_dimensions_from_string(dim_str)
-
-                if dimensions:
-                    length_dim, width_dim = dimensions
-                    # Perimeter approximation based on shape type
-                    shape_type = shaped.get("type", "Rect")
-                    if shape_type == "Slot":
-                        # dim string from detect_shaped_holes stores total slot length x width.
-                        # Capsule perimeter with total length L and width W: 2*(L-W) + pi*W.
-                        straight_len = max(0.0, length_dim - width_dim)
-                        perimeter = 2.0 * straight_len + 3.14159265359 * width_dim
-                    else:
-                        # Rectangle/Poly: approximate as rectangle
-                        perimeter = 2.0 * (length_dim + width_dim)
-                else:
-                    # Fallback: geen dimensions gevonden, gebruik default
-                    perimeter = 40.0  # Default small hole
-            
-            hole_contours.append(perimeter)
-
-            shaped_type = shaped.get("type", "Unknown")
-            shaped_types.append(shaped_type)
-
-            # Output-level policy: shaped holes are counted and measured,
-            # but not labeled as a separate category in XML.
-            hole_types.append("hole")
-
-        # Fallback: sommige STEP-modellen met tapgaten bevatten alleen conische
-        # insteek/chamfer-faces en geen bruikbare cilindrische hole-face.
-        # Label deze daarom niet als countersunk om false positives te vermijden.
-        standalone_countersinks = _detect_standalone_countersunk_holes(
-            cq_object,
-            cylindrical_holes,
-        )
-        for cs in standalone_countersinks:
-            radius = float(cs.get("inner_radius", 0.0) or 0.0)
-            if radius <= 0:
-                continue
-
-            perimeter = 2.0 * 3.14159265359 * radius
-            hole_contours.append(perimeter)
-            hole_radii.append(radius)
-            hole_types.append("thread")
-            threaded_holes += 1
-        
-        # STAP 6: Bereken outer contour
-        # ==============================
-        # Vind grootste planaire face, neem outer wire perimeter
-        logger.info("[CutFeatures] Bereken buitencontour...")
-        outer_contour = _get_outer_contour_length(analysis_shape)
-        logger.info(f"[CutFeatures] Buitencontour: {outer_contour:.2f} mm")
-        
-        # STAP 7: Totale snijlengte
-        # ==========================
-        # Gesloten contouren zijn leidend voor aantal en snijlengte.
-        # Labels (thread/countersunk) worden achteraf gematcht op cylindrische gaten.
-        if closed_contours:
-            hole_contours = [float(item["perimeter"]) for item in closed_contours]
-            label_results = _label_contours_from_holes(
-                closed_contours, cylindrical_holes, countersink_matches,
-            )
-            hole_types = [r["label"] for r in label_results]
-            hole_radii = [r["radius"] for r in label_results if r["radius"] is not None]
-            threaded_holes = sum(1 for r in label_results if r["label"] == "thread")
-            countersunk_holes = sum(1 for r in label_results if r["label"] == "countersunk")
-            countersunk_angles = [r["cs_angle"] for r in label_results if r.get("cs_angle") is not None]
-
-        total_contour = sum(hole_contours) + outer_contour
-        logger.info(f"[CutFeatures] Totale snijlengte: {total_contour:.2f} mm")
-        
-        # STAP 8: Bounding box dimensions
-        # ================================
-        bbox = _get_bounding_box(analysis_shape)
-        box_x = bbox["xlen"]
-        box_y = bbox["ylen"]
-        logger.info(f"[CutFeatures] Box dimensions: X={box_x:.2f} mm, Y={box_y:.2f} mm")
-        
-        # STAP 9: Return resultaat
-        # =========================
-        total_holes = len(closed_contours) if closed_contours else len(hole_types)
-        result = CutFeatures(
-            nr_holes=total_holes,
-            hole_contours=hole_contours,
-            hole_radii=hole_radii,
-            outer_contour=outer_contour,
-            total_contour=total_contour,
-            box_x=box_x,
-            box_y=box_y,
-            source=source,
-            hole_types=hole_types,
-            threaded_holes=threaded_holes,
-            countersunk_holes=countersunk_holes,
-            countersunk_angles=countersunk_angles,
-            nr_cylindrical=len(cylindrical_holes),
-            nr_shaped=len(shaped_holes),
-            shaped_types=shaped_types
-        )
-        
-        logger.info(f"[CutFeatures] Extractie compleet: {result.to_dict()}")
-        return result
-        
-    except Exception as e:
-        logger.error(f"[CutFeatures] FOUT tijdens extractie: {e}", exc_info=True)
-        return None
-
-
-def _normalize_vector(vector: Tuple[float, float, float]) -> Optional[Tuple[float, float, float]]:
-    """Return unit vector or None for invalid vectors."""
-    try:
-        x, y, z = float(vector[0]), float(vector[1]), float(vector[2])
-        norm = math.sqrt(x * x + y * y + z * z)
-        if norm <= 1e-9:
-            return None
-        return (x / norm, y / norm, z / norm)
-    except Exception:
-        return None
-
-
-def _as_point_tuple(value: Any) -> Optional[Tuple[float, float, float]]:
-    """Return a numeric 3D point tuple when possible."""
-    try:
-        if value is None:
-            return None
-        return (float(value[0]), float(value[1]), float(value[2]))
-    except Exception:
-        return None
-
-
-def _dot(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-
-
-def _distance_point_to_axis(
-    point: Tuple[float, float, float],
-    axis_origin: Tuple[float, float, float],
-    axis_dir: Tuple[float, float, float],
-) -> float:
-    """Shortest distance between point and infinite axis line."""
-    vx = point[0] - axis_origin[0]
-    vy = point[1] - axis_origin[1]
-    vz = point[2] - axis_origin[2]
-
-    cx = vy * axis_dir[2] - vz * axis_dir[1]
-    cy = vz * axis_dir[0] - vx * axis_dir[2]
-    cz = vx * axis_dir[1] - vy * axis_dir[0]
-
-    return math.sqrt(cx * cx + cy * cy + cz * cz)
-
-
-def _signed_axis_distance(
-    point: Tuple[float, float, float],
-    axis_origin: Tuple[float, float, float],
-    axis_dir: Tuple[float, float, float],
-) -> float:
-    """Projected signed distance from axis origin to point along axis direction."""
-    return (
-        (point[0] - axis_origin[0]) * axis_dir[0]
-        + (point[1] - axis_origin[1]) * axis_dir[1]
-        + (point[2] - axis_origin[2]) * axis_dir[2]
+    return _cut_features_extractors.extract_cut_features_for_sheet(
+        solid,
+        CutFeaturesCls=CutFeatures,
+        cq_module=cq,
+        detect_holes_fn=detect_holes,
+        detect_shaped_holes_fn=detect_shaped_holes,
+        deduplicate_holes_fn=deduplicate_holes,
+        iso_standards=iso_standards,
+        logger=logger,
+        detect_closed_inner_contours=_detect_closed_inner_contours,
+        detect_countersunk_holes=_detect_countersunk_holes,
+        detect_standalone_countersunk_holes=_detect_standalone_countersunk_holes,
+        label_contours_from_holes=_label_contours_from_holes,
+        get_outer_contour_length=_get_outer_contour_length,
+        get_bounding_box=_get_bounding_box,
+        parse_dimensions_from_string=_parse_dimensions_from_string,
+        unfold_result=unfold_result,
+        part_classification=part_classification,
     )
 
 
-def _get_outer_contour_length(shape: TopoDS_Shape) -> float:
-    """
-    Bereken outer contour lengte van grootste planaire face.
-    
-    Strategie:
-    ----------
-    1. Vind alle planaire faces (GeomAbs_Plane)
-    2. Sorteer op oppervlakte (grootste = skin face)
-    3. Neem outer wire van grootste face
-    4. Bereken perimeter
-    
-    Returns:
-    --------
-    Perimeter in mm, of 0.0 bij falen
-    """
-    try:
-        from OCP.TopExp import TopExp_Explorer
-        from OCP.TopAbs import TopAbs_FACE
-        from OCP.BRepAdaptor import BRepAdaptor_Surface
-        from OCP.GeomAbs import GeomAbs_Plane
-        from OCP.TopoDS import TopoDS, TopoDS_Face
-        from OCP.BRepTools import BRepTools
-        from OCP.BRepGProp import BRepGProp
-        from OCP.GProp import GProp_GProps
-        
-        # Collect planaire faces met oppervlakte
-        planar_faces = []
-        
-        exp = TopExp_Explorer(shape, TopAbs_FACE)
-        while exp.More():
-            face = TopoDS.Face_s(exp.Current())
-            
-            # Check if planar
-            surf = BRepAdaptor_Surface(face)
-            if surf.GetType() == GeomAbs_Plane:
-                # Bereken oppervlakte
-                props = GProp_GProps()
-                BRepGProp.SurfaceProperties_s(face, props)
-                area = props.Mass()
-                planar_faces.append((face, area))
-            
-            exp.Next()
-        
-        if not planar_faces:
-            logger.warning("[CutFeatures] Geen planaire faces gevonden voor outer contour")
-            return 0.0
-        
-        # Sorteer op oppervlakte (grootste eerst)
-        planar_faces.sort(key=lambda x: x[1], reverse=True)
-        largest_face = planar_faces[0][0]
-        
-        # Haal outer wire
-        outer_wire = BRepTools.OuterWire_s(largest_face)
-        
-        # Bereken perimeter
-        props = GProp_GProps()
-        BRepGProp.LinearProperties_s(outer_wire, props)
-        perimeter = props.Mass()
-        
-        return perimeter
-        
-    except Exception as e:
-        logger.error(f"[CutFeatures] Fout bij outer contour berekening: {e}")
-        return 0.0
-
-
-def _label_contours_from_holes(
-    closed_contours: List[Dict[str, Any]],
-    cylindrical_holes,
-    countersink_matches: Dict[int, float],
-    inferred_countersunk: Optional[set] = None,
-    is_profile: bool = False,
-) -> List[Dict[str, Any]]:
-    """Match closed inner contours to cylindrical holes for label assignment.
-
-    Per gesloten contour: zoek dichtstbijzijnde cilindrisch gat (centrumafstand
-    ≤ 10 mm) en pas thread/countersink-logica toe op de diameter van dat gat.
-    Ongematchte contouren krijgen label 'hole'.
-
-    Returns list of dicts: {label, radius, cs_angle}
-    """
-    if inferred_countersunk is None:
-        inferred_countersunk = set()
-    results: List[Dict[str, Any]] = []
-    used_hole_indices: set = set()
-    match_tol = 10.0  # mm
-
-    for contour in closed_contours:
-        center_cc = contour.get("center")
-        best_idx: Optional[int] = None
-        best_dist = float("inf")
-
-        if center_cc is not None:
-            for idx, hole in enumerate(cylindrical_holes):
-                if idx in used_hole_indices:
-                    continue
-                pos = _as_point_tuple(getattr(hole, "position", None))
-                if pos is None:
-                    pos = _as_point_tuple(getattr(hole, "axis_origin", None))
-                if pos is None:
-                    continue
-                dx = center_cc[0] - pos[0]
-                dy = center_cc[1] - pos[1]
-                dz = center_cc[2] - pos[2]
-                dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-                if dist < best_dist:
-                    best_dist = dist
-                    best_idx = idx
-
-        label = "hole"
-        radius: Optional[float] = None
-        cs_angle: Optional[float] = None
-
-        if best_idx is not None and best_dist <= match_tol:
-            used_hole_indices.add(best_idx)
-            hole = cylindrical_holes[best_idx]
-            radius = hole.diameter / 2.0
-            cs_angle_val = countersink_matches.get(best_idx)
-            if cs_angle_val is not None or best_idx in inferred_countersunk:
-                label = "countersunk"
-                cs_angle = cs_angle_val
-            else:
-                thread_matches = iso_standards.identify_thread_from_diameter(hole.diameter, 0.20)
-                tapped_matches = [m for m in thread_matches if "tapped" in m.designation.lower()]
-                major_matches = [m for m in thread_matches if "tapped" not in m.designation.lower()]
-                hole_depth = float(getattr(hole, "depth", 0.0) or 0.0)
-
-                if is_profile:
-                    if tapped_matches and not major_matches:
-                        label = "thread"
-                    elif tapped_matches and major_matches:
-                        if hole.diameter <= 6.0 and hole_depth <= max(6.0, hole.diameter * 1.5):
-                            for match in tapped_matches:
-                                delta = float(getattr(match, "major_diameter", 0.0) or 0.0) - float(hole.diameter)
-                                if 0.8 <= delta <= 1.4:
-                                    label = "thread"
-                                    break
-                else:
-                    if tapped_matches and major_matches:
-                        tapped_matches = []
-                    if tapped_matches and hole_depth > 0:
-                        plausible = [
-                            m for m in tapped_matches
-                            if float(getattr(m, "major_diameter", 0.0) or 0.0) <= hole_depth * 1.35
-                        ]
-                        tapped_matches = plausible if plausible else []
-                    if tapped_matches:
-                        label = "thread"
-
-        results.append({"label": label, "radius": radius, "cs_angle": cs_angle})
-
-    return results
-
-
-def _detect_closed_inner_contours(shape: TopoDS_Shape) -> List[Dict[str, Any]]:
-    """Detecteer unieke gesloten binnencontouren exclusief de buitencontour."""
-    try:
-        from collections import defaultdict
-        from OCP.Bnd import Bnd_Box
-        from OCP.BRepBndLib import BRepBndLib
-        from OCP.TopExp import TopExp_Explorer
-        from OCP.TopAbs import TopAbs_FACE, TopAbs_WIRE
-        from OCP.TopoDS import TopoDS
-
-        contour_candidates: List[Dict[str, Any]] = []
-        exp = TopExp_Explorer(shape, TopAbs_FACE)
-        while exp.More():
-            face = TopoDS.Face_s(exp.Current())
-            surf = BRepAdaptor_Surface(face, True)
-
-            normal = None
-            if surf.GetType() == GeomAbs_Plane:
-                axis = surf.Plane().Axis().Direction()
-                normal = (axis.X(), axis.Y(), axis.Z())
-
-            outer_wire = BRepTools.OuterWire_s(face)
-            wire_exp = TopExp_Explorer(face, TopAbs_WIRE)
-            while wire_exp.More():
-                wire = TopoDS.Wire_s(wire_exp.Current())
-                wire_exp.Next()
-
-                if wire.IsSame(outer_wire):
-                    continue
-
-                props = GProp_GProps()
-                BRepGProp.LinearProperties_s(wire, props)
-                perimeter = float(props.Mass())
-                if perimeter <= 1e-6:
-                    continue
-
-                center = props.CentreOfMass()
-                bbox = Bnd_Box()
-                BRepBndLib.Add_s(wire, bbox)
-                xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
-                dims = sorted([
-                    float(xmax - xmin),
-                    float(ymax - ymin),
-                    float(zmax - zmin),
-                ], reverse=True)
-                major = dims[0] if dims else 0.0
-                minor = dims[1] if len(dims) > 1 else 0.0
-
-                contour_candidates.append({
-                    "perimeter": perimeter,
-                    "center": (center.X(), center.Y(), center.Z()),
-                    "normal": normal,
-                    "dim": f"{major:.1f}x{minor:.1f}",
-                })
-
-            exp.Next()
-
-        if not contour_candidates:
-            return []
-
-        buckets = defaultdict(list)
-        for idx, contour in enumerate(contour_candidates):
-            buckets[(round(float(contour["perimeter"]), 2), contour["dim"])].append((idx, contour))
-
-        unique_contours: List[Dict[str, Any]] = []
-        processed_indices = set()
-        for bucket in buckets.values():
-            for i, contour_a in bucket:
-                if i in processed_indices:
-                    continue
-
-                processed_indices.add(i)
-                unique_contours.append(contour_a)
-
-                center_a = _as_point_tuple(contour_a.get("center"))
-                normal_a = _normalize_vector(_as_point_tuple(contour_a.get("normal")))
-                if center_a is None:
-                    continue
-
-                for j, contour_b in bucket:
-                    if j in processed_indices or i == j:
-                        continue
-
-                    center_b = _as_point_tuple(contour_b.get("center"))
-                    if center_b is None:
-                        continue
-
-                    dx = center_b[0] - center_a[0]
-                    dy = center_b[1] - center_a[1]
-                    dz = center_b[2] - center_a[2]
-                    dist_sq = dx * dx + dy * dy + dz * dz
-                    if dist_sq < 0.01:
-                        processed_indices.add(j)
-                        continue
-
-                    if normal_a is None:
-                        continue
-
-                    dist = math.sqrt(dist_sq)
-                    if dist <= 1e-9:
-                        processed_indices.add(j)
-                        continue
-
-                    direction = (dx / dist, dy / dist, dz / dist)
-                    if abs(_dot(direction, normal_a)) > 0.9:
-                        processed_indices.add(j)
-
-        return unique_contours
-
-    except Exception as e:
-        logger.debug(f"[CutFeatures] Closed contour detectie mislukt: {e}")
-        return []
-
-
-# ============================================================================
-# TOEKOMSTIGE UITBREIDINGEN (Fase 2: profiel)
-# ============================================================================
-
 def extract_cut_features_for_profile(
-    solid: TopoDS_Shape,
-    part_classification: str = "profiel"
+    solid,
+    part_classification: str = "profiel",
 ) -> Optional[CutFeatures]:
-    """
-    Fase 2: Gaten en snijdata voor profielen (buis, koker, hoekstaal).
-
-    Altijd 3D analyse (geen unfold). outer_contour = 0 (profiel is ingekocht,
-    geen lasersnij-buitencontour). total_contour = sum(hole contours).
-
-    Parameters:
-    -----------
-    solid : TopoDS_Shape
-        De te analyseren profiel solid
-    part_classification : str
-        "profiel" (voor logging)
-
-    Returns:
-    --------
-    CutFeatures of None bij falen
-    """
-    try:
-        logger.info(f"[CutFeatures] Start profiel extractie voor {part_classification}")
-
-        # Altijd 3D analyse (profielen worden niet ontvouwen)
-        source = "3d"
-
-        # Convert naar CadQuery object
-        cq_solid = cq.Solid(solid)
-        cq_object = cq.Workplane("XY").newObject([cq_solid])
-        closed_contours = _detect_closed_inner_contours(solid) if solid else []
-
-        # STAP 1: Detect cylindrische gaten
-        # filter_bores=False: we doen een eigen post-filter op depth ratio
-        # zodat ronde buizen (is_turned_part=True) geen echte gaten verliezen
-        logger.info("[CutFeatures] Profiel: detect cylindrische gaten...")
-        cylindrical_holes = detect_holes(
-            cq_object,
-            filter_bores=False,
-            is_flat_pattern=False
-        )
-        logger.info(f"[CutFeatures] Profiel vóór bore-filter: {len(cylindrical_holes)} cylindrische gaten")
-
-        # Post-filter: verwijder binnenboring (depth > 30% langste dimensie)
-        # Buisboring: depth=lengte (ratio~1.0). Echte gaten: depth=wanddikte (ratio<0.05).
-        from OCP.Bnd import Bnd_Box
-        from OCP.BRepBndLib import BRepBndLib
-        bbox = Bnd_Box()
-        BRepBndLib.Add_s(solid, bbox)
-        xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
-        longest_dim = max(xmax - xmin, ymax - ymin, zmax - zmin)
-        if longest_dim > 0:
-            before_count = len(cylindrical_holes)
-            cylindrical_holes = [h for h in cylindrical_holes
-                                 if h.depth <= longest_dim * 0.3]
-            filtered_count = before_count - len(cylindrical_holes)
-            if filtered_count > 0:
-                logger.info(f"[CutFeatures] Profiel bore-filter: {filtered_count} gaten verwijderd (depth > {longest_dim * 0.3:.1f}mm)")
-
-        logger.info(f"[CutFeatures] Profiel: {len(cylindrical_holes)} cylindrische gaten")
-
-        # STAP 2: Detect vormgaten (sleuven, rectangles) op planaire vlakken
-        logger.info("[CutFeatures] Profiel: detect vormgaten...")
-        cq_workplane = cq.Workplane(obj=cq_solid)
-        shaped_holes = detect_shaped_holes(cq_workplane)
-        shaped_holes = _filter_profile_end_opening_shaped_holes(
-            shaped_holes,
-            (xmin, ymin, zmin),
-            (xmax, ymax, zmax),
-        )
-        closed_contours = _filter_profile_end_opening_shaped_holes(
-            closed_contours,
-            (xmin, ymin, zmin),
-            (xmax, ymax, zmax),
-        )
-        logger.info(f"[CutFeatures] Profiel: {len(closed_contours)} gesloten binnencontouren")
-        logger.info(f"[CutFeatures] Profiel: {len(shaped_holes)} vormgaten")
-
-        # STAP 3: Dedupliceer
-        logger.info("[CutFeatures] Profiel: dedupliceer...")
-        cylindrical_holes = deduplicate_holes(cylindrical_holes, shaped_holes)
-        logger.info(f"[CutFeatures] Profiel na dedup: {len(cylindrical_holes)} cylindrisch, {len(shaped_holes)} vorm")
-
-        # STAP 4: Bereken hole contours en classificeer
-        hole_contours = []
-        hole_radii = []
-        hole_types = []
-        shaped_types = []
-        threaded_holes = 0
-        countersunk_holes = 0
-        countersunk_angles = []
-
-        # Match conische faces op cilindrische gaten (verzonken gaten)
-        countersink_matches = _detect_countersunk_holes(cq_object, cylindrical_holes)
-        inferred_countersunk, suppressed_subholes = _infer_profile_countersink_pairs(
-            cylindrical_holes,
-            countersink_matches,
-        )
-
-        for idx, hole in enumerate(cylindrical_holes):
-            if idx in suppressed_subholes:
-                continue
-
-            radius = hole.diameter / 2.0
-            perimeter = 2.0 * math.pi * radius
-            hole_contours.append(perimeter)
-            hole_radii.append(radius)
-
-            hole_type = "round"
-            cs_angle = countersink_matches.get(idx)
-            if cs_angle is not None or idx in inferred_countersunk:
-                hole_type = "countersunk"
-                countersunk_holes += 1
-                if cs_angle is not None:
-                    countersunk_angles.append(cs_angle)
-            else:
-                # Tapgat detectie met disambiguatie:
-                # Als diameter matcht op zowel major (=clearance) als tapped,
-                # is het waarschijnlijk een clearance gat, niet een tapgat.
-                thread_matches = iso_standards.identify_thread_from_diameter(hole.diameter, 0.20)
-                tapped_matches = [m for m in thread_matches if "tapped" in m.designation.lower()]
-                major_matches = [m for m in thread_matches if "tapped" not in m.designation.lower()]
-
-                if tapped_matches and not major_matches:
-                    # Alleen tap-drill match → waarschijnlijk tapgat
-                    hole_type = "thread"
-                    threaded_holes += 1
-                elif tapped_matches and major_matches:
-                    # Ambigue match (major + tapped): voor kleine profielgaten in
-                    # wanddikte-orde prefereren we tapped om typische tapgaten
-                    # niet als clearance te verliezen.
-                    hole_depth = float(getattr(hole, "depth", 0.0) or 0.0)
-                    if hole.diameter <= 6.0 and hole_depth <= max(6.0, hole.diameter * 1.5):
-                        for match in tapped_matches:
-                            delta = float(match.major_diameter) - float(hole.diameter)
-                            if 0.8 <= delta <= 1.4:
-                                hole_type = "thread"
-                                threaded_holes += 1
-                                break
-                # elif tapped_matches and major_matches: ambigue → default round
-
-            hole_types.append(hole_type)
-
-        # Vormgaten: bereken perimeter uit dimensions
-        for shaped in shaped_holes:
-            perimeter = float(shaped.get("perimeter", 0.0) or 0.0)
-            if perimeter <= 0:
-                dim_str = shaped.get("dim", "")
-                dimensions = _parse_dimensions_from_string(dim_str)
-                if dimensions:
-                    length_dim, width_dim = dimensions
-                    shape_type = shaped.get("type", "Rect")
-                    if shape_type == "Slot":
-                        straight_len = max(0.0, length_dim - width_dim)
-                        perimeter = 2.0 * straight_len + math.pi * width_dim
-                    else:
-                        perimeter = 2.0 * (length_dim + width_dim)
-                else:
-                    perimeter = 40.0
-
-            hole_contours.append(perimeter)
-            shaped_type = shaped.get("type", "Unknown")
-            shaped_types.append(shaped_type)
-
-            # Output-level policy: shaped holes are counted and measured,
-            # but not labeled as a separate category in XML.
-            hole_types.append("hole")
-
-        # Standalone countersinks (conische faces zonder cilindrische hole-face)
-        standalone_countersinks = _detect_standalone_countersunk_holes(
-            cq_object, cylindrical_holes,
-        )
-        for cs in standalone_countersinks:
-            radius = float(cs.get("inner_radius", 0.0) or 0.0)
-            if radius <= 0:
-                continue
-            perimeter = 2.0 * math.pi * radius
-            hole_contours.append(perimeter)
-            hole_radii.append(radius)
-            hole_types.append("thread")
-            threaded_holes += 1
-
-        # Profiel: geen buitencontour (ingekocht profiel)
-        outer_contour = 0.0
-        # Gesloten contouren zijn leidend voor aantal en snijlengte.
-        # Labels (thread/countersunk) worden achteraf gematcht op cylindrische gaten.
-        if closed_contours:
-            hole_contours = [float(item["perimeter"]) for item in closed_contours]
-            label_results = _label_contours_from_holes(
-                closed_contours, cylindrical_holes, countersink_matches,
-                inferred_countersunk=inferred_countersunk, is_profile=True,
-            )
-            hole_types = [r["label"] for r in label_results]
-            hole_radii = [r["radius"] for r in label_results if r["radius"] is not None]
-            threaded_holes = sum(1 for r in label_results if r["label"] == "thread")
-            countersunk_holes = sum(1 for r in label_results if r["label"] == "countersunk")
-            countersunk_angles = [r["cs_angle"] for r in label_results if r.get("cs_angle") is not None]
-        total_contour = sum(hole_contours)
-
-        total_holes = len(closed_contours) if closed_contours else len(hole_types)
-        logger.info(f"[CutFeatures] Profiel: {total_holes} gaten, snijlengte={total_contour:.2f} mm")
-
-        result = CutFeatures(
-            nr_holes=total_holes,
-            hole_contours=hole_contours,
-            hole_radii=hole_radii,
-            outer_contour=outer_contour,
-            total_contour=total_contour,
-            box_x=0.0,
-            box_y=0.0,
-            source=source,
-            hole_types=hole_types,
-            threaded_holes=threaded_holes,
-            countersunk_holes=countersunk_holes,
-            countersunk_angles=countersunk_angles,
-            nr_cylindrical=len(cylindrical_holes),
-            nr_shaped=len(shaped_holes),
-            shaped_types=shaped_types
-        )
-
-        logger.info(f"[CutFeatures] Profiel extractie compleet: {result.to_dict()}")
-        return result
-
-    except Exception as e:
-        logger.error(f"[CutFeatures] FOUT tijdens profiel extractie: {e}", exc_info=True)
-        return None
+    return _cut_features_extractors.extract_cut_features_for_profile(
+        solid,
+        CutFeaturesCls=CutFeatures,
+        cq_module=cq,
+        detect_holes_fn=detect_holes,
+        detect_shaped_holes_fn=detect_shaped_holes,
+        deduplicate_holes_fn=deduplicate_holes,
+        iso_standards=iso_standards,
+        logger=logger,
+        detect_closed_inner_contours=_detect_closed_inner_contours,
+        filter_profile_end_opening_shaped_holes=_filter_profile_end_opening_shaped_holes,
+        infer_profile_countersink_pairs=_infer_profile_countersink_pairs,
+        detect_countersunk_holes=_detect_countersunk_holes,
+        detect_standalone_countersunk_holes=_detect_standalone_countersunk_holes,
+        label_contours_from_holes=_label_contours_from_holes,
+        parse_dimensions_from_string=_parse_dimensions_from_string,
+        part_classification=part_classification,
+    )
 
 
 _get_bounding_box = _profile_helpers._get_bounding_box
 _parse_dimensions_from_string = _profile_helpers._parse_dimensions_from_string
+_normalize_vector = _geometry_helpers._normalize_vector
+_as_point_tuple = _geometry_helpers._as_point_tuple
+_dot = _geometry_helpers._dot
+_distance_point_to_axis = _geometry_helpers._distance_point_to_axis
+_signed_axis_distance = _geometry_helpers._signed_axis_distance
+
+
+def _get_outer_contour_length(shape):
+    return _geometry_helpers._get_outer_contour_length(shape, logger=logger)
+
+
+def _label_contours_from_holes(
+    closed_contours,
+    cylindrical_holes,
+    countersink_matches,
+    inferred_countersunk=None,
+    is_profile: bool = False,
+):
+    return _geometry_helpers._label_contours_from_holes(
+        closed_contours,
+        cylindrical_holes,
+        countersink_matches,
+        iso_standards=iso_standards,
+        as_point_tuple=_as_point_tuple,
+        inferred_countersunk=inferred_countersunk,
+        is_profile=is_profile,
+    )
+
+
+def _detect_closed_inner_contours(shape):
+    return _geometry_helpers._detect_closed_inner_contours(
+        shape,
+        logger=logger,
+        as_point_tuple=_as_point_tuple,
+        normalize_vector=_normalize_vector,
+        dot=_dot,
+    )
 
 
 def _filter_profile_end_opening_shaped_holes(
-    shaped_holes: List[Dict[str, Any]],
-    bbox_min: Tuple[float, float, float],
-    bbox_max: Tuple[float, float, float],
-) -> List[Dict[str, Any]]:
+    shaped_holes,
+    bbox_min,
+    bbox_max,
+):
     return _profile_helpers._filter_profile_end_opening_shaped_holes(
         shaped_holes,
         bbox_min,
@@ -956,7 +170,7 @@ def _filter_profile_end_opening_shaped_holes(
     )
 
 
-def _infer_profile_countersink_pairs(cylindrical_holes, countersink_matches: Dict[int, float]) -> Tuple[set, set]:
+def _infer_profile_countersink_pairs(cylindrical_holes, countersink_matches):
     return _profile_helpers._infer_profile_countersink_pairs(
         cylindrical_holes,
         countersink_matches,
@@ -968,14 +182,14 @@ def _infer_profile_countersink_pairs(cylindrical_holes, countersink_matches: Dic
     )
 
 
-def _collect_conical_faces(cq_object) -> List[Dict[str, Any]]:
+def _collect_conical_faces(cq_object):
     return _sheet_helpers._collect_conical_faces(
         cq_object,
         normalize_vector=_normalize_vector,
     )
 
 
-def _group_conical_countersink_faces(conical_faces: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _group_conical_countersink_faces(conical_faces):
     return _sheet_helpers._group_conical_countersink_faces(
         conical_faces,
         dot=_dot,
@@ -984,7 +198,7 @@ def _group_conical_countersink_faces(conical_faces: List[Dict[str, Any]]) -> Lis
     )
 
 
-def _candidate_matches_cylindrical_hole(candidate: Dict[str, Any], cylindrical_holes) -> bool:
+def _candidate_matches_cylindrical_hole(candidate, cylindrical_holes):
     return _sheet_helpers._candidate_matches_cylindrical_hole(
         candidate,
         cylindrical_holes,
@@ -996,7 +210,7 @@ def _candidate_matches_cylindrical_hole(candidate: Dict[str, Any], cylindrical_h
     )
 
 
-def _detect_countersunk_holes(cq_object, cylindrical_holes) -> Dict[int, float]:
+def _detect_countersunk_holes(cq_object, cylindrical_holes):
     return _sheet_helpers._detect_countersunk_holes(
         cq_object,
         cylindrical_holes,
@@ -1009,7 +223,7 @@ def _detect_countersunk_holes(cq_object, cylindrical_holes) -> Dict[int, float]:
     )
 
 
-def _detect_standalone_countersunk_holes(cq_object, cylindrical_holes) -> List[Dict[str, float]]:
+def _detect_standalone_countersunk_holes(cq_object, cylindrical_holes):
     return _sheet_helpers._detect_standalone_countersunk_holes(
         cq_object,
         cylindrical_holes,

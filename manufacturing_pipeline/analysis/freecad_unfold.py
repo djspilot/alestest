@@ -15,6 +15,7 @@ import math
 import json
 import tempfile
 from manufacturing_pipeline.analysis.sheetmetal import freecad_environment as _freecad_environment
+from manufacturing_pipeline.analysis.sheetmetal import freecad_geometry as _freecad_geometry
 from manufacturing_pipeline.analysis.sheetmetal import freecad_process as _freecad_process
 
 FreeCAD = None
@@ -23,303 +24,45 @@ _FREECAD_IMPORT_ERROR = None
 
 
 def _candidate_freecad_paths():
-    """Build candidate FreeCAD python/module paths for multiple platforms."""
-    candidates = []
-
-    # Explicit override via env var (recommended for deployments)
-    freecad_path = os.getenv('FREECAD_PATH')
-    if freecad_path:
-        candidates.append(freecad_path)
-        candidates.append(os.path.join(freecad_path, 'bin'))
-        candidates.append(os.path.join(freecad_path, 'lib'))
-        candidates.append(os.path.join(freecad_path, 'Mod'))
-
-    # Windows common installs
-    program_files = os.environ.get('ProgramFiles', r'C:\Program Files')
-    program_files_x86 = os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')
-    for base in [program_files, program_files_x86]:
-        if base:
-            candidates.extend([
-                os.path.join(base, 'FreeCAD 1.0', 'bin'),
-                os.path.join(base, 'FreeCAD 1.0', 'Mod'),
-                os.path.join(base, 'FreeCAD', 'bin'),
-                os.path.join(base, 'FreeCAD', 'Mod'),
-                os.path.join(base, 'FreeCAD 0.21', 'bin'),
-                os.path.join(base, 'FreeCAD 0.21', 'Mod'),
-            ])
-
-    appdata = os.environ.get('APPDATA')
-    if appdata:
-        candidates.append(os.path.join(appdata, 'FreeCAD', 'Mod'))
-
-    # macOS/Homebrew + app bundle
-    mac_app = '/Applications/FreeCAD.app/Contents/Resources'
-    brew_app = '/opt/homebrew/Caskroom/freecad/1.0.2/FreeCAD.app/Contents/Resources'
-    for path in [mac_app, brew_app]:
-        candidates.extend([
-            os.path.join(path, 'lib'),
-            os.path.join(path, 'Mod'),
-        ])
-    candidates.append(os.path.expanduser('~/Library/Application Support/FreeCAD/Mod'))
-
-    # Linux common paths
-    candidates.extend([
-        '/usr/lib/freecad/lib',
-        '/usr/share/freecad/Mod',
-        '/usr/lib/freecad/Mod',
-        '/snap/freecad/current/usr/lib/freecad/lib',
-        '/snap/freecad/current/usr/share/freecad/Mod',
-        os.path.expanduser('~/.local/share/FreeCAD/Mod'),
-    ])
-
-    return candidates
+    return _freecad_environment._candidate_freecad_paths()
 
 
 def _should_prefer_freecadcmd() -> bool:
-    """Prefer the external FreeCADCmd path on platforms where direct import is fragile."""
-    mode = os.getenv("FREECAD_UNFOLD_MODE", "auto").strip().lower()
-    if mode == "subprocess":
-        return True
-    if mode == "direct":
-        return False
-    return sys.platform.startswith("win")
+    return _freecad_environment._should_prefer_freecadcmd()
 
 
 def _ensure_freecad_imported() -> bool:
-    """Import FreeCAD/Part lazily with platform-aware path setup."""
-    global FreeCAD, Part, _FREECAD_IMPORT_ERROR
-
-    if FreeCAD is not None and Part is not None:
-        return True
-
-    # Add candidate paths once at runtime
-    for path in _candidate_freecad_paths():
-        if path and os.path.isdir(path) and path not in sys.path:
-            sys.path.insert(0, path)
-
-    try:
-        import FreeCAD as _FreeCAD
-        import Part as _Part
-        FreeCAD = _FreeCAD
-        Part = _Part
-
-        try:
-            import FreeCADGui as _FreeCADGui
-            _FreeCADGui.Selection.getSelection()
-        except (ImportError, AttributeError):
-            sys.modules['FreeCADGui'] = MockFreeCADGui()
-
-        return True
-    except Exception as e:
-        _FREECAD_IMPORT_ERROR = str(e)
-        return False
+    imported = _freecad_environment._ensure_freecad_imported()
+    _sync_freecad_bindings()
+    return imported
 
 
 def _find_freecadcmd_executable() -> str:
-    """Find FreeCADCmd executable for subprocess fallback."""
-    env_path = os.getenv('FREECAD_CMD')
-    if env_path and os.path.exists(env_path):
-        return env_path
-
-    candidates = [
-        r"C:\Program Files\FreeCAD 1.0\bin\freecadcmd.exe",
-        r"C:\Program Files\FreeCAD\bin\freecadcmd.exe",
-        r"C:\Program Files\FreeCAD 0.21\bin\freecadcmd.exe",
-        r"C:\Program Files (x86)\FreeCAD\bin\freecadcmd.exe",
-        "/usr/bin/freecadcmd",
-        "/usr/local/bin/freecadcmd",
-        "/Applications/FreeCAD.app/Contents/MacOS/FreeCADCmd",
-    ]
-
-    for candidate in candidates:
-        if os.path.exists(candidate):
-            return candidate
-
-    return ''
+    return _freecad_environment._find_freecadcmd_executable()
 
 
 def _vector_components(value):
-    """Extract numeric XYZ components from FreeCAD/OCP point-like objects."""
-    for names in (('x', 'y', 'z'), ('X', 'Y', 'Z')):
-        if all(hasattr(value, name) for name in names):
-            return tuple(float(getattr(value, name)) for name in names)
-
-    if isinstance(value, (tuple, list)) and len(value) >= 3:
-        return float(value[0]), float(value[1]), float(value[2])
-
-    raise TypeError(f"Unsupported vector type: {type(value)!r}")
+    return _freecad_geometry._vector_components(value)
 
 
 def _normalize_components(x_value, y_value, z_value):
-    length = math.sqrt(x_value * x_value + y_value * y_value + z_value * z_value)
-    if length <= 1e-9:
-        raise ValueError("Zero-length vector")
-    return x_value / length, y_value / length, z_value / length
+    return _freecad_geometry._normalize_components(x_value, y_value, z_value)
 
 
 def _find_largest_planar_face(shape):
-    """Return the largest planar face of a FreeCAD shape, if any."""
-    largest_face = None
-    largest_area = -1.0
-
-    for face in getattr(shape, 'Faces', []):
-        try:
-            surface = getattr(face, 'Surface', None)
-            if surface is None or 'Plane' not in getattr(surface, 'TypeId', ''):
-                continue
-
-            area = float(face.Area)
-            if area > largest_area:
-                largest_face = face
-                largest_area = area
-        except Exception:
-            continue
-
-    return largest_face
+    return _freecad_geometry._find_largest_planar_face(shape)
 
 
 def _choose_plane_basis(normal):
-    """Build a stable in-plane basis from a face normal.
-
-    The basis is aligned to the projected global axis with the strongest in-plane
-    component. This keeps dimensions stable for rotated flat patterns.
-    """
-    nx_value, ny_value, nz_value = _normalize_components(*_vector_components(normal))
-
-    best_projection = None
-    best_axis = None
-    best_length = -1.0
-    for axis in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)):
-        dot = axis[0] * nx_value + axis[1] * ny_value + axis[2] * nz_value
-        proj_x = axis[0] - dot * nx_value
-        proj_y = axis[1] - dot * ny_value
-        proj_z = axis[2] - dot * nz_value
-        proj_len = math.sqrt(proj_x * proj_x + proj_y * proj_y + proj_z * proj_z)
-
-        if proj_len > best_length:
-            best_length = proj_len
-            best_projection = (proj_x, proj_y, proj_z)
-            best_axis = axis
-
-    if best_projection is None or best_length <= 1e-9:
-        raise ValueError("Could not derive plane basis")
-
-    ux_value, uy_value, uz_value = _normalize_components(*best_projection)
-    vx_value = ny_value * uz_value - nz_value * uy_value
-    vy_value = nz_value * ux_value - nx_value * uz_value
-    vz_value = nx_value * uy_value - ny_value * ux_value
-    vx_value, vy_value, vz_value = _normalize_components(vx_value, vy_value, vz_value)
-
-    return {
-        'u': (ux_value, uy_value, uz_value),
-        'v': (vx_value, vy_value, vz_value),
-        'normal': (nx_value, ny_value, nz_value),
-        'reference_axis': best_axis,
-    }
+    return _freecad_geometry._choose_plane_basis(normal)
 
 
 def _sample_edge_points(shape, samples_per_edge=33):
-    """Sample a shape's edges densely enough to capture arc extents."""
-    sample_points = []
-    for edge in getattr(shape, 'Edges', []):
-        points = None
-        try:
-            points = edge.discretize(samples_per_edge)
-        except Exception:
-            try:
-                points = edge.discretize(Number=samples_per_edge)
-            except Exception:
-                points = None
-
-        if not points:
-            try:
-                points = [edge.firstVertex().Point, edge.lastVertex().Point]
-            except Exception:
-                points = None
-
-        if points:
-            for point in points:
-                try:
-                    sample_points.append(_vector_components(point))
-                except Exception:
-                    continue
-
-    if sample_points:
-        return sample_points
-
-    for vertex in getattr(shape, 'Vertexes', []):
-        try:
-            sample_points.append(_vector_components(vertex.Point))
-        except Exception:
-            continue
-
-    return sample_points
+    return _freecad_geometry._sample_edge_points(shape, samples_per_edge=samples_per_edge)
 
 
 def _measure_flat_pattern_dimensions(flat_shape):
-    """Measure a flat pattern in its own plane instead of global XYZ.
-
-    Using the two largest global bbox axes works for many parts but fails for
-    rotated flat patterns. This projects sampled edge points into the dominant
-    flat-pattern plane and measures the 2D extents there.
-    """
-    bbox = flat_shape.BoundBox
-    raw_bbox = (
-        float(bbox.XLength),
-        float(bbox.YLength),
-        float(bbox.ZLength),
-    )
-    raw_sorted = sorted(raw_bbox, reverse=True)
-
-    dims = {
-        'flat_length': raw_sorted[0],
-        'flat_width': raw_sorted[1],
-        'raw_bbox': raw_bbox,
-        'projection_used': False,
-        'reference_axis': None,
-    }
-
-    largest_face = _find_largest_planar_face(flat_shape)
-    if largest_face is None:
-        return dims
-
-    try:
-        u_min, u_max, v_min, v_max = largest_face.ParameterRange
-        sample_u = (u_min + u_max) / 2.0
-        sample_v = (v_min + v_max) / 2.0
-    except Exception:
-        sample_u = 0.0
-        sample_v = 0.0
-
-    try:
-        normal = largest_face.normalAt(sample_u, sample_v)
-        basis = _choose_plane_basis(normal)
-    except Exception:
-        return dims
-
-    sample_points = _sample_edge_points(flat_shape)
-    if not sample_points:
-        return dims
-
-    ux_value, uy_value, uz_value = basis['u']
-    vx_value, vy_value, vz_value = basis['v']
-
-    projected_u = []
-    projected_v = []
-    for point_x, point_y, point_z in sample_points:
-        projected_u.append(point_x * ux_value + point_y * uy_value + point_z * uz_value)
-        projected_v.append(point_x * vx_value + point_y * vy_value + point_z * vz_value)
-
-    span_u = max(projected_u) - min(projected_u)
-    span_v = max(projected_v) - min(projected_v)
-    if span_u <= 1e-6 or span_v <= 1e-6:
-        return dims
-
-    dims['flat_length'] = max(span_u, span_v)
-    dims['flat_width'] = min(span_u, span_v)
-    dims['projection_used'] = True
-    dims['reference_axis'] = basis['reference_axis']
-    return dims
+    return _freecad_geometry._measure_flat_pattern_dimensions(flat_shape)
 
 
 def _unfold_via_freecadcmd(step_path, output_dxf=None, k_factor=0.44, max_attempts=5, max_bends=None):
@@ -1576,24 +1319,6 @@ def _sync_freecad_bindings() -> None:
     FreeCAD = _freecad_environment.FreeCAD
     Part = _freecad_environment.Part
     _FREECAD_IMPORT_ERROR = _freecad_environment._FREECAD_IMPORT_ERROR
-
-
-def _candidate_freecad_paths():
-    return _freecad_environment._candidate_freecad_paths()
-
-
-def _should_prefer_freecadcmd() -> bool:
-    return _freecad_environment._should_prefer_freecadcmd()
-
-
-def _ensure_freecad_imported() -> bool:
-    imported = _freecad_environment._ensure_freecad_imported()
-    _sync_freecad_bindings()
-    return imported
-
-
-def _find_freecadcmd_executable() -> str:
-    return _freecad_environment._find_freecadcmd_executable()
 
 
 # Command line interface

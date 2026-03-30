@@ -1,12 +1,21 @@
 from manufacturing_pipeline.analysis.geometry import profile_sections as shared
 from manufacturing_pipeline.analysis.io import step_file_io
 from manufacturing_pipeline.analysis.features import hole_detection
+from manufacturing_pipeline.analysis.features import cut_features_geometry_helpers
+from manufacturing_pipeline.analysis.features import cut_features_extractors
+from manufacturing_pipeline.analysis.features import component_reporting
 from manufacturing_pipeline.analysis.features import cut_features_profile_helpers
+from manufacturing_pipeline.analysis.features import manufacturing_orchestration
 from manufacturing_pipeline.analysis.features import manufacturing_features
+from manufacturing_pipeline.analysis.features import runtime_support
 from manufacturing_pipeline.analysis.bom import assembly_analysis as bom_assembly_analysis
 from manufacturing_pipeline.analysis.sheetmetal import orchestration as sheetmetal_orchestration
 from manufacturing_pipeline.analysis.sheetmetal import freecad_environment
+from manufacturing_pipeline.analysis.sheetmetal import freecad_geometry
+from manufacturing_pipeline.analysis.sheetmetal import complete_analysis as sheetmetal_complete_analysis
+from manufacturing_pipeline.analysis.sheetmetal import geometry_analysis as sheetmetal_geometry_analysis
 from manufacturing_pipeline.analysis.sheetmetal import freecad_process
+from manufacturing_pipeline.analysis.sheetmetal import standards as sheetmetal_standards
 from manufacturing_pipeline.analysis.classification_core import step0 as classification_core_step0
 from manufacturing_pipeline.analysis.classification_core import geometry_metrics as classification_geometry_metrics
 from manufacturing_pipeline.analysis.classification_core import hollow_closed as classification_hollow_closed
@@ -20,6 +29,7 @@ from manufacturing_pipeline.analysis import classification
 from manufacturing_pipeline.analysis import cut_features
 from manufacturing_pipeline.analysis import freecad_unfold
 from manufacturing_pipeline.analysis import profile_classifier
+from manufacturing_pipeline.analysis import sheetmetal_analysis
 from manufacturing_pipeline.analysis import step_processing
 from manufacturing_pipeline.analysis import step0_section_tools
 
@@ -127,6 +137,32 @@ def test_step_processing_wrappers_pass_legacy_callbacks(monkeypatch):
     assert captured["thread_tolerance"] == 0.2
 
 
+def test_step_processing_reexports_internal_manufacturing_orchestration():
+    assert manufacturing_orchestration.analyze_manufacturing_requirements is not None
+    assert manufacturing_orchestration.calculate_mass_properties is not None
+    assert manufacturing_orchestration.analyze_holes_with_fits is not None
+    assert manufacturing_orchestration.generate_manufacturing_summary is not None
+    assert manufacturing_orchestration.generate_werkvoorbereiding is not None
+    assert manufacturing_orchestration.analyze_sheetmetal is not None
+    assert manufacturing_orchestration.analyze_assembly_bom is not None
+
+
+def test_step_processing_reexports_runtime_support_shims():
+    assert step_processing._IsoThreadMatch is runtime_support._IsoThreadMatch
+    assert step_processing._IsoStandardsFallback is runtime_support._IsoStandardsFallback
+    assert step_processing._WerkvoorbereidingFallback is runtime_support._WerkvoorbereidingFallback
+
+
+def test_step_processing_reexports_internal_component_reporting():
+    assert component_reporting._analyze_part_manufacturing is not None
+    assert component_reporting.analyze_components_detailed is not None
+    assert component_reporting.get_topology_stats is not None
+    assert component_reporting.classify_components is not None
+    assert component_reporting.get_geometric_properties is not None
+    assert component_reporting.analyze_faces is not None
+    assert component_reporting.debug_hole_detection is not None
+
+
 def test_assembly_analysis_reexports_internal_bom_module():
     assert assembly_analysis.BOMItem is bom_assembly_analysis.BOMItem
     assert assembly_analysis.AssemblyAnalysis is bom_assembly_analysis.AssemblyAnalysis
@@ -141,9 +177,22 @@ def test_cut_features_reexports_profile_helper_ownership():
     assert cut_features._parse_dimensions_from_string is cut_features_profile_helpers._parse_dimensions_from_string
 
 
+def test_cut_features_reexports_geometry_helper_ownership():
+    assert cut_features._normalize_vector is cut_features_geometry_helpers._normalize_vector
+    assert cut_features._as_point_tuple is cut_features_geometry_helpers._as_point_tuple
+    assert cut_features._dot is cut_features_geometry_helpers._dot
+    assert cut_features._distance_point_to_axis is cut_features_geometry_helpers._distance_point_to_axis
+    assert cut_features._signed_axis_distance is cut_features_geometry_helpers._signed_axis_distance
+
+
 def test_cut_features_public_extractors_remain_available():
     assert callable(cut_features.extract_cut_features_for_sheet)
     assert callable(cut_features.extract_cut_features_for_profile)
+
+
+def test_cut_features_public_extractors_delegate_to_internal_extractors():
+    assert cut_features_extractors.extract_cut_features_for_sheet is not None
+    assert cut_features_extractors.extract_cut_features_for_profile is not None
 
 
 def test_freecad_unfold_delegates_environment_probing():
@@ -171,6 +220,60 @@ def test_freecad_unfold_delegates_process_execution(monkeypatch):
     assert captured["executable"] == "/tmp/freecadcmd"
     assert captured["timeout_seconds"] == 300
     assert captured["script_has_payload"] is True
+
+
+def test_freecad_unfold_delegates_geometry_helpers(monkeypatch):
+    captured = {}
+
+    def fake_vector_components(value):
+        captured["vector"] = value
+        return (1.0, 2.0, 3.0)
+
+    def fake_measure_flat_pattern_dimensions(shape):
+        captured["flat_shape"] = shape
+        return {"flat_length": 100.0, "flat_width": 50.0}
+
+    monkeypatch.setattr(freecad_geometry, "_vector_components", fake_vector_components)
+    monkeypatch.setattr(
+        freecad_geometry,
+        "_measure_flat_pattern_dimensions",
+        fake_measure_flat_pattern_dimensions,
+    )
+
+    assert freecad_unfold._vector_components("point") == (1.0, 2.0, 3.0)
+    assert captured["vector"] == "point"
+
+    dims = freecad_unfold._measure_flat_pattern_dimensions("flat-shape")
+    assert dims == {"flat_length": 100.0, "flat_width": 50.0}
+    assert captured["flat_shape"] == "flat-shape"
+
+
+def test_sheetmetal_analysis_reexports_internal_standards():
+    assert sheetmetal_analysis.STANDARD_THICKNESSES is sheetmetal_standards.STANDARD_THICKNESSES
+    assert sheetmetal_analysis.STANDARD_BEND_ANGLES is sheetmetal_standards.STANDARD_BEND_ANGLES
+    assert sheetmetal_analysis.BendTool is sheetmetal_standards.BendTool
+    assert sheetmetal_analysis.STANDARD_V_DIES is sheetmetal_standards.STANDARD_V_DIES
+    assert sheetmetal_analysis.K_FACTORS is sheetmetal_standards.K_FACTORS
+    assert sheetmetal_analysis.MATERIAL_BEND_PROPERTIES is sheetmetal_standards.MATERIAL_BEND_PROPERTIES
+    assert sheetmetal_analysis.BendSequenceOptimizer is sheetmetal_standards.BendSequenceOptimizer
+    assert sheetmetal_analysis.calculate_bend_allowance is sheetmetal_standards.calculate_bend_allowance
+    assert sheetmetal_analysis.calculate_bend_deduction is sheetmetal_standards.calculate_bend_deduction
+    assert sheetmetal_analysis.calculate_flat_length is sheetmetal_standards.calculate_flat_length
+    assert sheetmetal_analysis.get_minimum_bend_radius is sheetmetal_standards.get_minimum_bend_radius
+    assert sheetmetal_analysis.recommend_v_opening is sheetmetal_standards.recommend_v_opening
+    assert sheetmetal_analysis.calculate_bend_force is sheetmetal_standards.calculate_bend_force
+    assert sheetmetal_analysis.calculate_complete_flat_pattern is sheetmetal_standards.calculate_complete_flat_pattern
+
+
+def test_sheetmetal_analysis_reexports_internal_geometry_analysis():
+    assert sheetmetal_analysis.HAS_OCP is sheetmetal_geometry_analysis.HAS_OCP
+    assert sheetmetal_analysis.DetectedBend is sheetmetal_geometry_analysis.DetectedBend
+    assert sheetmetal_analysis.analyze_sheet_metal_geometry is sheetmetal_geometry_analysis.analyze_sheet_metal_geometry
+
+
+def test_sheetmetal_analysis_reexports_internal_complete_analysis():
+    assert sheetmetal_analysis.analyze_sheetmetal_complete is sheetmetal_complete_analysis.analyze_sheetmetal_complete
+    assert sheetmetal_analysis._recommend_machine is sheetmetal_complete_analysis._recommend_machine
 
 
 def test_classification_step0_reuses_internal_metric_and_result_helpers():
