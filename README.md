@@ -22,13 +22,37 @@ Analyseert STEP CAD-bestanden: classificeert onderdelen, detecteert features (ga
 ### Vereisten
 
 - Python 3.10+
-- [FreeCAD](https://www.freecad.org/) (optioneel, voor plaatwerk ontvouwen)
+- Voor plaatwerk ontvouwen: een headless FreeCAD runtime met SheetMetal broncode
 
 ### Installatie
 
 ```bash
 pip install -r requirements.txt
 ```
+
+### Headless unfold runtime
+
+Voor ontvouwen is de desktop-app niet meer de aanbevolen route. Gebruik een beheerde headless runtime:
+
+```bash
+python -m manufacturing_pipeline.tools.ensure_unfold_runtime
+```
+
+Wat dit doet:
+- installeert een lokale FreeCAD runtime onder `.runtime/freecad` via `micromamba` of `conda`
+- haalt de `SheetMetal` workbench broncode op
+- verifieert `FreeCADCmd`, `Part` en `SheetMetalUnfolder`
+- slaat runtime-configuratie op zodat de pipeline die automatisch gebruikt
+
+Extra opties:
+
+```bash
+python -m manufacturing_pipeline.tools.ensure_unfold_runtime --no-install
+python -m manufacturing_pipeline.tools.ensure_unfold_runtime --update-sheetmetal
+python -m manufacturing_pipeline.tools.ensure_unfold_runtime --json
+```
+
+Op macOS en Windows gebruikt de pipeline standaard de subprocess-route via `FreeCADCmd`.
 
 ### Analyse draaien
 
@@ -63,7 +87,7 @@ python run_viewer.py
 - **Classificatie (4 categorieën)** — Vlakke plaat, gezette plaat, profiel, anders
 - **Gatdetectie** — Cilindrische gaten + vormgaten (sleuven, rechthoeken), tapgaten (ISO 68-1), verzonken gaten
 - **Zetanalyse** — Productierelevante zettingen, profielherkenning, ERP-telling
-- **Plaatwerk ontvouwen** — FreeCAD SheetMetal workbench, multi-poging strategie
+- **Plaatwerk ontvouwen** — Headless FreeCAD runtime + SheetMetal broncode, multi-poging strategie
 - **ERP-integratie** — XML/Excel export in SpaceClaim-formaat
 
 ## Architectuur
@@ -108,9 +132,11 @@ Pas hier waarden aan om de classificatie te tunen — geen codewijzigingen elder
 │   │   ├── classification_variables.py # Alle thresholds (single source of truth)
 │   │   ├── step_processing.py          # STEP-parsing, gat/zetdetectie
 │   │   ├── freecad_unfold.py           # FreeCAD ontvouw-integratie
+│   │   ├── sheetmetal/                 # Interne FreeCAD runtime / SheetMetal helpers
 │   │   └── ...
 │   ├── reporting/                      # PDF, Excel, XML, CLI output
 │   ├── scripts/                        # AAG analyzer, ERP vergelijking
+│   ├── tools/                          # Runtime installer / utility commands
 │   └── tests/                          # Testsuite
 │
 ├── viewer/                             # Web-based 3D viewer
