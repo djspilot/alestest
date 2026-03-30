@@ -6,13 +6,10 @@ Handles file discovery, selection, batch processing, and output directories.
 import os
 import sys
 import glob
-import subprocess
 from types import SimpleNamespace
 from multiprocessing import Pool
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PARTS_DIR = os.path.join(PROJECT_ROOT, "data", "input")
-OUTPUT_DIR = os.path.join(PROJECT_ROOT, "data", "output")
+from manufacturing_pipeline.core.paths import PARTS_DIR, OUTPUT_DIR
 
 
 def find_step_files(directory=None):
