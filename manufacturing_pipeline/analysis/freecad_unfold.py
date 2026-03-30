@@ -14,7 +14,9 @@ from typing import Optional, Any
 import math
 import json
 import tempfile
-import subprocess
+from manufacturing_pipeline.analysis.sheetmetal import freecad_environment as _freecad_environment
+from manufacturing_pipeline.analysis.sheetmetal import freecad_geometry as _freecad_geometry
+from manufacturing_pipeline.analysis.sheetmetal import freecad_process as _freecad_process
 
 FreeCAD = None
 Part = None
@@ -22,303 +24,45 @@ _FREECAD_IMPORT_ERROR = None
 
 
 def _candidate_freecad_paths():
-    """Build candidate FreeCAD python/module paths for multiple platforms."""
-    candidates = []
-
-    # Explicit override via env var (recommended for deployments)
-    freecad_path = os.getenv('FREECAD_PATH')
-    if freecad_path:
-        candidates.append(freecad_path)
-        candidates.append(os.path.join(freecad_path, 'bin'))
-        candidates.append(os.path.join(freecad_path, 'lib'))
-        candidates.append(os.path.join(freecad_path, 'Mod'))
-
-    # Windows common installs
-    program_files = os.environ.get('ProgramFiles', r'C:\Program Files')
-    program_files_x86 = os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')
-    for base in [program_files, program_files_x86]:
-        if base:
-            candidates.extend([
-                os.path.join(base, 'FreeCAD 1.0', 'bin'),
-                os.path.join(base, 'FreeCAD 1.0', 'Mod'),
-                os.path.join(base, 'FreeCAD', 'bin'),
-                os.path.join(base, 'FreeCAD', 'Mod'),
-                os.path.join(base, 'FreeCAD 0.21', 'bin'),
-                os.path.join(base, 'FreeCAD 0.21', 'Mod'),
-            ])
-
-    appdata = os.environ.get('APPDATA')
-    if appdata:
-        candidates.append(os.path.join(appdata, 'FreeCAD', 'Mod'))
-
-    # macOS/Homebrew + app bundle
-    mac_app = '/Applications/FreeCAD.app/Contents/Resources'
-    brew_app = '/opt/homebrew/Caskroom/freecad/1.0.2/FreeCAD.app/Contents/Resources'
-    for path in [mac_app, brew_app]:
-        candidates.extend([
-            os.path.join(path, 'lib'),
-            os.path.join(path, 'Mod'),
-        ])
-    candidates.append(os.path.expanduser('~/Library/Application Support/FreeCAD/Mod'))
-
-    # Linux common paths
-    candidates.extend([
-        '/usr/lib/freecad/lib',
-        '/usr/share/freecad/Mod',
-        '/usr/lib/freecad/Mod',
-        '/snap/freecad/current/usr/lib/freecad/lib',
-        '/snap/freecad/current/usr/share/freecad/Mod',
-        os.path.expanduser('~/.local/share/FreeCAD/Mod'),
-    ])
-
-    return candidates
+    return _freecad_environment._candidate_freecad_paths()
 
 
 def _should_prefer_freecadcmd() -> bool:
-    """Prefer the external FreeCADCmd path on platforms where direct import is fragile."""
-    mode = os.getenv("FREECAD_UNFOLD_MODE", "auto").strip().lower()
-    if mode == "subprocess":
-        return True
-    if mode == "direct":
-        return False
-    return sys.platform.startswith("win")
+    return _freecad_environment._should_prefer_freecadcmd()
 
 
 def _ensure_freecad_imported() -> bool:
-    """Import FreeCAD/Part lazily with platform-aware path setup."""
-    global FreeCAD, Part, _FREECAD_IMPORT_ERROR
-
-    if FreeCAD is not None and Part is not None:
-        return True
-
-    # Add candidate paths once at runtime
-    for path in _candidate_freecad_paths():
-        if path and os.path.isdir(path) and path not in sys.path:
-            sys.path.insert(0, path)
-
-    try:
-        import FreeCAD as _FreeCAD
-        import Part as _Part
-        FreeCAD = _FreeCAD
-        Part = _Part
-
-        try:
-            import FreeCADGui as _FreeCADGui
-            _FreeCADGui.Selection.getSelection()
-        except (ImportError, AttributeError):
-            sys.modules['FreeCADGui'] = MockFreeCADGui()
-
-        return True
-    except Exception as e:
-        _FREECAD_IMPORT_ERROR = str(e)
-        return False
+    imported = _freecad_environment._ensure_freecad_imported()
+    _sync_freecad_bindings()
+    return imported
 
 
 def _find_freecadcmd_executable() -> str:
-    """Find FreeCADCmd executable for subprocess fallback."""
-    env_path = os.getenv('FREECAD_CMD')
-    if env_path and os.path.exists(env_path):
-        return env_path
-
-    candidates = [
-        r"C:\Program Files\FreeCAD 1.0\bin\freecadcmd.exe",
-        r"C:\Program Files\FreeCAD\bin\freecadcmd.exe",
-        r"C:\Program Files\FreeCAD 0.21\bin\freecadcmd.exe",
-        r"C:\Program Files (x86)\FreeCAD\bin\freecadcmd.exe",
-        "/usr/bin/freecadcmd",
-        "/usr/local/bin/freecadcmd",
-        "/Applications/FreeCAD.app/Contents/MacOS/FreeCADCmd",
-    ]
-
-    for candidate in candidates:
-        if os.path.exists(candidate):
-            return candidate
-
-    return ''
+    return _freecad_environment._find_freecadcmd_executable()
 
 
 def _vector_components(value):
-    """Extract numeric XYZ components from FreeCAD/OCP point-like objects."""
-    for names in (('x', 'y', 'z'), ('X', 'Y', 'Z')):
-        if all(hasattr(value, name) for name in names):
-            return tuple(float(getattr(value, name)) for name in names)
-
-    if isinstance(value, (tuple, list)) and len(value) >= 3:
-        return float(value[0]), float(value[1]), float(value[2])
-
-    raise TypeError(f"Unsupported vector type: {type(value)!r}")
+    return _freecad_geometry._vector_components(value)
 
 
 def _normalize_components(x_value, y_value, z_value):
-    length = math.sqrt(x_value * x_value + y_value * y_value + z_value * z_value)
-    if length <= 1e-9:
-        raise ValueError("Zero-length vector")
-    return x_value / length, y_value / length, z_value / length
+    return _freecad_geometry._normalize_components(x_value, y_value, z_value)
 
 
 def _find_largest_planar_face(shape):
-    """Return the largest planar face of a FreeCAD shape, if any."""
-    largest_face = None
-    largest_area = -1.0
-
-    for face in getattr(shape, 'Faces', []):
-        try:
-            surface = getattr(face, 'Surface', None)
-            if surface is None or 'Plane' not in getattr(surface, 'TypeId', ''):
-                continue
-
-            area = float(face.Area)
-            if area > largest_area:
-                largest_face = face
-                largest_area = area
-        except Exception:
-            continue
-
-    return largest_face
+    return _freecad_geometry._find_largest_planar_face(shape)
 
 
 def _choose_plane_basis(normal):
-    """Build a stable in-plane basis from a face normal.
-
-    The basis is aligned to the projected global axis with the strongest in-plane
-    component. This keeps dimensions stable for rotated flat patterns.
-    """
-    nx_value, ny_value, nz_value = _normalize_components(*_vector_components(normal))
-
-    best_projection = None
-    best_axis = None
-    best_length = -1.0
-    for axis in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)):
-        dot = axis[0] * nx_value + axis[1] * ny_value + axis[2] * nz_value
-        proj_x = axis[0] - dot * nx_value
-        proj_y = axis[1] - dot * ny_value
-        proj_z = axis[2] - dot * nz_value
-        proj_len = math.sqrt(proj_x * proj_x + proj_y * proj_y + proj_z * proj_z)
-
-        if proj_len > best_length:
-            best_length = proj_len
-            best_projection = (proj_x, proj_y, proj_z)
-            best_axis = axis
-
-    if best_projection is None or best_length <= 1e-9:
-        raise ValueError("Could not derive plane basis")
-
-    ux_value, uy_value, uz_value = _normalize_components(*best_projection)
-    vx_value = ny_value * uz_value - nz_value * uy_value
-    vy_value = nz_value * ux_value - nx_value * uz_value
-    vz_value = nx_value * uy_value - ny_value * ux_value
-    vx_value, vy_value, vz_value = _normalize_components(vx_value, vy_value, vz_value)
-
-    return {
-        'u': (ux_value, uy_value, uz_value),
-        'v': (vx_value, vy_value, vz_value),
-        'normal': (nx_value, ny_value, nz_value),
-        'reference_axis': best_axis,
-    }
+    return _freecad_geometry._choose_plane_basis(normal)
 
 
 def _sample_edge_points(shape, samples_per_edge=33):
-    """Sample a shape's edges densely enough to capture arc extents."""
-    sample_points = []
-    for edge in getattr(shape, 'Edges', []):
-        points = None
-        try:
-            points = edge.discretize(samples_per_edge)
-        except Exception:
-            try:
-                points = edge.discretize(Number=samples_per_edge)
-            except Exception:
-                points = None
-
-        if not points:
-            try:
-                points = [edge.firstVertex().Point, edge.lastVertex().Point]
-            except Exception:
-                points = None
-
-        if points:
-            for point in points:
-                try:
-                    sample_points.append(_vector_components(point))
-                except Exception:
-                    continue
-
-    if sample_points:
-        return sample_points
-
-    for vertex in getattr(shape, 'Vertexes', []):
-        try:
-            sample_points.append(_vector_components(vertex.Point))
-        except Exception:
-            continue
-
-    return sample_points
+    return _freecad_geometry._sample_edge_points(shape, samples_per_edge=samples_per_edge)
 
 
 def _measure_flat_pattern_dimensions(flat_shape):
-    """Measure a flat pattern in its own plane instead of global XYZ.
-
-    Using the two largest global bbox axes works for many parts but fails for
-    rotated flat patterns. This projects sampled edge points into the dominant
-    flat-pattern plane and measures the 2D extents there.
-    """
-    bbox = flat_shape.BoundBox
-    raw_bbox = (
-        float(bbox.XLength),
-        float(bbox.YLength),
-        float(bbox.ZLength),
-    )
-    raw_sorted = sorted(raw_bbox, reverse=True)
-
-    dims = {
-        'flat_length': raw_sorted[0],
-        'flat_width': raw_sorted[1],
-        'raw_bbox': raw_bbox,
-        'projection_used': False,
-        'reference_axis': None,
-    }
-
-    largest_face = _find_largest_planar_face(flat_shape)
-    if largest_face is None:
-        return dims
-
-    try:
-        u_min, u_max, v_min, v_max = largest_face.ParameterRange
-        sample_u = (u_min + u_max) / 2.0
-        sample_v = (v_min + v_max) / 2.0
-    except Exception:
-        sample_u = 0.0
-        sample_v = 0.0
-
-    try:
-        normal = largest_face.normalAt(sample_u, sample_v)
-        basis = _choose_plane_basis(normal)
-    except Exception:
-        return dims
-
-    sample_points = _sample_edge_points(flat_shape)
-    if not sample_points:
-        return dims
-
-    ux_value, uy_value, uz_value = basis['u']
-    vx_value, vy_value, vz_value = basis['v']
-
-    projected_u = []
-    projected_v = []
-    for point_x, point_y, point_z in sample_points:
-        projected_u.append(point_x * ux_value + point_y * uy_value + point_z * uz_value)
-        projected_v.append(point_x * vx_value + point_y * vy_value + point_z * vz_value)
-
-    span_u = max(projected_u) - min(projected_u)
-    span_v = max(projected_v) - min(projected_v)
-    if span_u <= 1e-6 or span_v <= 1e-6:
-        return dims
-
-    dims['flat_length'] = max(span_u, span_v)
-    dims['flat_width'] = min(span_u, span_v)
-    dims['projection_used'] = True
-    dims['reference_axis'] = basis['reference_axis']
-    return dims
+    return _freecad_geometry._measure_flat_pattern_dimensions(flat_shape)
 
 
 def _unfold_via_freecadcmd(step_path, output_dxf=None, k_factor=0.44, max_attempts=5, max_bends=None):
@@ -342,58 +86,11 @@ def _unfold_via_freecadcmd(step_path, output_dxf=None, k_factor=0.44, max_attemp
 
     script = f'''import importlib.util\nimport json\nimport Part\nimport FreeCAD\nimport math\n\nHELPER_MODULE_PATH = {json.dumps(os.path.abspath(__file__))}\nUNFOLD_ERROR_MESSAGES = {json.dumps(UNFOLD_ERROR_MESSAGES, ensure_ascii=False)}\n\nspec = importlib.util.spec_from_file_location("freecad_unfold_host", HELPER_MODULE_PATH)\nfreecad_unfold_host = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(freecad_unfold_host)\n\ndef _result():\n    return {{\n        "success": False,\n        "flat_shape": None,\n        "flat_length": 0,\n        "flat_width": 0,\n        \n        "bend_angles": [],\n        "bend_radii": [],\n        "bend_lengths": [],\n        "bend_count": 0,\n        "bend_line_segments": [],\n        "bend_line_groups": [],\n        "error": None,\n        "attempts": 0,\n        "error_details": [],\n        "used_face_idx": None\n    }}\n\ndef _collect_bend_nodes(node, bend_list):\n    """Recursively collect Bend nodes from tree"""\n    if node is None:\n        return\n    try:\n        if hasattr(node, 'node_type'):\n            print(f"[DEBUG] Node type: {{node.node_type}}")\n            if node.node_type == 'Bend':\n                print(f"[DEBUG] Found Bend node!")\n                bend_list.append(node)\n        if hasattr(node, 'bend_angle') and node.bend_angle is not None:\n            print(f"[DEBUG] Node has bend_angle: {{node.bend_angle}}")\n        if hasattr(node, 'bend_dir') and node.bend_dir is not None:\n            print(f"[DEBUG] Node has bend_dir: {{node.bend_dir}}")\n        if hasattr(node, 'innerRadius') and node.innerRadius is not None:\n            print(f"[DEBUG] Node has innerRadius: {{node.innerRadius}}")\n\n        if hasattr(node, 'child_list'):\n            print(f"[DEBUG] Node has child_list attribute: {{node.child_list is not None}}, length: {{len(node.child_list) if node.child_list else 0}}")\n            if node.child_list:\n                print(f"[DEBUG] Node has {{len(node.child_list)}} children")\n                for child in node.child_list:\n                    _collect_bend_nodes(child, bend_list)\n        else:\n            print(f"[DEBUG] Node does NOT have child_list attribute")\n    except Exception as e:\n        print(f"[DEBUG] Error in _collect_bend_nodes: {{e}}")\n\ndef _signed_angle_deg(node):\n    raw_angle = getattr(node, 'bend_angle', None)\n    if raw_angle is None:\n        return None\n\n    try:\n        angle_deg = abs(float(raw_angle) * 180.0 / 3.14159265)\n    except Exception:\n        return None\n\n    direction = getattr(node, 'bend_dir', None)\n    sign = 1.0\n\n    if isinstance(direction, str):\n        token = direction.strip().lower()\n        if token in ('down', 'negative', '-', 'minus', '-1'):\n            sign = -1.0\n        elif token in ('up', 'positive', '+', 'plus', '1'):\n            sign = 1.0\n    elif isinstance(direction, (int, float)):\n        if float(direction) < 0:\n            sign = -1.0\n        elif float(direction) > 0:\n            sign = 1.0\n\n    return angle_deg * sign\n\ndef _extract_bends_from_tree(tree_root):\n    """Extract bend parameters from SheetTree node structure"""\n    result = {{\n        "bend_angles": [],\n        "bend_radii": [],\n        "bend_lengths": [],\n        "bend_count": 0\n    }}\n\n    try:\n        print(f"[DEBUG] Starting tree extraction...")\n        print(f"[DEBUG] Tree root type: {{type(tree_root).__name__}}")\n        print(f"[DEBUG] Tree root attributes: {{[attr for attr in dir(tree_root) if not attr.startswith('_')][:20]}}")\n        bend_nodes = []\n        _collect_bend_nodes(tree_root, bend_nodes)\n        print(f"[DEBUG] Found {{len(bend_nodes)}} bend nodes")\n\n        for node in bend_nodes:\n            try:\n                signed_angle = _signed_angle_deg(node)\n                if signed_angle is not None:\n                    result["bend_angles"].append(round(signed_angle, 2))\n                    print(f"[DEBUG] Bend angle: {{signed_angle}}°")\n\n                if hasattr(node, 'innerRadius') and node.innerRadius is not None:\n                    result["bend_radii"].append(round(node.innerRadius, 2))\n                    print(f"[DEBUG] Inner radius: {{node.innerRadius}} mm")\n\n                if hasattr(node, '_trans_length') and node._trans_length is not None:\n                    result["bend_lengths"].append(round(node._trans_length, 2))\n                    print(f"[DEBUG] Trans length: {{node._trans_length}} mm")\n                elif hasattr(node, 'p_wire') and node.p_wire is not None:\n                    try:\n                        result["bend_lengths"].append(round(node.p_wire.Length, 2))\n                        print(f"[DEBUG] Wire length: {{node.p_wire.Length}} mm")\n                    except:\n                        pass\n            except Exception as e:\n                print(f"[DEBUG] Error extracting from node: {{e}}")\n\n        result["bend_count"] = len(result["bend_angles"])\n        print(f"[DEBUG] Final bend_count: {{result['bend_count']}}")\n    except Exception as e:\n        print(f"[DEBUG] Error in _extract_bends_from_tree: {{e}}")\n\n    return result\n\ndef _analyze_bends(solid, max_bends=0):\n    """FALLBACK: Analyze cylindrical faces to extract bend parameters"""\n    bends = {{\n        "bend_angles": [],\n        "bend_radii": [],\n        "bend_lengths": [],\n        "bend_count": 0\n    }}\n\n    try:\n        cylinders = []\n        for face in solid.Faces:\n            try:\n                surf_type = face.Surface.TypeId\n                if "Cylinder" in surf_type:\n                    cyl = face.Surface\n                    radius = cyl.Radius\n                    u_min, u_max, v_min, v_max = face.ParameterRange\n                    angle_rad = abs(u_max - u_min)\n                    angle_deg = angle_rad * 180.0 / 3.14159265\n                    length = abs(v_max - v_min)\n\n                    if angle_rad > 0.3 and length > 5:\n                        cylinders.append({{\n                            "radius": radius,\n                            "angle_deg": angle_deg,\n                            "length": length,\n                            "area": face.Area\n                        }})\n            except:\n                pass\n\n        unique = {{}}\n        for cyl in cylinders:\n            key = (round(cyl["angle_deg"], 1), round(cyl["length"], 1))\n            if key not in unique:\n                unique[key] = cyl\n            elif cyl["radius"] < unique[key]["radius"]:\n                unique[key] = cyl\n\n        sorted_bends = sorted(unique.values(), key=lambda x: x["area"], reverse=True)\n        if max_bends > 0:\n            sorted_bends = sorted_bends[:max_bends]\n\n        for bend in sorted_bends:\n            bends["bend_radii"].append(round(bend["radius"], 2))\n            bends["bend_angles"].append(round(bend["angle_deg"], 2))\n            bends["bend_lengths"].append(round(bend["length"], 2))\n\n        bends["bend_count"] = len(sorted_bends)\n    except:\n        pass\n\n    return bends\n\ndef _candidates(shape):\n    planar = []\n    for i, face in enumerate(shape.Faces):\n        try:\n            t = face.Surface.TypeId\n            if "Plane" in t:\n                planar.append((i, face.Area))\n        except Exception:\n            pass\n    planar.sort(key=lambda x: x[1], reverse=True)\n    return planar\n\ndef run(data):\n    res = _result()\n    try:\n        shape = Part.read(data["step_path"])\n        if not shape.Solids:\n            res["error"] = "Geen solids gevonden in STEP file"\n            print(json.dumps(res))\n            return\n\n        solid = shape.Solids[0] if len(shape.Solids) > 1 else shape\n\n        cand = _candidates(solid)\n        if not cand:\n            res["error"] = "Geen vlakke oppervlakken gevonden"\n            print(json.dumps(res))\n            return\n\n        import SheetMetalUnfolder\n\n        k_lookup = {{}}\n        for t in [0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 15.0, 20.0]:\n            k_lookup[t] = float(data["k_factor"])\n\n        attempts_to_try = min(int(data["max_attempts"]), len(cand))\n\n        for attempt, (face_idx, area) in enumerate(cand[:attempts_to_try]):\n            res["attempts"] = attempt + 1\n            doc = FreeCAD.newDocument("UnfoldDoc")\n            try:\n                obj = doc.addObject("Part::Feature", "SheetPart")\n                obj.Shape = solid\n                doc.recompute()\n\n                try:\n                    tree = SheetMetalUnfolder.SheetTree(solid, face_idx, k_lookup, obj)\n                except TypeError:\n                    tree = SheetMetalUnfolder.SheetTree(solid, face_idx, k_lookup)\n                if tree.error_code:\n                    msg = UNFOLD_ERROR_MESSAGES.get(tree.error_code, f"Onbekende fout ({{tree.error_code}})")\n                    res["error_details"].append({{"face_idx": face_idx, "stage": "init", "error_code": tree.error_code, "message": msg}})\n                    continue\n\n                tree.Bend_analysis(face_idx, None)\n                if tree.error_code:\n                    msg = UNFOLD_ERROR_MESSAGES.get(tree.error_code, f"Onbekende fout ({{tree.error_code}})")\n                    res["error_details"].append({{"face_idx": face_idx, "stage": "analysis", "error_code": tree.error_code, "message": msg}})\n                    continue\n\n                if hasattr(tree, "root") and tree.root:\n                    face_list, fold_lines = tree.unfold_tree2(tree.root)\n                    if tree.error_code:\n                        msg = UNFOLD_ERROR_MESSAGES.get(tree.error_code, f"Onbekende fout ({{tree.error_code}})")\n                        res["error_details"].append({{"face_idx": face_idx, "stage": "unfold", "error_code": tree.error_code, "message": msg}})\n                        continue\n\n                    print(f"[DEBUG] fold_lines: {{type(fold_lines).__name__}}, length: {{len(fold_lines) if fold_lines else 0}}")\n                    if fold_lines:\n                        for i, line in enumerate(fold_lines[:3]):\n                            print(f"[DEBUG] fold_line[{{i}}]: {{type(line).__name__}}")\n                            if hasattr(line, '__dict__'):\n                                print(f"[DEBUG] fold_line[{{i}}] dict: {{line.__dict__}}")\n\n                    bend_params = _extract_bends_from_tree(tree.root)\n                    res["bend_angles"] = bend_params["bend_angles"]\n                    res["bend_radii"] = bend_params["bend_radii"]\n                    res["bend_lengths"] = bend_params["bend_lengths"]\n                    res["bend_count"] = bend_params["bend_count"]\n\n                    if res["bend_count"] == 0:\n                        bend_params_fallback = _analyze_bends(solid, max_bends=int(data.get("max_bends", 0)))\n                        res["bend_angles"] = bend_params_fallback["bend_angles"]\n                        res["bend_radii"] = bend_params_fallback["bend_radii"]\n                        res["bend_lengths"] = bend_params_fallback["bend_lengths"]\n                        res["bend_count"] = bend_params_fallback["bend_count"]\n                    if tree.error_code:\n                        msg = UNFOLD_ERROR_MESSAGES.get(tree.error_code, f"Onbekende fout ({{tree.error_code}})")\n                        res["error_details"].append({{"face_idx": face_idx, "stage": "unfold", "error_code": tree.error_code, "message": msg}})\n                        continue\n\n                    if face_list:\n                        try:\n                            flat_shape = Part.Shell(face_list)\n                        except Exception:\n                            flat_shape = Part.Compound(face_list)\n\n                        dims_info = freecad_unfold_host._measure_flat_pattern_dimensions(flat_shape)\n                        res["flat_length"] = dims_info["flat_length"]\n                        res["flat_width"] = dims_info["flat_width"]\n                        res["bend_line_segments"] = freecad_unfold_host._extract_fold_line_segments_from_edges(fold_lines, flat_shape)\n\n                        res["success"] = True\n                        res["used_face_idx"] = int(face_idx)\n\n                        if data.get("output_dxf"):\n                            try:\n                                import importDXF\n                                export_doc = FreeCAD.newDocument("ExportDoc")\n                                exp_obj = export_doc.addObject("Part::Feature", "FlatPattern")\n                                exp_obj.Shape = flat_shape\n                                importDXF.export([exp_obj], data["output_dxf"])\n                                FreeCAD.closeDocument("ExportDoc")\n                            except Exception:\n                                pass\n\n                        print(json.dumps(res))\n                        return\n\n            except Exception as e:\n                res["error_details"].append({{"face_idx": int(face_idx), "stage": "exception", "error_code": -1, "message": str(e)}})\n            finally:\n                try:\n                    FreeCAD.closeDocument("UnfoldDoc")\n                except Exception:\n                    pass\n\n        if res["error_details"]:\n            code = res["error_details"][-1].get("error_code", -1)\n            res["error"] = UNFOLD_ERROR_MESSAGES.get(code, f"Unfold gefaald na {{res['attempts']}} pogingen")\n        else:\n            res["error"] = f"Unfold gefaald na {{res['attempts']}} pogingen"\n\n    except Exception as e:\n        res["error"] = str(e)\n\n    print(json.dumps(res))\n\nrun({json.dumps(payload)})\n'''
 
-    tmp_file = None
-    try:
-        with tempfile.NamedTemporaryFile('w', suffix='_freecad_unfold.py', delete=False, encoding='utf-8') as handle:
-            handle.write(script)
-            tmp_file = handle.name
-
-        proc = subprocess.run(
-            [freecadcmd, tmp_file],
-            capture_output=True,
-            text=True,
-            timeout=300,
-            check=False
-        )
-
-        output_lines = [line.strip() for line in (proc.stdout or '').splitlines() if line.strip()]
-        
-        # Print debug output
-        for line in output_lines:
-            if not (line.startswith('{') and line.endswith('}')):
-                if '[DEBUG]' in line:
-                    print(line)
-        
-        for line in reversed(output_lines):
-            if line.startswith('{') and line.endswith('}'):
-                try:
-                    data = json.loads(line)
-                    data.setdefault('error_details', [])
-                    data.setdefault('attempts', 0)
-                    return data
-                except Exception:
-                    continue
-
-        stderr = (proc.stderr or '').strip()
-        return {
-            'success': False,
-            'error': f'FreeCADCmd uitvoer niet parsebaar (code {proc.returncode}): {stderr[:300]}',
-            'attempts': 0,
-            'error_details': []
-        }
-    except Exception as e:
-        return {
-            'success': False,
-            'error': f'FreeCADCmd fallback error: {e}',
-            'attempts': 0,
-            'error_details': []
-        }
-    finally:
-        if tmp_file and os.path.exists(tmp_file):
-            try:
-                os.remove(tmp_file)
-            except Exception:
-                pass
+    return _freecad_process.run_freecadcmd_script(
+        freecadcmd,
+        script,
+        timeout_seconds=300,
+    )
 
 # Mock FreeCADGui voor headless mode
 class MockSelection:
@@ -1615,6 +1312,13 @@ def calculate_theoretical_unfold(step_path, k_factor=0.44):
         result['error'] = str(e)
 
     return result
+
+
+def _sync_freecad_bindings() -> None:
+    global FreeCAD, Part, _FREECAD_IMPORT_ERROR
+    FreeCAD = _freecad_environment.FreeCAD
+    Part = _freecad_environment.Part
+    _FREECAD_IMPORT_ERROR = _freecad_environment._FREECAD_IMPORT_ERROR
 
 
 # Command line interface

@@ -2,7 +2,8 @@
 Centralized classification thresholds and score-model settings.
 
 This module is intentionally simple and dependency-free so all classification
-logic can import the same source of truth.
+logic can import the same source of truth.  Every constant lives in exactly one
+place — tests below assert domain constraints (positive, bounded, ordered).
 
 DOCUMENTATION:
 - Complete decision tree: docs/CLASSIFICATION_DECISION_TREE.md

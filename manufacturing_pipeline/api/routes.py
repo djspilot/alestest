@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
 
-from manufacturing_pipeline.api.config import ALLOWED_EXTENSIONS, MAX_FILE_SIZE_MB, UPLOAD_DIR
+from manufacturing_pipeline.api.config import ALLOWED_EXTENSIONS, DISABLE_STAGES, MAX_FILE_SIZE_MB, UPLOAD_DIR, VALID_STAGE_KEYS
 from manufacturing_pipeline.api.schemas import (
     AnalysisResult,
     HealthResponse,
@@ -58,7 +58,7 @@ def _refresh_live_summary(summary_raw: dict | None) -> dict | None:
     return summary
 
 
-def _run_analysis_job(job_id: str, step_path: str, use_aag: bool):
+def _run_analysis_job(job_id: str, step_path: str, use_aag: bool, disable_stages: set[str] | None = None):
     """Background task that runs the analysis and updates job state."""
     jobs.mark_processing(job_id)
     try:
@@ -66,6 +66,7 @@ def _run_analysis_job(job_id: str, step_path: str, use_aag: bool):
             step_path,
             use_aag=use_aag,
             progress_callback=lambda event, summary: jobs.record_progress(job_id, event, summary),
+            disable_stages=disable_stages,
         )
         jobs.mark_completed(job_id, result)
     except Exception as e:
@@ -81,11 +82,22 @@ async def analyze(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     aag: bool = Query(True, description="Run AAG topology-based feature recognition"),
+    disable_stages: str = Query("", description="Comma-separated stage keys to disable: classify_geometry, detect_holes_pre_unfold, unfold, detect_holes, aag"),
 ):
     """Upload a STEP file for manufacturing analysis.
 
     Returns a job_id that can be polled via GET /jobs/{job_id}.
     """
+    # Parse and validate disable_stages
+    request_disabled = {s.strip() for s in disable_stages.split(",") if s.strip()}
+    invalid_keys = request_disabled - VALID_STAGE_KEYS
+    if invalid_keys:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid disable_stages keys: {', '.join(sorted(invalid_keys))}. Valid: {', '.join(sorted(VALID_STAGE_KEYS))}",
+        )
+    merged_disable_stages = DISABLE_STAGES | request_disabled
+
     # Validate file extension
     _, ext = os.path.splitext(file.filename or "")
     if ext.lower() not in ALLOWED_EXTENSIONS:
@@ -116,7 +128,7 @@ async def analyze(
                       file_name=file.filename or "upload.step",
                       file_hash=file_hash,
                       file_size_bytes=len(content))
-    background_tasks.add_task(_run_analysis_job, job_id, step_path, aag)
+    background_tasks.add_task(_run_analysis_job, job_id, step_path, aag, merged_disable_stages)
 
     return JobCreated(job_id=job_id, created_at=job.created_at)
 
@@ -140,7 +152,7 @@ async def list_jobs(
 @router.get("/jobs/{job_id}", response_model=JobStatus)
 async def get_job(
     job_id: str,
-    format: str = Query("json", description="Response format: json, csv, xml, or excel"),
+    format: str = Query("json", description="Response format: json, csv, or xml"),
 ):
     """Get the status and result of an analysis job."""
     job = jobs.get(job_id)
@@ -153,8 +165,6 @@ async def get_job(
     if format == "xml" and job.status == "completed" and job.result:
         return _result_to_xml(job.result)
 
-    if format == "excel" and job.status == "completed" and job.result:
-        return _result_to_excel(job.result)
 
     if job.status == "completed":
         timeline_raw = (job.result or {}).get("timeline") or []
@@ -295,27 +305,3 @@ def _result_to_xml(result: dict) -> str:
         raise HTTPException(status_code=500, detail=f"XML export failed: {str(e)}")
 
 
-def _result_to_excel(result: dict):
-    """Convert analysis result dict to Excel (SpaceClaim format) response."""
-    from fastapi.responses import Response
-    from manufacturing_pipeline.reporting.excel_exporter import export_to_excel
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
-        tmp_path = Path(tmp.name)
-
-    try:
-        export_to_excel([result], tmp_path)
-        excel_content = tmp_path.read_bytes()
-        tmp_path.unlink()
-
-        filename = Path(result.get('file', 'result')).stem
-        return Response(
-            content=excel_content,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f"attachment; filename={filename}.xlsx"},
-        )
-
-    except Exception as e:
-        if tmp_path.exists():
-            tmp_path.unlink()
-        raise HTTPException(status_code=500, detail=f"Excel export failed: {str(e)}")

@@ -1,8 +1,0 @@
-# Additional requirements for file watcher service
-# These are on top of the main requirements.txt
-
-# File system monitoring
-watchdog==3.0.0
-
-# Environment variable management
-python-dotenv==1.0.0

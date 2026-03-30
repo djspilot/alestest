@@ -22,3 +22,11 @@ DB_PATH = os.environ.get("DB_PATH", os.path.join(
 
 # Toegestane STEP-bestandsextensies
 ALLOWED_EXTENSIONS = {".step", ".stp"}
+
+# All valid stage keys that can be disabled
+VALID_STAGE_KEYS = {"classify_geometry", "detect_holes_pre_unfold", "unfold", "detect_holes", "aag"}
+
+# Comma-separated list of stages to disable by default
+DISABLE_STAGES: set[str] = {
+    s.strip() for s in os.environ.get("DISABLE_STAGES", "").split(",") if s.strip()
+}

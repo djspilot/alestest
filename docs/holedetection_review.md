@@ -258,6 +258,32 @@ Een vormgat wordt opgenomen als:
 - het geen pure cirkel is
 - de edge-samenstelling overeenkomt met Slot, Rect (R), Rect of Poly
 
+### Methodevolgorde voor irregulaire contouren (primair + fallback)
+Voor het pad "andere holes zijn al gedetecteerd, maar irregulair nog niet" geldt nu deze volgorde:
+1. **Face Boundary (primair):** haal per planaire face eerst de wire-set op, behandel grootste wire als buitencontour en alle overige wires als hole-kandidaten.
+2. **Shaped classificatie:** classificeer kandidaten als Slot/Rect (R)/Rect/Poly op basis van line/arc samenstelling.
+3. **Recovery Bucket (fallback):** alleen kandidaten die niet in stap 2 landen, worden via endpoint hashing + wire walking opnieuw opgebouwd tot gesloten contour.
+
+Rationale:
+- Face Boundary volgt direct de topologische definitie van OpenCASCADE (outer wire + inner wires)
+- hierdoor worden line+arc combinaties eerst kernel-native benaderd, vóór reconstructie-fallback
+
+### Nieuwe fallback: recovery bucket voor gemengde contouren (line + arc)
+Actieve uitbreiding:
+- inner-wire kandidaten die niet direct als bekende vorm zijn herkend, gaan naar een recovery bucket
+- recovery reconstrueert gesloten lussen uit edge-fragmenten via endpoint hashing + wire walking
+- als een gesloten lus valide is, wordt deze alsnog toegevoegd als shaped hole (`Recovered contour` of afgeleide Slot/Rect/Poly)
+
+Validatie in fallbackpad:
+- minimale lusgrootte: `>= 3` edges
+- closure gate: begin/eindpunt binnen tolerance
+- perimeter gate: `> 0`
+
+Output-impact:
+- recovered holes worden meegeteld in shaped hole output
+- debug payload bevat `contour_points` (exacte polyline punten)
+- viewer kan deze contouren direct als exacte rand tekenen in plaats van benaderde primitives
+
 Output-notitie (actueel):
 - vormgaten worden wel meegeteld en gemeten
 - maar niet als aparte labelcategorie naar XML geschreven
@@ -626,6 +652,7 @@ Wordt naar `Tube_*` velden geschreven, o.a.:
 - turned-part bore reject: `depth > 0.5 * min_dim`
 
 ### `detect_shaped_holes`
+- irregulaire methodiekvolgorde: Face Boundary eerst, Recovery Bucket daarna
 - shaped dedup center tolerance: `dist_sq < 0.01`
 - shaped dedup normal alignment: `dot > 0.9`
 
@@ -678,6 +705,7 @@ Wordt naar `Tube_*` velden geschreven, o.a.:
 
 1. `detect_shaped_holes` gebruikt de aanname dat elke inner wire op een planair vlak een gat is.
    - bij profielen is nu een end-face filter toegevoegd voor grote holle-kern openingen
+   - daarnaast is een recovery bucket toegevoegd voor gemengde contourfragmenten op unfold geometry
    - resterend risico: complexe end-features die sterk op een holle kern lijken
 
 2. Thread-detectie is diameter-gedreven.

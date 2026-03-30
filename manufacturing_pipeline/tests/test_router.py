@@ -1,6 +1,6 @@
 """Tests for profile routing."""
 import pytest
-from manufacturing_pipeline.core.models import RouteCategory
+from manufacturing_pipeline.analysis.router import RouteCategory, RouteResult, map_profile_label
 
 
 def test_route_category_values():
@@ -12,10 +12,6 @@ def test_route_category_values():
 
 def test_route_category_has_four_members():
     assert len(RouteCategory) == 4
-
-
-from manufacturing_pipeline.analysis.router import RouteResult, map_profile_label
-
 
 def test_map_plat_staal_to_plaat():
     result = map_profile_label("PLAT_STAAL", 0.98)

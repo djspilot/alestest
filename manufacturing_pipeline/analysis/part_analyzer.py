@@ -15,6 +15,11 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple, Any
 from enum import Enum
 
+from manufacturing_pipeline.analysis.part_analysis.rules import (
+    classify_part_type,
+    determine_unfold_reason,
+)
+
 
 class PartType(Enum):
     """Classificatie van onderdeel types"""
@@ -401,93 +406,26 @@ def analyze_part_geometry(shape, name: str = "Part") -> PartAnalysis:
                 ))
 
     # === STAP 7: Profiel classificatie ===
-    is_profile = False
-    part_type = PartType.OVERIG
-    bend_count_erp = bend_count_total
-
-    if is_turned:
-        # Check aspect ratio (Length / Diameter)
-        # Assuming height is diameter (smallest dim) or width
-        diameter = max(width, height)
-        aspect_ratio = length / diameter if diameter > 0 else 0
-        
-        # Determine if it's a tube/bar profile vs a machined part
-        # High aspect ratio usually implies stock material (bar/tube)
-        if aspect_ratio > 4.0:
-            part_type = PartType.BUIS
-            is_profile = True
-            reasoning.append(AnalysisReason(
-                step="Profiel Type",
-                observation=f"Cilindrisch met aspect ratio {aspect_ratio:.1f}",
-                conclusion="BUIS/STAF - ingekocht profiel",
-                details={"aspect_ratio": aspect_ratio}
-            ))
-        else:
-            part_type = PartType.DRAAISTUK
-    elif is_sheet_metal:
-        if is_closed_profile:
-            part_type = PartType.KOKER
-            is_profile = True
-            bend_count_erp = 0
-            reasoning.append(AnalysisReason(
-                step="Profiel Type",
-                observation=f"Gesloten profiel met {bend_count_total} zettingen",
-                conclusion="KOKER PROFIEL - ingekocht, 0 zettingen voor ERP",
-                details={}
-            ))
-        elif bend_count_total == 0:
-            part_type = PartType.PLAAT
-        elif bend_count_total in [1, 2, 3]:
-            # Integration A: Check of dit een ingekocht profiel is
-            if bend_count_total == 1:
-                part_type = PartType.HOEKPROFIEL
-            elif bend_count_total == 2:
-                part_type = PartType.U_PROFIEL
-            elif bend_count_total == 3:
-                part_type = PartType.C_PROFIEL
-
-            # Heuristics voor ingekocht profiel:
-            # 1. Hoge aspect ratio (langwerpig)
-            # 2. Buigingen lopen over de gehele lengte
-            # 3. Afmetingen zijn "mooie" getallen (standaard maten)
-            aspect_ratio_len = length / width if width > 0 else 0
-            
-            is_likely_stock = False
-            # Als aspect ratio > 4 en buigingen vullen > 90% van de lengte
-            if aspect_ratio_len > 3.0: # Iets ruimer nemen (bijv. kort stukje koker)
-                all_long_bends = all(b.length > length * 0.9 for b in bends)
-                
-                # Check of breedte/hoogte standaardwaarden zijn (bijv. 20, 25, 30, 40, 50, ...)
-                standard_dims = [10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 100, 120, 150, 200]
-                is_standard_w = any(abs(width - s) < 0.5 for s in standard_dims)
-                is_standard_h = any(abs(height - s) < 0.5 for s in standard_dims)
-                
-                if all_long_bends and (is_standard_w or is_standard_h):
-                    is_likely_stock = True
-            
-            if is_likely_stock:
-                is_profile = True
-                bend_count_erp = 0
-                reasoning.append(AnalysisReason(
-                    step="Profiel Type",
-                    observation=f"{part_type.value} met aspect ratio {aspect_ratio_len:.1f}, bends over volle lengte en standaard afmetingen",
-                    conclusion=f"{part_type.value.upper()} PROFIEL (ingekocht) - 0 zettingen voor ERP",
-                    details={"aspect_ratio": aspect_ratio_len, "width": width, "height": height}
-                ))
-        else:
-            part_type = PartType.COMPLEX
-    else:
-        # Check aspect ratio voor profiel detectie
-        aspect_ratio = length / width if width > 0 else 0
-        if aspect_ratio > 5:
-            is_profile = True
-            part_type = PartType.KOKER_PROFIEL
-            reasoning.append(AnalysisReason(
-                step="Profiel Type",
-                observation=f"Aspect ratio {aspect_ratio:.1f} (lengte/breedte > 5)",
-                conclusion="Langwerpig PROFIEL - waarschijnlijk ingekocht",
-                details={"aspect_ratio": aspect_ratio}
-            ))
+    part_type, is_profile, bend_count_erp, profile_reason_entries = classify_part_type(
+        is_turned=is_turned,
+        is_sheet_metal=is_sheet_metal,
+        is_closed_profile=is_closed_profile,
+        bend_count_total=bend_count_total,
+        length=length,
+        width=width,
+        height=height,
+        bends=bends,
+        part_type_values={item.name: item for item in PartType},
+    )
+    for entry in profile_reason_entries:
+        reasoning.append(
+            AnalysisReason(
+                step=str(entry["step"]),
+                observation=str(entry["observation"]),
+                conclusion=str(entry["conclusion"]),
+                details=dict(entry.get("details", {})),
+            )
+        )
 
     # === STAP 8: Gaten analyse ===
     holes = []
@@ -598,25 +536,12 @@ def analyze_part_geometry(shape, name: str = "Part") -> PartAnalysis:
         ))
 
     # === STAP 9: Unfold mogelijkheid ===
-    can_unfold = is_sheet_metal and not is_profile
-    unfold_reason = ""
-
-    if is_sheet_metal:
-        if is_profile:
-            can_unfold = False
-            unfold_reason = "Profiel - ingekocht, geen ontbuigen nodig"
-        elif bend_count_total == 0:
-            can_unfold = False
-            unfold_reason = "Vlakke plaat - geen buigingen om te ontbuigen"
-        else:
-            can_unfold = True
-            unfold_reason = f"Plaatwerk met {bend_count_total} zettingen - kan worden ontbogen"
-    elif is_turned:
-        can_unfold = False
-        unfold_reason = "Draaistuk - geen plaatwerk"
-    else:
-        can_unfold = False
-        unfold_reason = "Geen plaatwerk gedetecteerd"
+    can_unfold, unfold_reason = determine_unfold_reason(
+        is_sheet_metal=is_sheet_metal,
+        is_profile=is_profile,
+        bend_count_total=bend_count_total,
+        is_turned=is_turned,
+    )
 
     reasoning.append(AnalysisReason(
         step="Unfold Analyse",

@@ -39,6 +39,8 @@ from shapely.ops import unary_union
 from scipy.spatial.distance import cdist
 from scipy.cluster.hierarchy import linkage, fcluster
 
+from manufacturing_pipeline.analysis.geometry import profile_sections as shared_profile_sections
+
 
 # -----------------------------------------------------------------------------
 # Small data objects
@@ -1460,3 +1462,57 @@ def add_template_from_spec(registry: ProfileRegistry, spec: dict[str, Any]) -> N
 
 if __name__ == "__main__":
     print("step_profile_classifier.py loaded successfully.")
+
+
+# Canonical shared ownership for duplicated 2D/profile helpers now lives in
+# analysis.geometry.profile_sections. Keep the legacy names here for
+# compatibility while later refactors trim the duplicated local bodies.
+AxisCandidate = shared_profile_sections.AxisCandidate
+Section2D = shared_profile_sections.Section2D
+SectionFeatures = shared_profile_sections.SectionFeatures
+TemplateMatch = shared_profile_sections.TemplateMatch
+ProfileTemplate = shared_profile_sections.ProfileTemplate
+ProfileRegistry = shared_profile_sections.ProfileRegistry
+normalize = shared_profile_sections.normalize
+unique_rows_rounded = shared_profile_sections.unique_rows_rounded
+orthonormal_basis_from_normal = shared_profile_sections.orthonormal_basis_from_normal
+project_points_to_plane = shared_profile_sections.project_points_to_plane
+polygon_signed_area = shared_profile_sections.polygon_signed_area
+simplify_relative = shared_profile_sections.simplify_relative
+normalize_section_polygon = shared_profile_sections.normalize_section_polygon
+section_distance = shared_profile_sections.section_distance
+count_reentrant_corners = shared_profile_sections.count_reentrant_corners
+reflect_polygon_about_axis = shared_profile_sections.reflect_polygon_about_axis
+symmetry_score = shared_profile_sections.symmetry_score
+detect_symmetry_axes = shared_profile_sections.detect_symmetry_axes
+extract_section_features = shared_profile_sections.extract_section_features
+make_round_bar = shared_profile_sections.make_round_bar
+make_pipe = shared_profile_sections.make_pipe
+make_flat_bar = shared_profile_sections.make_flat_bar
+make_rectangular_tube = shared_profile_sections.make_rectangular_tube
+make_i_section = shared_profile_sections.make_i_section
+make_u_section = shared_profile_sections.make_u_section
+make_l_section = shared_profile_sections.make_l_section
+make_t_section = shared_profile_sections.make_t_section
+match_templates = shared_profile_sections.match_templates
+
+# Keep template builder registry aligned with canonical shared helper ownership.
+TEMPLATE_BUILDERS = {
+    "round_bar": make_round_bar,
+    "pipe": make_pipe,
+    "flat_bar": make_flat_bar,
+    "rect_tube": make_rectangular_tube,
+    "i_section": make_i_section,
+    "u_section": make_u_section,
+    "l_section": make_l_section,
+    "t_section": make_t_section,
+}
+
+assert TEMPLATE_BUILDERS["round_bar"] is shared_profile_sections.make_round_bar
+assert TEMPLATE_BUILDERS["pipe"] is shared_profile_sections.make_pipe
+assert TEMPLATE_BUILDERS["flat_bar"] is shared_profile_sections.make_flat_bar
+assert TEMPLATE_BUILDERS["rect_tube"] is shared_profile_sections.make_rectangular_tube
+assert TEMPLATE_BUILDERS["i_section"] is shared_profile_sections.make_i_section
+assert TEMPLATE_BUILDERS["u_section"] is shared_profile_sections.make_u_section
+assert TEMPLATE_BUILDERS["l_section"] is shared_profile_sections.make_l_section
+assert TEMPLATE_BUILDERS["t_section"] is shared_profile_sections.make_t_section

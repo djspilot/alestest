@@ -1,0 +1,43 @@
+import { describe, it, expect } from 'vitest'
+import { normalizeStageName, formatDuration, formatLabel, formatDetailValue, parseIsoToMs } from '../pipelineUi'
+
+describe('pipelineUi', () => {
+  it('normalizes Profile Router to Classify geometry', () => {
+    expect(normalizeStageName('Profile Router')).toBe('Classify geometry')
+  })
+
+  it('normalizes Detect holes to merged stage', () => {
+    expect(normalizeStageName('Detect holes')).toBe('Unfold / Detect holes')
+  })
+
+  it('formats short durations', () => {
+    expect(formatDuration(5.3)).toBe('5.3s')
+  })
+
+  it('formats minute durations', () => {
+    expect(formatDuration(125)).toBe('2m 05s')
+  })
+
+  it('formats labels with underscores', () => {
+    expect(formatLabel('stage_start')).toBe('Stage Start')
+  })
+
+  it('formats detail values for null', () => {
+    expect(formatDetailValue(null)).toBe('n.v.t.')
+  })
+
+  it('formats detail values for booleans', () => {
+    expect(formatDetailValue(true)).toBe('ja')
+    expect(formatDetailValue(false)).toBe('nee')
+  })
+
+  it('parses ISO timestamps', () => {
+    const ms = parseIsoToMs('2024-01-15T10:30:00.000Z')
+    expect(ms).toBe(Date.UTC(2024, 0, 15, 10, 30, 0))
+  })
+
+  it('returns null for invalid ISO', () => {
+    expect(parseIsoToMs('not-a-date')).toBeNull()
+    expect(parseIsoToMs(null)).toBeNull()
+  })
+})

@@ -4,15 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a **manufacturing analysis pipeline** that processes STEP CAD files to extract geometric data, analyze components, detect holes/features, and generate reports. The pipeline includes comprehensive **Dutch/ISO manufacturing standards** analysis for tolerances, fits, threads, surface finish, and material calculations.
+This is a **manufacturing analysis pipeline** (quick-mode only) that processes STEP CAD files to extract geometric data, classify components, detect holes/features, unfold sheet metal, and generate reports (PDF/Excel/XML) for ERP integration.
 
-The project provides three usage modes:
-
-| Mode | Command | Description |
-|------|---------|-------------|
-| **Quick** (default) | `python run.py` | Fast AAG-based analysis with PDF reports |
-| **Full** | `python run.py --full` | Complete ISO pipeline with database storage |
-| **API** (Docker) | `docker compose -f deploy/docker-compose.yml up -d` | REST API for VPS deployment |
+| Command | Description |
+|---------|-------------|
+| `python run.py` | Interactive analysis with PDF reports |
+| `python run.py -f part.step` | Analyze specific file |
+| `python run.py --batch` | Batch process all files in data/input/ |
+| `python run_viewer.py` | Launch web-based 3D viewer |
 
 ## Key Commands
 
@@ -50,47 +49,11 @@ python run.py --batch --excel                               # Excel for batch re
 python run.py --batch --excel --reference spaceclaim.xml    # Batch + comparison
 ```
 
-### Full Mode (Complete ISO Pipeline)
-```bash
-python run.py -f mypart.step --full                    # Full ISO pipeline
-python run.py -f mypart.step --full --production-info  # With production table
-python run.py --full --status                          # Show cache status
-python run.py --full --clear-cache                     # Clear cached data
-python run.py --full --from threads                    # Resume from specific stage
-python run.py --full --list-stages                     # List pipeline stages
-python run.py --full --list-modules                    # List available modules
-python run.py --full --disable cost_estimation         # Disable specific module
-```
-
-You can also use `python -m manufacturing_pipeline` instead of `python run.py`.
-
 ### ERP Comparison Tool
 ```bash
 python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/
 python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ --aag
 python manufacturing_pipeline/scripts/compare_erp.py data/parts/AI-voorbeelden/ -v
-```
-
-### Docker / API Deployment
-```bash
-# Start API server
-docker compose -f deploy/docker-compose.yml up -d
-
-# Or local dev mode
-API_KEYS=your-key uvicorn manufacturing_pipeline.api.app:app --reload --port 8000
-
-# Use the API
-curl -X POST http://localhost:8000/api/v1/analyze \
-  -H "X-API-Key: your-key" -F "file=@mypart.step"
-curl http://localhost:8000/api/v1/jobs/{job_id} -H "X-API-Key: your-key"
-curl http://localhost:8000/api/v1/health
-```
-
-### Windows File Watcher (ERP Integration)
-```bash
-# Run from project root
-python deploy/file_watcher_service.py
-python deploy/file_watcher_service.py --test --file path/to/file.step
 ```
 
 ### Testing
@@ -103,115 +66,61 @@ python -m pytest
 ```
 /
 ├── run.py                          # Entry point (thin wrapper → cli.py)
+├── run_viewer.py                   # Viewer launcher
 ├── requirements.txt                # All Python dependencies
 ├── CLAUDE.md                       # This file
 │
 ├── manufacturing_pipeline/         # ALL code
 │   ├── __init__.py
 │   ├── __main__.py                 # Enables: python -m manufacturing_pipeline
-│   ├── cli.py                      # Unified CLI (quick + full + batch modes)
+│   ├── cli.py                      # CLI interface (quick + batch modes)
 │   │
 │   ├── core/                       # Infrastructure
-│   │   ├── config.py               # Pipeline configuration, module settings
+│   │   ├── config.py               # Pipeline configuration
 │   │   ├── models.py               # Data models and types
-│   │   ├── pipeline_init.py        # Pipeline initialization helpers
-│   │   ├── profiler.py             # Performance profiling & timing (AnalysisProfiler)
 │   │   └── utils.py                # Shared utilities, constants, path definitions
 │   │
 │   ├── analysis/                   # Analysis modules (business logic)
+│   │   ├── classification.py       # Step 0 classification decision tree
+│   │   ├── classification_variables.py  # All thresholds (single source of truth)
 │   │   ├── step_processing.py      # STEP parsing, hole/bend detection, geometry
 │   │   ├── sheetmetal_analysis.py  # Sheet metal: thickness, bends, profiles
 │   │   ├── part_analyzer.py        # Part classification, reasoning system
-│   │   ├── iso_standards.py        # ISO/NEN standards (tolerances, fits, threads)
 │   │   ├── freecad_unfold.py       # FreeCAD SheetMetal workbench integration
 │   │   ├── assembly_analysis.py    # Assembly/BOM analysis
-│   │   ├── pipeline_stages.py      # Pipeline stage definitions
-│   │   ├── correlation.py          # Dimension correlation
-│   │   └── werkvoorbereiding.py    # Work preparation analysis
-│   │
-│   ├── data/                       # Data layer
-│   │   ├── cache_manager.py        # Pipeline caching system
-│   │   ├── database.py             # SQLite database manager
-│   │   └── sql/schema.sql          # Database schema
+│   │   ├── cut_features.py         # Hole/contour feature extraction
+│   │   ├── router.py               # Pre-routing: PLAAT/PROFIEL/ROND/OVERIG
+│   │   └── step0_section_tools.py  # Cross-section analysis helpers
 │   │
 │   ├── reporting/                  # Output generation
 │   │   ├── report_generator.py     # PDF report generation
 │   │   ├── cli_output.py           # CLI output formatting
 │   │   ├── xml_exporter.py         # XML export for ERP integration
-│   │   ├── excel_exporter.py       # Excel export in SpaceClaim format
-│   │   └── pdf_processing.py       # PDF parsing utilities
+│   │   └── excel_exporter.py       # Excel export in SpaceClaim format
 │   │
-│   ├── scripts/                    # Standalone analysis scripts
-│   │   ├── aag_analyzer.py         # AAG feature recognition
-│   │   └── compare_erp.py          # ERP validation tool
-│   │
-│   ├── api/                        # REST API (Docker/VPS deployment)
-│   │   ├── app.py                  # FastAPI application, middleware, CORS
-│   │   ├── routes.py               # API endpoints (analyze, jobs, health)
-│   │   ├── analysis_service.py     # Bridge to manufacturing pipeline
-│   │   ├── job_manager.py          # Job state management with SQLite
-│   │   ├── schemas.py              # Pydantic request/response models
-│   │   ├── config.py               # API configuration (env vars)
-│   │   └── static/index.html       # Web frontend
+│   ├── api/                        # REST API (viewer backend)
+│   │   ├── app.py                  # FastAPI application
+│   │   ├── routes.py               # API endpoints
+│   │   └── analysis_service.py     # Bridge to pipeline
 │   │
 │   └── tests/                      # Test suite
-│       ├── test_basic.py
-│       └── test_xml_export.py
 │
-├── deploy/                         # Deployment & Docker
-│   ├── Dockerfile                  # Docker image definition
-│   ├── docker-compose.yml          # Docker orchestration
-│   ├── .env.example                # Environment config template
-│   ├── deploy.sh                   # VPS deploy script
-│   ├── install.sh                  # VPS setup script
-│   ├── nginx.conf                  # Nginx reverse proxy config
-│   ├── file_watcher_service.py     # Windows ERP file watcher service
-│   └── requirements-watcher.txt    # File watcher dependencies
-│
-├── docs/                           # Documentation, scripts & archive
-│   ├── *.md                        # Handovers, classificatie, workflows
-│   ├── scripts/                    # Standalone validation/analysis scripts
-│   ├── archive/                    # Archived code (profile_pipeline, etc.)
-│   └── plans/                      # Implementation plans
-│
+├── viewer/                         # Web-based 3D viewer
+├── docs/                           # Technical documentation (see docs/README.md)
 └── data/                           # Runtime data (gitignored)
     ├── input/                      # STEP files for analysis
-    ├── output/                     # Analysis results (per-part subdirs)
-    ├── parts/                      # Quick-access sample parts
-    ├── snapshots/                  # XML status snapshots (git-tracked)
-    ├── config/                     # pipeline_config.json
-    └── db/                         # manufacturing_data.db, pipeline_cache.json
+    └── output/                     # Analysis results (per-part subdirs)
 ```
 
 ## Architecture
 
 ### How It Works
 
-**Local usage (CLI):**
 ```
 run.py → manufacturing_pipeline/cli.py → core/utils.py functions
                                        → analysis/ modules
                                        → reporting/ modules
 ```
-
-**Docker deployment (API):**
-```
-deploy/Dockerfile → manufacturing_pipeline/api/app.py → api/routes.py → same engine
-```
-
-**Windows ERP integration:**
-```
-deploy/file_watcher_service.py → monitors folder → manufacturing_pipeline → XML export
-```
-
-### Entry Points
-
-| Entry Point | Purpose |
-|-------------|---------|
-| `run.py` | Thin wrapper, delegates to `manufacturing_pipeline.cli.main()` |
-| `python -m manufacturing_pipeline` | Same as `run.py` (via `__main__.py`) |
-| `manufacturing_pipeline/api/app.py` | FastAPI REST API (Docker/VPS) |
-| `deploy/file_watcher_service.py` | Windows folder watcher for ERP |
 
 ### Analysis Flow
 

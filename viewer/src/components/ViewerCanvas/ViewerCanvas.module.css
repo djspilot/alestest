@@ -1,0 +1,107 @@
+.viewer-container {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+}
+
+.viewer-toolbar {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 5;
+  display: flex;
+  gap: 6px;
+}
+
+.toolbar-btn {
+  padding: 6px 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid #ccc;
+  background: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.toolbar-btn:hover {
+  background: #000;
+  color: #fff;
+  border-color: #000;
+}
+
+.toolbar-btn.is-active {
+  background: #eef6ff;
+  color: #173a63;
+  border-color: #9bbde2;
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toolbar-btn:disabled:hover {
+  background: rgba(255, 255, 255, 0.92);
+  color: inherit;
+  border-color: #ccc;
+}
+
+.viewer-info {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  z-index: 5;
+  font-size: 0.72rem;
+  color: #666;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 4px 8px;
+  border: 1px solid #ddd;
+}
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.88);
+  z-index: 20;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #e0e0e0;
+  border-top-color: #000;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin-bottom: 16px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-text {
+  font-size: 0.95rem;
+  color: #333;
+}
+
+.loading-sub {
+  font-size: 0.8rem;
+  color: #999;
+  margin-top: 4px;
+}
+
+.error-banner {
+  background: #fff0f0;
+  border-bottom: 1px solid #e00;
+  padding: 10px 20px;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

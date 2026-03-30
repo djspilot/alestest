@@ -9,6 +9,8 @@ export default function Sidebar({
   onPipelineToggle,
   aagFallbackEnabled,
   onAagFallbackToggle,
+  disabledStages,
+  onStageToggle,
   pipelineApiBase,
   onPipelineApiBaseChange,
   pipelineApiKey,
@@ -25,6 +27,8 @@ export default function Sidebar({
   onSelectStageIndex,
   onRetryPipeline,
   pipelineStatus,
+  pipelineDebug,
+  onResetPipelineApiBase,
 }) {
   return (
     <div className="sidebar">
@@ -79,6 +83,27 @@ export default function Sidebar({
           <span>AAG fallback inschakelen</span>
         </label>
 
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: '0.82rem', color: '#888', marginBottom: 6 }}>Analyse fases</div>
+          {[
+            { key: 'classify_geometry', label: 'Profile Router (classif.)' },
+            { key: 'detect_holes_pre_unfold', label: 'Detect holes (pre-unfold)' },
+            { key: 'unfold', label: 'Unfold' },
+            { key: 'detect_holes', label: 'Detect holes' },
+            { key: 'aag', label: 'AAG analyse' },
+          ].map(({ key, label }) => (
+            <label className="sidebar-toggle" key={key} style={{ opacity: pipelineEnabled ? 1 : 0.6 }}>
+              <input
+                type="checkbox"
+                checked={!disabledStages.includes(key)}
+                onChange={(event) => onStageToggle(key, event.target.checked)}
+                disabled={!pipelineEnabled}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
+
         <div style={{ marginTop: 10 }}>
           <div className="sidebar-row" style={{ paddingBottom: 6 }}>
             <span className="label">API status</span>
@@ -108,6 +133,23 @@ export default function Sidebar({
             </div>
           )}
           {pipelineState?.error && <div className="sidebar-error">{pipelineState.error}</div>}
+          {(pipelineState?.status === 'unavailable' ||
+            pipelineState?.status === 'failed' ||
+            pipelineState?.status === 'auth_required') && (
+            <div style={{ marginTop: 8, fontSize: '0.78rem', color: '#888', lineHeight: 1.45 }}>
+              <div>
+                <strong>Debug</strong>
+              </div>
+              {pipelineDebug?.checkedBase && <div>Base: {pipelineDebug.checkedBase}</div>}
+              {pipelineDebug?.checkedUrl && <div>Check: {pipelineDebug.checkedUrl}</div>}
+              {pipelineDebug?.code && <div>Code: {pipelineDebug.code}</div>}
+              {pipelineDebug?.fallbackBase && <div>Fallback: {pipelineDebug.fallbackBase}</div>}
+              {pipelineDebug?.fallbackUrl && <div>Fallback check: {pipelineDebug.fallbackUrl}</div>}
+              <button className="toolbar-btn" style={{ marginTop: 8, width: '100%' }} onClick={onResetPipelineApiBase}>
+                API URL reset naar launcher default
+              </button>
+            </div>
+          )}
           {fileName && pipelineEnabled && (
             <button className="toolbar-btn" style={{ marginTop: 8, width: '100%' }} onClick={onRetryPipeline}>
               Pipeline analyse opnieuw
@@ -120,7 +162,9 @@ export default function Sidebar({
         <h3>Keuzes Per Stap</h3>
         {summary && (
           <div className="timeline-summary">
-            <div>{completedStepCount}/{totalStepsHint} stappen klaar</div>
+            <div>
+              {completedStepCount}/{totalStepsHint} stappen klaar
+            </div>
             <div>{summary.event_count || 0} events</div>
             <div>{formatDuration(liveTotalElapsed)}</div>
             <div>
@@ -166,7 +210,8 @@ export default function Sidebar({
       <div className="sidebar-section">
         <h3>Bediening</h3>
         <div style={{ fontSize: '0.82rem', color: '#888', lineHeight: 1.6 }}>
-          🖱 Links slepen — roteren<br />
+          🖱 Links slepen — roteren
+          <br />
           🖱 Scrollwiel — zoomen
         </div>
       </div>

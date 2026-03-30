@@ -7,10 +7,8 @@ import os
 import shutil
 import json
 
-from manufacturing_pipeline.core.utils import (
-    run_analysis,
-    get_output_dir,
-)
+from manufacturing_pipeline.core.runtime_analysis import run_analysis
+from manufacturing_pipeline.core.file_utils import get_output_dir
 
 
 def _serialize_3d_bends(step_file: str, thickness: float | None = None) -> list[dict]:
@@ -230,12 +228,13 @@ def _serialize_analysis_reasoning(analysis) -> list[dict]:
     return serialized
 
 
-def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=None) -> dict:
+def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=None, disable_stages: set[str] | None = None) -> dict:
     """Run the manufacturing analysis pipeline on a STEP file.
 
     Args:
         step_file: Absolute path to the STEP file.
         use_aag: Whether to run AAG topology-based feature recognition.
+        disable_stages: Set of stage keys to skip during analysis.
 
     Returns:
         Enriched result dict with analysis data, AAG details, and production info.
@@ -251,6 +250,12 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
             self.no_unfold = False
             self.no_pdf = True  # No PDF generation for API
             self.no_cache = True
+            self.disable_stages = disable_stages or set()
+            if "aag" in self.disable_stages:
+                self.aag = False
+                self.aag_fallback = False
+            if "unfold" in self.disable_stages:
+                self.no_unfold = True
 
     args = Args()
     part_name = os.path.basename(step_file)
@@ -358,6 +363,9 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
             "holes": {
                 "total": total_holes,
                 **(getattr(analysis, "detected_hole_visuals", None) or {"items": []}),
+            },
+            "holes_pre_unfold": {
+                **(getattr(analysis, "detected_hole_visuals_pre_unfold", None) or {"items": []}),
             },
             "unfold": {
                 "success": bool(unfold_result and unfold_result.get("success")),

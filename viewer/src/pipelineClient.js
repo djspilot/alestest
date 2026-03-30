@@ -1,6 +1,5 @@
 const DEFAULT_API_BASE =
-  import.meta.env.VITE_PIPELINE_API_BASE_URL ||
-  `${window.location.protocol}//${window.location.hostname}:8000`
+  import.meta.env.VITE_PIPELINE_API_BASE_URL || `${window.location.protocol}//${window.location.hostname}:8000`
 
 function trimTrailingSlash(value) {
   return (value || '').replace(/\/$/, '')
@@ -43,11 +42,13 @@ async function fetchStatus(url, options = {}) {
       ok: false,
       status: 'unavailable',
       message: getErrorMessage(error, 'Pipeline backend niet bereikbaar'),
+      url,
+      code: 'network_error',
     }
   }
 
   if (response.ok) {
-    return { ok: true, status: 'ready', message: null }
+    return { ok: true, status: 'ready', message: null, url, code: null }
   }
 
   if (response.status === 401) {
@@ -55,6 +56,8 @@ async function fetchStatus(url, options = {}) {
       ok: false,
       status: 'auth_required',
       message: 'Pipeline API vereist een geldige X-API-Key',
+      url,
+      code: 'auth_required',
     }
   }
 
@@ -70,6 +73,8 @@ async function fetchStatus(url, options = {}) {
     ok: false,
     status: 'unavailable',
     message: detail || `${response.status} ${response.statusText}`,
+    url,
+    code: `http_${response.status}`,
   }
 }
 
@@ -84,7 +89,7 @@ function delay(ms, signal) {
         clearTimeout(id)
         reject(new DOMException('Aborted', 'AbortError'))
       },
-      { once: true }
+      { once: true },
     )
   })
 }
@@ -94,11 +99,7 @@ export function getDefaultPipelineApiBase() {
 }
 
 export async function checkPipelineConnection(options = {}) {
-  const {
-    apiBase = getDefaultPipelineApiBase(),
-    apiKey = '',
-    signal,
-  } = options
+  const { apiBase = getDefaultPipelineApiBase(), apiKey = '', signal } = options
 
   const base = trimTrailingSlash(apiBase)
   if (!base) {
@@ -121,6 +122,7 @@ export async function runPipelineAnalysis(file, options = {}) {
     apiBase = getDefaultPipelineApiBase(),
     apiKey = '',
     aag = true,
+    disableStages = [],
     onProgress,
     signal,
     pollIntervalMs = 1200,
@@ -132,7 +134,11 @@ export async function runPipelineAnalysis(file, options = {}) {
     throw new Error('Pipeline API URL ontbreekt')
   }
 
-  const analyzeUrl = `${base}/api/v1/analyze?aag=${aag ? 'true' : 'false'}`
+  const parts = [`aag=${aag ? 'true' : 'false'}`]
+  if (disableStages.length > 0) {
+    parts.push(`disable_stages=${disableStages.join(',')}`)
+  }
+  const analyzeUrl = `${base}/api/v1/analyze?${parts.join('&')}`
   const formData = new FormData()
   formData.append('file', file)
 
@@ -145,7 +151,7 @@ export async function runPipelineAnalysis(file, options = {}) {
       headers: buildHeaders(apiKey),
     })
   } catch (error) {
-    throw new Error(getErrorMessage(error, 'Upload naar pipeline mislukt'))
+    throw new Error(`${getErrorMessage(error, 'Upload naar pipeline mislukt')} (${analyzeUrl})`)
   }
 
   const jobId = created?.job_id
@@ -168,7 +174,7 @@ export async function runPipelineAnalysis(file, options = {}) {
         headers: buildHeaders(apiKey),
       })
     } catch (error) {
-      throw new Error(getErrorMessage(error, 'Job status ophalen mislukt'))
+      throw new Error(`${getErrorMessage(error, 'Job status ophalen mislukt')} (${base}/api/v1/jobs/${jobId})`)
     }
 
     onProgress?.({
@@ -190,7 +196,7 @@ export async function runPipelineAnalysis(file, options = {}) {
           headers: buildHeaders(apiKey),
         })
       } catch (error) {
-        throw new Error(getErrorMessage(error, 'Timeline ophalen mislukt'))
+        throw new Error(`${getErrorMessage(error, 'Timeline ophalen mislukt')} (${base}/api/v1/jobs/${jobId}/timeline)`)
       }
 
       onProgress?.({

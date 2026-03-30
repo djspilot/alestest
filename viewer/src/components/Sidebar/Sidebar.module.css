@@ -1,0 +1,120 @@
+.sidebar {
+  width: 320px;
+  border-right: 1px solid #ddd;
+  background: #fff;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.sidebar-section {
+  padding: 16px 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.sidebar-section h3 {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #888;
+  margin-bottom: 8px;
+}
+
+.sidebar-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 0.88rem;
+}
+
+.sidebar-row .label {
+  color: #666;
+}
+.sidebar-row .value {
+  font-weight: 600;
+}
+
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: #333;
+}
+
+.sidebar-input {
+  width: 100%;
+  border: 1px solid #d4d8dd;
+  padding: 7px 8px;
+  font-size: 0.78rem;
+  color: #222;
+  background: #fff;
+}
+
+.status-pill {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 12px;
+  border: 1px solid #ccd3dc;
+}
+
+.status-idle,
+.status-disabled {
+  color: #5f6b78;
+  background: #f2f5f8;
+}
+
+.status-checking,
+.status-queued,
+.status-processing {
+  color: #245f8f;
+  background: #e9f4ff;
+}
+
+.status-completed {
+  color: #1f6b3b;
+  background: #e9f7ef;
+}
+
+.status-failed,
+.status-unavailable,
+.status-auth_required {
+  color: #8a1f1f;
+  background: #fdeceb;
+}
+
+.sidebar-error {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: #8a1f1f;
+  background: #fdeceb;
+  border: 1px solid #f2c9c6;
+  padding: 7px;
+}
+
+@media (max-width: 1200px) {
+  .sidebar {
+    width: 280px;
+  }
+}
+
+@media (max-width: 960px) {
+  .sidebar {
+    width: 100%;
+    border-left: none;
+    border-right: none;
+    border-bottom: 1px solid #ddd;
+    max-height: 38vh;
+  }
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid #ddd;
+    max-height: 200px;
+  }
+}

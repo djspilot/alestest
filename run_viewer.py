@@ -91,11 +91,14 @@ def handle_signal(signum, _frame) -> None:
     raise SystemExit(128 + signum)
 
 
-def spawn_process(command: list[str], cwd: Path) -> subprocess.Popen:
+def spawn_process(command: list[str], cwd: Path, extra_env: dict[str, str] | None = None) -> subprocess.Popen:
     creationflags = 0
     if os.name == "nt":
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
-    process = subprocess.Popen(command, cwd=cwd, creationflags=creationflags)
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
+    process = subprocess.Popen(command, cwd=cwd, creationflags=creationflags, env=env)
     PROCESSES.append(process)
     return process
 
@@ -142,6 +145,7 @@ def main() -> int:
             str(VIEWER_PORT),
         ],
         VIEWER_DIR,
+        extra_env={"VITE_PIPELINE_API_BASE_URL": API_URL},
     )
     wait_for_http(VIEWER_URL, "Viewer")
 
