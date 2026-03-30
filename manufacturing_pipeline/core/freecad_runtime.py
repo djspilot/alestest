@@ -142,6 +142,11 @@ def runtime_root_candidates(project_root: Optional[str] = None) -> List[str]:
     return _dedupe(candidates)
 
 
+def auto_install_enabled() -> bool:
+    value = os.environ.get("FREECAD_AUTO_INSTALL", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
 def choose_package_manager() -> str:
     env_value = os.environ.get("FREECAD_PACKAGE_MANAGER")
     if env_value:
@@ -155,6 +160,61 @@ def choose_package_manager() -> str:
 
 def _run_command(command: List[str]) -> None:
     subprocess.run(command, check=True)
+
+
+def _sheetmetal_destination(runtime_info: Dict[str, Any]) -> str:
+    mod_root = str(runtime_info.get("freecad_mod") or "")
+    if not mod_root:
+        mod_root = os.path.join(str(runtime_info.get("runtime_root") or ""), "Mod")
+    return os.path.join(mod_root, "SheetMetal")
+
+
+def _install_sheetmetal_source(
+    runtime_info: Dict[str, Any],
+    sheetmetal_repo: str,
+    update_sheetmetal: bool,
+) -> Dict[str, Any]:
+    git_executable = shutil.which("git")
+    if not git_executable:
+        return {
+            "success": False,
+            "error": "Git niet gevonden. Installeer git om de SheetMetal broncode op te halen.",
+        }
+
+    mod_root = str(runtime_info.get("freecad_mod") or "")
+    if not mod_root:
+        mod_root = os.path.join(str(runtime_info.get("runtime_root") or ""), "Mod")
+        runtime_info["freecad_mod"] = mod_root
+    os.makedirs(mod_root, exist_ok=True)
+    sheetmetal_dest = _sheetmetal_destination(runtime_info)
+
+    try:
+        if os.path.isdir(sheetmetal_dest):
+            if update_sheetmetal:
+                _run_command([git_executable, "-C", sheetmetal_dest, "pull", "--ff-only"])
+        else:
+            _run_command([git_executable, "clone", "--depth", "1", sheetmetal_repo, sheetmetal_dest])
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": f"SheetMetal broncode installatie gefaald: {exc}",
+        }
+
+    return {
+        "success": True,
+        "sheetmetal_dest": sheetmetal_dest,
+    }
+
+
+def _persist_runtime(runtime_info: Dict[str, Any], sheetmetal_repo: str, manager: str) -> Dict[str, Any]:
+    metadata = {
+        **runtime_info,
+        "platform": sys.platform,
+        "sheetmetal_repo": sheetmetal_repo,
+        "manager": manager,
+    }
+    save_runtime_metadata(metadata)
+    return metadata
 
 
 def _verify_runtime(runtime_info: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,23 +291,36 @@ def ensure_managed_runtime(
     if os.path.exists(runtime_info["freecad_cmd"]):
         verify_result = _verify_runtime(runtime_info)
         if verify_result.get("success"):
-            metadata = {
-                **runtime_info,
-                "platform": sys.platform,
-                "sheetmetal_repo": sheetmetal_repo,
-                "manager": "existing",
-            }
-            save_runtime_metadata(metadata)
+            metadata = _persist_runtime(runtime_info, sheetmetal_repo, "existing")
             return {
                 "success": True,
                 "installed": False,
                 "runtime": metadata,
             }
+
+        repair_result = _install_sheetmetal_source(
+            runtime_info,
+            sheetmetal_repo=sheetmetal_repo,
+            update_sheetmetal=True,
+        )
+        if repair_result.get("success"):
+            verify_result = _verify_runtime(runtime_info)
+            if verify_result.get("success"):
+                metadata = _persist_runtime(runtime_info, sheetmetal_repo, "existing")
+                return {
+                    "success": True,
+                    "installed": False,
+                    "runtime": metadata,
+                }
         if not install_if_missing:
             return {
                 "success": False,
                 "installed": False,
-                "error": verify_result.get("error") or "Bestaande runtime verificatie gefaald",
+                "error": (
+                    repair_result.get("error")
+                    or verify_result.get("error")
+                    or "Bestaande runtime verificatie gefaald"
+                ),
             }
 
     if not install_if_missing:
@@ -263,14 +336,6 @@ def ensure_managed_runtime(
             "success": False,
             "installed": False,
             "error": "Geen package manager gevonden. Installeer micromamba of conda.",
-        }
-
-    git_executable = shutil.which("git")
-    if not git_executable:
-        return {
-            "success": False,
-            "installed": False,
-            "error": "Git niet gevonden. Installeer git om de SheetMetal broncode op te halen.",
         }
 
     os.makedirs(runtime_root, exist_ok=True)
@@ -296,21 +361,16 @@ def ensure_managed_runtime(
         }
 
     runtime_info = detect_runtime_layout(runtime_root)
-    mod_root = runtime_info["freecad_mod"] or os.path.join(runtime_root, "Mod")
-    os.makedirs(mod_root, exist_ok=True)
-    sheetmetal_dest = os.path.join(mod_root, "SheetMetal")
-
-    try:
-        if os.path.isdir(sheetmetal_dest):
-            if update_sheetmetal:
-                _run_command([git_executable, "-C", sheetmetal_dest, "pull", "--ff-only"])
-        else:
-            _run_command([git_executable, "clone", "--depth", "1", sheetmetal_repo, sheetmetal_dest])
-    except Exception as exc:
+    sheetmetal_result = _install_sheetmetal_source(
+        runtime_info,
+        sheetmetal_repo=sheetmetal_repo,
+        update_sheetmetal=update_sheetmetal,
+    )
+    if not sheetmetal_result.get("success"):
         return {
             "success": False,
             "installed": False,
-            "error": f"SheetMetal broncode installatie gefaald: {exc}",
+            "error": sheetmetal_result.get("error") or "SheetMetal broncode installatie gefaald",
         }
 
     verify_result = _verify_runtime(runtime_info)
@@ -321,13 +381,7 @@ def ensure_managed_runtime(
             "error": verify_result.get("error") or "Runtime verificatie gefaald",
         }
 
-    metadata = {
-        **runtime_info,
-        "platform": sys.platform,
-        "sheetmetal_repo": sheetmetal_repo,
-        "manager": os.path.basename(manager),
-    }
-    save_runtime_metadata(metadata)
+    metadata = _persist_runtime(runtime_info, sheetmetal_repo, os.path.basename(manager))
     return {
         "success": True,
         "installed": True,

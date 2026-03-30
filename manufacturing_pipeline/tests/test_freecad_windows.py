@@ -4,6 +4,7 @@ from pathlib import PureWindowsPath
 from unittest.mock import patch
 
 from manufacturing_pipeline.analysis import freecad_unfold
+from manufacturing_pipeline.analysis.sheetmetal import freecad_environment
 from manufacturing_pipeline.core.config import SystemConfig
 from manufacturing_pipeline.core import runtime_unfold
 
@@ -35,6 +36,39 @@ def test_macos_unfold_prefers_subprocess_mode_by_default() -> None:
     """macOS should also prefer the external FreeCADCmd route in auto mode."""
     with patch("manufacturing_pipeline.analysis.freecad_unfold.sys.platform", "darwin"):
         assert freecad_unfold._should_prefer_freecadcmd() is True
+
+
+def test_find_freecadcmd_auto_installs_runtime_when_missing(monkeypatch) -> None:
+    captured = {}
+    state = {"installed": False}
+
+    monkeypatch.setattr(freecad_environment.freecad_runtime, "auto_install_enabled", lambda: True)
+
+    def fake_configured_runtime():
+        if state["installed"]:
+            return {"freecad_cmd": "/managed/FreeCADCmd"}
+        return {}
+
+    def fake_ensure_runtime(install_if_missing=True):
+        captured["install_if_missing"] = install_if_missing
+        state["installed"] = True
+        return {
+            "success": True,
+            "runtime": {
+                "freecad_cmd": "/managed/FreeCADCmd",
+            },
+        }
+
+    monkeypatch.setattr(freecad_environment.freecad_runtime, "configured_runtime", fake_configured_runtime)
+    monkeypatch.setattr(freecad_environment.freecad_runtime, "ensure_managed_runtime", fake_ensure_runtime)
+    monkeypatch.setattr(
+        freecad_environment.os.path,
+        "exists",
+        lambda path: path == "/managed/FreeCADCmd",
+    )
+
+    assert freecad_environment._find_freecadcmd_executable() == "/managed/FreeCADCmd"
+    assert captured["install_if_missing"] is True
 
 
 def test_run_unfold_uses_host_python_wrapper(tmp_path) -> None:

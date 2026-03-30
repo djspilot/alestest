@@ -84,3 +84,42 @@ def test_ensure_managed_runtime_reuses_existing_runtime(monkeypatch, tmp_path):
     assert result["success"] is True
     assert result["installed"] is False
     assert result["runtime"]["freecad_cmd"] == str(freecad_cmd)
+
+
+def test_ensure_managed_runtime_repairs_existing_runtime(monkeypatch, tmp_path):
+    runtime_root = tmp_path / "freecad"
+    freecad_cmd = runtime_root / "bin" / "FreeCADCmd"
+    freecad_python = runtime_root / "bin" / "python"
+    freecad_mod = runtime_root / "Mod"
+    freecad_lib = runtime_root / "lib"
+
+    freecad_cmd.parent.mkdir(parents=True)
+    freecad_mod.mkdir()
+    freecad_lib.mkdir()
+    freecad_cmd.write_text("")
+    freecad_python.write_text("")
+
+    verify_calls = {"count": 0}
+    install_calls = {"count": 0}
+
+    def fake_verify(info):
+        verify_calls["count"] += 1
+        return {"success": verify_calls["count"] > 1, "error": "missing SheetMetalUnfolder"}
+
+    def fake_install(runtime_info, sheetmetal_repo, update_sheetmetal):
+        install_calls["count"] += 1
+        return {"success": True}
+
+    monkeypatch.setattr(freecad_runtime, "_verify_runtime", fake_verify)
+    monkeypatch.setattr(freecad_runtime, "_install_sheetmetal_source", fake_install)
+    monkeypatch.setattr(freecad_runtime, "save_runtime_metadata", lambda data, metadata_path=None: str(tmp_path / "meta.json"))
+
+    result = freecad_runtime.ensure_managed_runtime(
+        install_if_missing=True,
+        runtime_root=str(runtime_root),
+    )
+
+    assert result["success"] is True
+    assert result["installed"] is False
+    assert verify_calls["count"] == 2
+    assert install_calls["count"] == 1

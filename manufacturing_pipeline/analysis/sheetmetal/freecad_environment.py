@@ -76,6 +76,13 @@ def _candidate_freecad_paths():
     return candidates
 
 
+def _ensure_managed_runtime_available() -> bool:
+    if not freecad_runtime.auto_install_enabled():
+        return False
+    result = freecad_runtime.ensure_managed_runtime(install_if_missing=True)
+    return bool(result.get("success"))
+
+
 def _should_prefer_freecadcmd() -> bool:
     mode = os.getenv("FREECAD_UNFOLD_MODE", "auto").strip().lower()
     if mode == "subprocess":
@@ -112,6 +119,28 @@ def _ensure_freecad_imported() -> bool:
         return True
     except Exception as exc:
         _FREECAD_IMPORT_ERROR = str(exc)
+        if _ensure_managed_runtime_available():
+            for path in _candidate_freecad_paths():
+                if path and os.path.isdir(path) and path not in sys.path:
+                    sys.path.insert(0, path)
+            try:
+                import FreeCAD as _FreeCAD
+                import Part as _Part
+
+                FreeCAD = _FreeCAD
+                Part = _Part
+
+                try:
+                    import FreeCADGui as _FreeCADGui
+
+                    _FreeCADGui.Selection.getSelection()
+                except (ImportError, AttributeError):
+                    sys.modules["FreeCADGui"] = MockFreeCADGui()
+
+                _FREECAD_IMPORT_ERROR = None
+                return True
+            except Exception as retry_exc:
+                _FREECAD_IMPORT_ERROR = str(retry_exc)
         return False
 
 
@@ -137,5 +166,11 @@ def _find_freecadcmd_executable() -> str:
     for candidate in candidates:
         if os.path.exists(candidate):
             return candidate
+
+    if _ensure_managed_runtime_available():
+        runtime_info = freecad_runtime.configured_runtime()
+        managed_cmd = str(runtime_info.get("freecad_cmd") or "")
+        if managed_cmd and os.path.exists(managed_cmd):
+            return managed_cmd
 
     return ""
