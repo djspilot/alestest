@@ -97,6 +97,7 @@ function StepGeometry({
   onLoaded,
   onError,
   onStatus,
+  onDebug,
   onSurfacePick,
   parseMode = 'auto',
   renderMode = 'clean',
@@ -109,6 +110,11 @@ function StepGeometry({
     async function load() {
       const backendMeshes = buildBackendMeshes(mesh)
       if (backendMeshes) {
+        onDebug?.({
+          source: 'step-model',
+          stage: 'backend_mesh_used',
+          meshCount: backendMeshes.length,
+        })
         setMeshData(backendMeshes)
         onLoaded?.(summarizeMeshes(backendMeshes))
         onStatus?.('Viewer asset geladen via pipeline')
@@ -116,21 +122,43 @@ function StepGeometry({
       }
 
       if (!buffer || parseMode === 'backend-only') {
+        onDebug?.({
+          source: 'step-model',
+          stage: 'no_local_parse',
+          hasBuffer: Boolean(buffer),
+          parseMode,
+        })
         setMeshData(null)
         return
       }
 
       try {
+        onDebug?.({
+          source: 'step-model',
+          stage: 'wasm_parse_start',
+          bytes: buffer?.byteLength || 0,
+          parseMode,
+        })
         onStatus?.('OpenCascade WASM laden...')
-        const result = await parseStepFile(buffer)
+        const result = await parseStepFile(buffer, { onDebug })
         if (cancelled) return
 
         setMeshData(result.meshes)
+        onDebug?.({
+          source: 'step-model',
+          stage: 'wasm_parse_done',
+          meshCount: Array.isArray(result.meshes) ? result.meshes.length : 0,
+        })
         onLoaded?.(summarizeMeshes(result.meshes))
         onStatus?.('Klaar')
       } catch (err) {
         if (!cancelled) {
           console.error('[ALES] STEP load error:', err)
+          onDebug?.({
+            source: 'step-model',
+            stage: 'wasm_parse_error',
+            error: err.message || String(err),
+          })
           onError?.(err.message || String(err))
         }
       }
@@ -200,7 +228,7 @@ function StepGeometry({
   )
 }
 
-export default function StepModel({ buffer, mesh, onLoaded, onError, onStatus, onSurfacePick, parseMode, renderMode }) {
+export default function StepModel({ buffer, mesh, onLoaded, onError, onStatus, onDebug, onSurfacePick, parseMode, renderMode }) {
   return (
     <StepGeometry
       buffer={buffer}
@@ -208,6 +236,7 @@ export default function StepModel({ buffer, mesh, onLoaded, onError, onStatus, o
       onLoaded={onLoaded}
       onError={onError}
       onStatus={onStatus}
+      onDebug={onDebug}
       onSurfacePick={onSurfacePick}
       parseMode={parseMode}
       renderMode={renderMode}

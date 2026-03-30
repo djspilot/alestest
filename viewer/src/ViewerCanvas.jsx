@@ -1402,6 +1402,7 @@ export default function ViewerCanvas({
   onLoaded,
   onError,
   onStatus,
+  onDebug,
   parseMode,
   modelInfo,
   backendVisuals,
@@ -1465,6 +1466,7 @@ export default function ViewerCanvas({
         onLoaded={onLoaded}
         onError={onError}
         onStatus={onStatus}
+        onDebug={onDebug}
         onSurfacePick={handleSurfacePick}
         parseMode={parseMode}
         renderMode={renderMode}

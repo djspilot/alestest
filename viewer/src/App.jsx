@@ -1,11 +1,12 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Dropzone from './Dropzone'
+import DebugPanel from './DebugPanel'
 import Sidebar from './Sidebar'
 import StageDetailsPanel from './StageDetailsPanel'
 import { PipelineProvider, usePipelineContext } from './context/PipelineContext'
 import { SelectionProvider, useSelectionContext } from './context/SelectionContext'
 import { useViewer } from './hooks/useViewer'
-import { fetchFileAsBrowserFile, readFileAsArrayBuffer } from './lib/files'
+import { fetchFileAsBrowserFile } from './lib/files'
 import { normalizeStageName, MERGED_HOLES_STAGE } from './pipelineUi'
 import { getDefaultPipelineApiBase } from './pipelineClient'
 
@@ -31,6 +32,7 @@ function AppContent() {
   const controlsRef = useRef()
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
+  const [debugPanelOpen, setDebugPanelOpen] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [loadingDefaultStep, setLoadingDefaultStep] = useState(false)
 
@@ -148,6 +150,9 @@ function AppContent() {
           <button className="header-toggle-btn" onClick={() => setRightPanelOpen((v) => !v)}>
             {rightPanelOpen ? 'Verberg rechts' : 'Toon rechts'}
           </button>
+          <button className="header-toggle-btn" onClick={() => setDebugPanelOpen((v) => !v)}>
+            {debugPanelOpen ? 'Verberg debug' : 'Toon debug'}
+          </button>
           <span className="header-status">rev {VIEWER_REVISION}</span>
           <span className="header-status">{viewer.engineStatus}</span>
         </div>
@@ -251,6 +256,7 @@ function AppContent() {
                 onLoaded={viewer.handleModelLoaded}
                 onError={viewer.handleModelError}
                 onStatus={viewer.handleStatus}
+                onDebug={viewer.pushDebugEvent}
                 parseMode={selection.parseMode}
                 modelInfo={viewer.modelInfo}
                 backendVisuals={pipeline.pipelineVisuals}
@@ -292,6 +298,15 @@ function AppContent() {
             onShowHiddenHolesChange={selection.setShowHiddenHoles}
             highlightHiddenHoleLocations={selection.highlightHiddenHoleLocations}
             onHighlightHiddenHoleLocationsChange={selection.setHighlightHiddenHoleLocations}
+          />
+        )}
+
+        {debugPanelOpen && (
+          <DebugPanel
+            viewer={viewer}
+            pipeline={pipeline}
+            parseMode={selection.parseMode}
+            activeMesh={selection.activeMesh}
           />
         )}
       </div>
