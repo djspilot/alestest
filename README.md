@@ -30,6 +30,38 @@ Analyseert STEP CAD-bestanden: classificeert onderdelen, detecteert features (ga
 pip install -r requirements.txt
 ```
 
+### Windows all-in-one bootstrap
+
+Voor een nieuwe Windows machine is handmatig Python, Node, Git en de FreeCAD runtime zetten niet nodig. Gebruik de repo-bootstrapper:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap-windows.ps1
+```
+
+Of:
+
+```bat
+bootstrap-windows.bat
+```
+
+Wat dit doet:
+- installeert `Python`, `Node.js` en `Git` via `winget`, of `Chocolatey` als fallback
+- maakt een lokale `.venv`
+- installeert `requirements.txt`
+- draait `ensure_python_deps`
+- draait `ensure_unfold_runtime` met package-manager bootstrap aan
+- draait `npm install` in [`viewer/`](/Users/ds/AIdoel/alestest/viewer)
+- eindigt met doctor output
+
+Handige varianten:
+
+```powershell
+.\scripts\bootstrap-windows.ps1 -DoctorOnly
+.\scripts\bootstrap-windows.ps1 -SkipViewer
+.\scripts\bootstrap-windows.ps1 -SkipFreeCAD
+.\scripts\bootstrap-windows.ps1 -SkipPythonDeps
+```
+
 ### Host Python dependencies
 
 De pipeline gebruikt `cadquery` in de host Python omgeving. Controleer of installeer die dependencies met:
@@ -38,6 +70,8 @@ De pipeline gebruikt `cadquery` in de host Python omgeving. Controleer of instal
 python -m manufacturing_pipeline.tools.ensure_python_deps --doctor
 python -m manufacturing_pipeline.tools.ensure_python_deps
 ```
+
+Deze check dekt ook `shapely`, omdat classificatie- en profielanalyse die module direct importeren.
 
 Automatisch installeren tijdens pipeline-runs kan met:
 

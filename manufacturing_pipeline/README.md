@@ -20,6 +20,39 @@ The project has been updated to use `cadquery` instead of `pythonocc-core`, whic
     python -m manufacturing_pipeline.tools.ensure_python_deps
     ```
 
+The host dependency preflight also verifies `shapely`, because STEP classification and profile section analysis import it directly.
+
+## Windows bootstrap (recommended on a fresh PC)
+
+On a new Windows machine, use the repo bootstrapper instead of installing Python, Node, Git, viewer dependencies, and the FreeCAD unfold runtime manually:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap-windows.ps1
+```
+
+Or:
+
+```bat
+bootstrap-windows.bat
+```
+
+It will:
+- install `Python`, `Node.js`, and `Git` with `winget`, or `Chocolatey` as fallback
+- create a local `.venv`
+- install `requirements.txt`
+- run `ensure_python_deps`
+- run `ensure_unfold_runtime`
+- run `npm install` in `viewer/`
+- finish with doctor output
+
+Useful flags:
+
+```powershell
+.\scripts\bootstrap-windows.ps1 -DoctorOnly
+.\scripts\bootstrap-windows.ps1 -SkipViewer
+.\scripts\bootstrap-windows.ps1 -SkipFreeCAD
+```
+
 ## Headless FreeCAD unfold runtime
 
 If you need sheet-metal unfolding, do not rely on the desktop FreeCAD app path. Use the managed headless runtime instead:
