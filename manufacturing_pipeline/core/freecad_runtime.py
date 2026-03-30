@@ -15,6 +15,7 @@ MANAGED_RUNTIME_METADATA = os.path.join(PROJECT_ROOT, ".runtime", "freecad_runti
 DEFAULT_SHEETMETAL_REPO = "https://github.com/shaise/FreeCAD_SheetMetal.git"
 
 
+
 def managed_runtime_root(project_root: Optional[str] = None) -> str:
     root = project_root or PROJECT_ROOT
     return os.path.join(root, ".runtime", "freecad")
@@ -147,6 +148,11 @@ def auto_install_enabled() -> bool:
     return value not in {"0", "false", "no", "off"}
 
 
+def auto_bootstrap_package_manager_enabled() -> bool:
+    value = os.environ.get("FREECAD_BOOTSTRAP_PACKAGE_MANAGER", "0").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def choose_package_manager() -> str:
     env_value = os.environ.get("FREECAD_PACKAGE_MANAGER")
     if env_value:
@@ -158,8 +164,73 @@ def choose_package_manager() -> str:
     return ""
 
 
-def _run_command(command: List[str]) -> None:
-    subprocess.run(command, check=True)
+def _run_command(command: List[str], capture_output: bool = False, text: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, check=True, capture_output=capture_output, text=text)
+
+
+def diagnose_package_manager() -> Dict[str, Any]:
+    discovered = []
+    for candidate in ("micromamba", "conda"):
+        discovered.append({
+            "name": candidate,
+            "path": shutil.which(candidate) or "",
+        })
+    chosen = choose_package_manager()
+    return {
+        "chosen": chosen,
+        "discovered": discovered,
+        "auto_bootstrap_enabled": auto_bootstrap_package_manager_enabled(),
+    }
+
+
+def _package_manager_bootstrap_command() -> List[str]:
+    if sys.platform.startswith("win"):
+        return [
+            "powershell",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-NoProfile",
+            "-Command",
+            "iwr -useb https://micro.mamba.pm/install.ps1 | iex",
+        ]
+    return [
+        "bash",
+        "-lc",
+        "curl -Ls https://micro.mamba.pm/install.sh | bash",
+    ]
+
+
+def bootstrap_package_manager() -> Dict[str, Any]:
+    if not auto_bootstrap_package_manager_enabled():
+        return {
+            "success": False,
+            "error": "Geen package manager gevonden. Zet FREECAD_BOOTSTRAP_PACKAGE_MANAGER=1 om micromamba automatisch te bootstrapen.",
+            "command": _package_manager_bootstrap_command(),
+        }
+
+    command = _package_manager_bootstrap_command()
+    try:
+        _run_command(command)
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": f"Bootstrap van micromamba gefaald: {exc}",
+            "command": command,
+        }
+
+    chosen = choose_package_manager()
+    if not chosen:
+        return {
+            "success": False,
+            "error": "Bootstrap voltooid zonder bruikbare package manager in PATH.",
+            "command": command,
+        }
+
+    return {
+        "success": True,
+        "package_manager": chosen,
+        "command": command,
+    }
 
 
 def _sheetmetal_destination(runtime_info: Dict[str, Any]) -> str:
@@ -224,6 +295,7 @@ def _verify_runtime(runtime_info: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "success": False,
             "error": "FreeCADCmd niet gevonden na installatie",
+            "stage": "resolve_freecadcmd",
         }
 
     script = (
@@ -253,6 +325,7 @@ def _verify_runtime(runtime_info: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "success": False,
             "error": f"Runtime verificatie gefaald: {exc}",
+            "stage": "launch_verify_script",
         }
     finally:
         if tmp_file and os.path.exists(tmp_file):
@@ -270,11 +343,14 @@ def _verify_runtime(runtime_info: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             continue
         if payload.get("success"):
-            return {"success": True}
+            return {"success": True, "stage": "verified"}
 
     return {
         "success": False,
         "error": (proc.stderr or proc.stdout or "Runtime verificatie gaf geen geldig resultaat").strip(),
+        "stage": "verify_imports",
+        "stdout": (proc.stdout or "").strip()[-2000:],
+        "stderr": (proc.stderr or "").strip()[-2000:],
     }
 
 
@@ -287,8 +363,10 @@ def ensure_managed_runtime(
 ) -> Dict[str, Any]:
     runtime_root = runtime_root or managed_runtime_root()
     runtime_info = detect_runtime_layout(runtime_root)
+    actions: List[str] = []
 
     if os.path.exists(runtime_info["freecad_cmd"]):
+        actions.append("found_existing_runtime")
         verify_result = _verify_runtime(runtime_info)
         if verify_result.get("success"):
             metadata = _persist_runtime(runtime_info, sheetmetal_repo, "existing")
@@ -296,6 +374,7 @@ def ensure_managed_runtime(
                 "success": True,
                 "installed": False,
                 "runtime": metadata,
+                "actions": actions + ["verified_existing_runtime"],
             }
 
         repair_result = _install_sheetmetal_source(
@@ -304,6 +383,7 @@ def ensure_managed_runtime(
             update_sheetmetal=True,
         )
         if repair_result.get("success"):
+            actions.append("repaired_sheetmetal_source")
             verify_result = _verify_runtime(runtime_info)
             if verify_result.get("success"):
                 metadata = _persist_runtime(runtime_info, sheetmetal_repo, "existing")
@@ -311,6 +391,7 @@ def ensure_managed_runtime(
                     "success": True,
                     "installed": False,
                     "runtime": metadata,
+                    "actions": actions + ["verified_existing_runtime"],
                 }
         if not install_if_missing:
             return {
@@ -321,6 +402,8 @@ def ensure_managed_runtime(
                     or verify_result.get("error")
                     or "Bestaande runtime verificatie gefaald"
                 ),
+                "actions": actions,
+                "verify": verify_result,
             }
 
     if not install_if_missing:
@@ -328,15 +411,23 @@ def ensure_managed_runtime(
             "success": False,
             "installed": False,
             "error": "Geen beheerde FreeCAD runtime gevonden",
+            "actions": actions,
         }
 
     manager = package_manager or choose_package_manager()
     if not manager:
-        return {
-            "success": False,
-            "installed": False,
-            "error": "Geen package manager gevonden. Installeer micromamba of conda.",
-        }
+        bootstrap_result = bootstrap_package_manager()
+        if bootstrap_result.get("success"):
+            manager = str(bootstrap_result["package_manager"])
+            actions.append("bootstrapped_package_manager")
+        else:
+            return {
+                "success": False,
+                "installed": False,
+                "error": bootstrap_result.get("error") or "Geen package manager gevonden.",
+                "actions": actions,
+                "bootstrap": bootstrap_result,
+            }
 
     os.makedirs(runtime_root, exist_ok=True)
     create_cmd = [
@@ -352,12 +443,14 @@ def ensure_managed_runtime(
     ]
     try:
         _run_command(create_cmd)
+        actions.append("created_runtime")
     except Exception as exc:
         return {
             "success": False,
             "installed": False,
             "error": f"Runtime installatie gefaald: {exc}",
             "command": create_cmd,
+            "actions": actions,
         }
 
     runtime_info = detect_runtime_layout(runtime_root)
@@ -371,7 +464,9 @@ def ensure_managed_runtime(
             "success": False,
             "installed": False,
             "error": sheetmetal_result.get("error") or "SheetMetal broncode installatie gefaald",
+            "actions": actions,
         }
+    actions.append("installed_sheetmetal_source")
 
     verify_result = _verify_runtime(runtime_info)
     if not verify_result.get("success"):
@@ -379,6 +474,8 @@ def ensure_managed_runtime(
             "success": False,
             "installed": True,
             "error": verify_result.get("error") or "Runtime verificatie gefaald",
+            "actions": actions,
+            "verify": verify_result,
         }
 
     metadata = _persist_runtime(runtime_info, sheetmetal_repo, os.path.basename(manager))
@@ -386,4 +483,35 @@ def ensure_managed_runtime(
         "success": True,
         "installed": True,
         "runtime": metadata,
+        "actions": actions + ["verified_new_runtime"],
+    }
+
+
+def doctor_runtime(
+    runtime_root: Optional[str] = None,
+    sheetmetal_repo: str = DEFAULT_SHEETMETAL_REPO,
+) -> Dict[str, Any]:
+    runtime_root = runtime_root or managed_runtime_root()
+    runtime_info = detect_runtime_layout(runtime_root)
+    configured = configured_runtime()
+    verify = _verify_runtime(runtime_info) if os.path.exists(runtime_info.get("freecad_cmd") or "") else {
+        "success": False,
+        "stage": "resolve_freecadcmd",
+        "error": "FreeCADCmd niet gevonden",
+    }
+
+    return {
+        "platform": sys.platform,
+        "runtime_root": runtime_root,
+        "auto_install_enabled": auto_install_enabled(),
+        "auto_bootstrap_package_manager_enabled": auto_bootstrap_package_manager_enabled(),
+        "package_manager": diagnose_package_manager(),
+        "configured_runtime": configured,
+        "detected_runtime": {
+            **runtime_info,
+            "sheetmetal_dest": _sheetmetal_destination(runtime_info),
+            "sheetmetal_repo": sheetmetal_repo,
+        },
+        "verify": verify,
+        "bootstrap_command": _package_manager_bootstrap_command(),
     }

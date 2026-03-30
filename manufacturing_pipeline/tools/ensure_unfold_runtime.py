@@ -35,11 +35,34 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Emit machine-readable JSON.",
     )
+    parser.add_argument(
+        "--doctor",
+        action="store_true",
+        help="Print runtime diagnostics instead of installing or verifying.",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if args.doctor:
+        result = freecad_runtime.doctor_runtime(sheetmetal_repo=args.sheetmetal_repo)
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            print("FreeCAD unfold runtime doctor")
+            print(f"  platform: {result['platform']}")
+            print(f"  runtime_root: {result['runtime_root']}")
+            print(f"  auto_install_enabled: {result['auto_install_enabled']}")
+            print(f"  auto_bootstrap_package_manager_enabled: {result['auto_bootstrap_package_manager_enabled']}")
+            pkg = result["package_manager"]
+            print(f"  package_manager: {pkg.get('chosen') or '(none)'}")
+            verify = result["verify"]
+            print(f"  verify_success: {verify.get('success')}")
+            if verify.get("error"):
+                print(f"  verify_error: {verify['error']}")
+        return 0
+
     result = freecad_runtime.ensure_managed_runtime(
         install_if_missing=not args.no_install,
         package_manager=args.package_manager,
@@ -56,6 +79,8 @@ def main() -> int:
         print(f"  root: {runtime.get('runtime_root')}")
         print(f"  cmd:  {runtime.get('freecad_cmd')}")
         print(f"  mod:  {runtime.get('freecad_mod')}")
+        if result.get("actions"):
+            print(f"  actions: {', '.join(result['actions'])}")
         print("Use this runtime via the normal pipeline; config is persisted automatically.")
     else:
         print(result.get("error") or "Managed FreeCAD runtime check failed.", file=sys.stderr)

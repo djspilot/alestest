@@ -123,3 +123,63 @@ def test_ensure_managed_runtime_repairs_existing_runtime(monkeypatch, tmp_path):
     assert result["installed"] is False
     assert verify_calls["count"] == 2
     assert install_calls["count"] == 1
+
+
+def test_bootstrap_package_manager_disabled_by_default(monkeypatch):
+    monkeypatch.delenv("FREECAD_BOOTSTRAP_PACKAGE_MANAGER", raising=False)
+    result = freecad_runtime.bootstrap_package_manager()
+    assert result["success"] is False
+    assert "FREECAD_BOOTSTRAP_PACKAGE_MANAGER=1" in result["error"]
+    assert result["command"]
+
+
+def test_ensure_managed_runtime_uses_bootstrapped_package_manager(monkeypatch, tmp_path):
+    runtime_root = tmp_path / "freecad"
+    calls = {"commands": []}
+
+    monkeypatch.setattr(freecad_runtime, "choose_package_manager", lambda: "")
+    monkeypatch.setattr(
+        freecad_runtime,
+        "bootstrap_package_manager",
+        lambda: {"success": True, "package_manager": "/tmp/micromamba", "command": ["bootstrap"]},
+    )
+    monkeypatch.setattr(
+        freecad_runtime,
+        "_run_command",
+        lambda command, capture_output=False, text=True: calls["commands"].append(command),
+    )
+    monkeypatch.setattr(
+        freecad_runtime,
+        "_install_sheetmetal_source",
+        lambda runtime_info, sheetmetal_repo, update_sheetmetal: {"success": True},
+    )
+    monkeypatch.setattr(freecad_runtime, "_verify_runtime", lambda info: {"success": True, "stage": "verified"})
+    monkeypatch.setattr(freecad_runtime, "save_runtime_metadata", lambda data, metadata_path=None: str(tmp_path / "meta.json"))
+
+    result = freecad_runtime.ensure_managed_runtime(
+        install_if_missing=True,
+        runtime_root=str(runtime_root),
+    )
+
+    assert result["success"] is True
+    assert result["installed"] is True
+    assert "bootstrapped_package_manager" in result["actions"]
+    assert calls["commands"]
+    assert calls["commands"][0][0] == "/tmp/micromamba"
+
+
+def test_doctor_runtime_reports_verify_failure(monkeypatch, tmp_path):
+    runtime_root = tmp_path / "freecad"
+    monkeypatch.setattr(freecad_runtime, "managed_runtime_root", lambda project_root=None: str(runtime_root))
+    monkeypatch.setattr(
+        freecad_runtime,
+        "diagnose_package_manager",
+        lambda: {"chosen": "", "discovered": [], "auto_bootstrap_enabled": False},
+    )
+
+    result = freecad_runtime.doctor_runtime(runtime_root=str(runtime_root))
+
+    assert result["platform"]
+    assert result["runtime_root"] == str(runtime_root)
+    assert result["verify"]["success"] is False
+    assert result["verify"]["stage"] == "resolve_freecadcmd"
