@@ -1,6 +1,7 @@
 # Core - Manufacturing Pipeline
 cadquery>=2.4.0
 cadquery-ocp
+shapely
 opencv-python
 pymupdf
 numpy

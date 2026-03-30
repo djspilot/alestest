@@ -17,6 +17,11 @@ HOST_DEPENDENCIES = [
         "module": "OCP",
         "pip": "cadquery-ocp",
     },
+    {
+        "label": "shapely",
+        "module": "shapely",
+        "pip": "shapely",
+    },
 ]
 
 

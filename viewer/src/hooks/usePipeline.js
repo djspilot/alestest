@@ -51,8 +51,25 @@ export function usePipeline() {
     return window.localStorage.getItem('ales-pipeline-api-key') || ''
   })
   const [pipelineState, setPipelineState] = useState(EMPTY_PIPELINE_STATE)
+  const [debugEvents, setDebugEvents] = useState([])
   const pipelineAbortRef = useRef(null)
   const pendingRestartRef = useRef(false)
+
+  const pushDebugEvent = useCallback((stage, details = {}) => {
+    setDebugEvents((prev) => {
+      const next = [
+        ...prev,
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          timestamp: new Date().toISOString(),
+          source: 'pipeline',
+          stage,
+          ...details,
+        },
+      ]
+      return next.slice(-200)
+    })
+  }, [])
 
   // Persist settings
   useEffect(() => {
@@ -82,8 +99,9 @@ export function usePipeline() {
     if (!pipelineEnabled) {
       stopPipelineRequest()
       setPipelineState({ ...EMPTY_PIPELINE_STATE, status: 'disabled' })
+      pushDebugEvent('pipeline_disabled', { message: 'Pipeline is disabled in viewer settings' })
     }
-  }, [pipelineEnabled, stopPipelineRequest])
+  }, [pipelineEnabled, pushDebugEvent, stopPipelineRequest])
 
   const handleStageToggle = useCallback((stageKey, enabled) => {
     setDisabledStages((prev) => {
@@ -110,27 +128,40 @@ export function usePipeline() {
       const controller = new AbortController()
       pipelineAbortRef.current = controller
 
+      setDebugEvents([])
       setPipelineState({ ...EMPTY_PIPELINE_STATE, status: 'checking' })
 
       try {
         const configuredBase = (pipelineApiBase || '').trim()
         const defaultBase = getDefaultPipelineApiBase()
+        pushDebugEvent('connection_check_started', {
+          configuredBase: configuredBase || null,
+          defaultBase,
+          fileName: file?.name || null,
+          fileSize: file?.size || null,
+        })
 
         let connection = await checkPipelineConnection({
           apiBase: pipelineApiBase,
           apiKey: pipelineApiKey,
           signal: controller.signal,
         })
+        pushDebugEvent('connection_check_result', connection)
 
         let usedBase = configuredBase
         let fallbackAttempt = null
 
         if (!connection.ok && configuredBase && configuredBase !== defaultBase) {
+          pushDebugEvent('connection_fallback_started', {
+            fallbackBase: defaultBase,
+            originalBase: configuredBase,
+          })
           fallbackAttempt = await checkPipelineConnection({
             apiBase: defaultBase,
             apiKey: pipelineApiKey,
             signal: controller.signal,
           })
+          pushDebugEvent('connection_fallback_result', fallbackAttempt)
           if (fallbackAttempt.ok) {
             usedBase = defaultBase
             connection = fallbackAttempt
@@ -152,10 +183,23 @@ export function usePipeline() {
               message: connection.message,
             }),
           }))
+          pushDebugEvent('connection_check_failed', {
+            status: connection.status,
+            code: connection.code,
+            message: connection.message,
+            checkedUrl: connection.url || null,
+            fallbackUrl: fallbackAttempt?.url || null,
+          })
           return
         }
 
         setPipelineState({ ...EMPTY_PIPELINE_STATE, status: 'queued' })
+        pushDebugEvent('analysis_requested', {
+          apiBase: usedBase,
+          analyzeUrl: `${usedBase}/api/v1/analyze`,
+          aag: aagFallbackEnabled,
+          disabledStages,
+        })
 
         const result = await runPipelineAnalysis(file, {
           apiBase: usedBase,
@@ -164,6 +208,14 @@ export function usePipeline() {
           disableStages: disabledStages,
           signal: controller.signal,
           onProgress: (progress) => {
+            pushDebugEvent('progress', {
+              progressStage: progress.stage || null,
+              status: progress.status || null,
+              jobId: progress.jobId || null,
+              activeStage: progress.timeline?.summary?.active_stage || null,
+              eventCount: progress.timeline?.events?.length || 0,
+              error: progress.job?.error || null,
+            })
             setPipelineState((prev) => ({
               ...prev,
               status: progress.status || prev.status,
@@ -188,8 +240,18 @@ export function usePipeline() {
             checkedUrl: `${usedBase}/api/v1/health`,
           }),
         }))
+        pushDebugEvent('analysis_completed', {
+          jobId: result.jobId,
+          activeStage: result.timeline?.summary?.active_stage || null,
+          eventCount: result.timeline?.events?.length || 0,
+        })
       } catch (pipelineError) {
         if (pipelineError?.name === 'AbortError') return
+        pushDebugEvent('analysis_failed', {
+          message: pipelineError?.message || 'Pipeline analyse mislukt',
+          checkedBase: (pipelineApiBase || '').trim(),
+          checkedUrl: `${(pipelineApiBase || '').trim()}/api/v1/health`,
+        })
         setPipelineState((prev) => ({
           ...prev,
           status: 'failed',
@@ -265,6 +327,7 @@ export function usePipeline() {
     setPipelineApiKey,
     pipelineState,
     setPipelineState,
+    debugEvents,
     startPipeline,
     stopPipelineRequest,
     triggerAutoRestart,

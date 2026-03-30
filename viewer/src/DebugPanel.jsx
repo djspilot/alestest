@@ -15,6 +15,14 @@ export default function DebugPanel({
   activeMesh,
 }) {
   const [copyState, setCopyState] = useState('idle')
+  const combinedEvents = useMemo(
+    () => [...(viewer.debugEvents || []), ...(pipeline.debugEvents || [])].sort((a, b) => {
+      const left = new Date(a.timestamp || 0).getTime()
+      const right = new Date(b.timestamp || 0).getTime()
+      return left - right
+    }),
+    [pipeline.debugEvents, viewer.debugEvents],
+  )
 
   const summary = useMemo(
     () => [
@@ -25,7 +33,12 @@ export default function DebugPanel({
       { label: 'Actieve mesh', value: Boolean(activeMesh) },
       { label: 'Parse mode', value: parseMode },
       { label: 'Pipeline status', value: pipeline.pipelineState?.status || 'idle' },
+      { label: 'Pipeline job', value: pipeline.pipelineState?.jobId || '—' },
       { label: 'Actieve stage', value: pipeline.summary?.active_stage || '—' },
+      { label: 'Pipeline fout', value: pipeline.pipelineState?.error || '—' },
+      { label: 'Pipeline debug code', value: pipeline.pipelineState?.debug?.code || '—' },
+      { label: 'Pipeline debug bericht', value: pipeline.pipelineState?.debug?.message || '—' },
+      { label: 'Health URL', value: pipeline.pipelineState?.debug?.checkedUrl || '—' },
       { label: 'API base', value: pipeline.pipelineApiBase || '—' },
       { label: 'User agent', value: navigator.userAgent },
     ],
@@ -33,6 +46,11 @@ export default function DebugPanel({
       activeMesh,
       parseMode,
       pipeline.pipelineApiBase,
+      pipeline.pipelineState?.debug?.checkedUrl,
+      pipeline.pipelineState?.debug?.code,
+      pipeline.pipelineState?.debug?.message,
+      pipeline.pipelineState?.error,
+      pipeline.pipelineState?.jobId,
       pipeline.pipelineState?.status,
       pipeline.summary?.active_stage,
       viewer.engineStatus,
@@ -46,7 +64,10 @@ export default function DebugPanel({
     const payload = {
       generatedAt: new Date().toISOString(),
       summary: Object.fromEntries(summary.map((item) => [item.label, item.value])),
-      events: viewer.debugEvents,
+      viewerEvents: viewer.debugEvents || [],
+      pipelineEvents: pipeline.debugEvents || [],
+      events: combinedEvents,
+      pipelineDebug: pipeline.pipelineState?.debug || null,
     }
     try {
       await navigator.clipboard.writeText(JSON.stringify(payload, null, 2))
@@ -77,10 +98,10 @@ export default function DebugPanel({
       </div>
 
       <div className="debug-event-list">
-        {viewer.debugEvents.length === 0 ? (
+        {combinedEvents.length === 0 ? (
           <div className="debug-empty">Nog geen debug-events. Laad een STEP-bestand om de keten te volgen.</div>
         ) : (
-          [...viewer.debugEvents].reverse().map((event) => (
+          [...combinedEvents].reverse().map((event) => (
             <div className="debug-event" key={event.id}>
               <div className="debug-event-head">
                 <span className="debug-event-source">{event.source || 'viewer'}</span>

@@ -65,7 +65,9 @@ except Exception:
             timeout=60,
         )
         if proc.returncode != 0:
-            print(f"  XCAF probe crashed (exit {proc.returncode}), using CadQuery fallback")
+            stderr = (proc.stderr or "").strip()
+            detail = f": {stderr[:400]}" if stderr else ""
+            print(f"  XCAF probe crashed (exit {proc.returncode}), using CadQuery fallback{detail}")
             return None
         solid_count = int(proc.stdout.strip() or "0")
         if solid_count == 0:
