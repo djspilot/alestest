@@ -8,14 +8,7 @@ import subprocess
 
 from manufacturing_pipeline.core.config import SystemConfig
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DATA_DIR = os.path.join(PROJECT_ROOT, "data")
-CONFIG_DIR = os.path.join(DATA_DIR, "config")
-DB_DIR = os.path.join(DATA_DIR, "db")
-PARTS_DIR = os.path.join(DATA_DIR, "input")
-OUTPUT_DIR = os.path.join(DATA_DIR, "output")
-PIPELINE_DIR = os.path.join(PROJECT_ROOT, "manufacturing_pipeline")
-SCRIPTS_DIR = os.path.join(PIPELINE_DIR, "scripts")
+from manufacturing_pipeline.core.paths import PIPELINE_DIR, SCRIPTS_DIR
 
 FREECAD_PYTHON = SystemConfig.from_env().freecad_python
 HOST_PYTHON = sys.executable
