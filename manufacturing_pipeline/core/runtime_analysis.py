@@ -584,7 +584,7 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                     flat_shape = load_step_file(flat_step_path)
                     print(f"  [OK] Flat STEP: {flat_step_path}")
             else:
-                print(f"  ⚠ Unfold niet gelukt: {unfold_result.get('error', 'onbekend') if unfold_result else 'geen resultaat'}")
+                print(f"  [!] Unfold niet gelukt: {unfold_result.get('error', 'onbekend') if unfold_result else 'geen resultaat'}")
 
         profiler.emit(
             "unfold_result",

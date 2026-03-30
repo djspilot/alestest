@@ -161,6 +161,13 @@ def choose_package_manager() -> str:
         path = shutil.which(candidate)
         if path:
             return path
+    # Check known install locations not yet on PATH
+    if sys.platform.startswith("win"):
+        local_app_data = os.environ.get("LOCALAPPDATA", "")
+        if local_app_data:
+            candidate = os.path.join(local_app_data, "micromamba", "micromamba.exe")
+            if os.path.exists(candidate):
+                return candidate
     return ""
 
 
@@ -290,67 +297,122 @@ def _persist_runtime(runtime_info: Dict[str, Any], sheetmetal_repo: str, manager
 
 def _verify_runtime(runtime_info: Dict[str, Any]) -> Dict[str, Any]:
     freecad_cmd = str(runtime_info.get("freecad_cmd") or "")
+    freecad_python = str(runtime_info.get("freecad_python") or "")
+    freecad_lib = str(runtime_info.get("freecad_lib") or "")
     freecad_mod = str(runtime_info.get("freecad_mod") or "")
-    if not freecad_cmd or not os.path.exists(freecad_cmd):
-        return {
-            "success": False,
-            "error": "FreeCADCmd niet gevonden na installatie",
-            "stage": "resolve_freecadcmd",
-        }
+
+    # On Windows conda, FreeCAD.pyd lives in Library/bin which is not on sys.path
+    freecad_lib_bin = os.path.join(str(runtime_info.get("runtime_root") or ""), "Library", "bin")
 
     script = (
         "import json, os, sys\n"
+        "\n"
+        "# Mock FreeCADGui BEFORE adding Library/bin to sys.path\n"
+        "# so the real FreeCADGui.pyd (which needs Qt/GUI) is never loaded\n"
+        "class _MockObj:\n"
+        "    Refine = True\n"
+        "class _MockSel:\n"
+        "    _s = [_MockObj()]\n"
+        "    @staticmethod\n"
+        "    def getSelection():\n"
+        "        return _MockSel._s\n"
+        "    @staticmethod\n"
+        "    def addSelection(*a):\n"
+        "        pass\n"
+        "class _MockGui:\n"
+        "    Selection = _MockSel()\n"
+        "sys.modules['FreeCADGui'] = _MockGui()\n"
+        "\n"
+        f"lib_bin = {json.dumps(freecad_lib_bin)}\n"
+        "if lib_bin and os.path.isdir(lib_bin) and lib_bin not in sys.path:\n"
+        "    sys.path.insert(0, lib_bin)\n"
         f"mod_path = {json.dumps(freecad_mod)}\n"
         "if mod_path and os.path.isdir(mod_path) and mod_path not in sys.path:\n"
         "    sys.path.insert(0, mod_path)\n"
+        "\n"
         "import FreeCAD\n"
         "import Part\n"
         "import SheetMetalUnfolder\n"
         "print(json.dumps({'success': True}))\n"
     )
 
-    tmp_file = None
-    try:
-        with tempfile.NamedTemporaryFile("w", suffix="_verify_freecad.py", delete=False, encoding="utf-8") as handle:
-            handle.write(script)
-            tmp_file = handle.name
-        proc = subprocess.run(
-            [freecad_cmd, tmp_file],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=120,
-        )
-    except Exception as exc:
+    # Build PATH so conda-managed FreeCAD can find its DLLs
+    extra_path_parts = []
+    runtime_root = str(runtime_info.get("runtime_root") or "")
+    for candidate in (
+        os.path.join(runtime_root, "Library", "bin"),
+        os.path.join(runtime_root, "Library", "mingw-w64", "bin"),
+        os.path.join(runtime_root, "bin"),
+        freecad_lib,
+    ):
+        if candidate and os.path.isdir(candidate) and candidate not in extra_path_parts:
+            extra_path_parts.append(candidate)
+
+    env = os.environ.copy()
+    if extra_path_parts:
+        path_sep = ";" if sys.platform.startswith("win") else ":"
+        existing = env.get("PATH", "")
+        env["PATH"] = path_sep.join(extra_path_parts) + path_sep + existing
+
+    # Prefer python.exe over FreeCADCmd.exe — it resolves DLLs correctly
+    # within conda environments where FreeCADCmd may fail due to PATH issues.
+    executables_to_try: List[str] = []
+    if freecad_python and os.path.exists(freecad_python):
+        executables_to_try.append(freecad_python)
+    if freecad_cmd and os.path.exists(freecad_cmd):
+        executables_to_try.append(freecad_cmd)
+    if not executables_to_try:
         return {
             "success": False,
-            "error": f"Runtime verificatie gefaald: {exc}",
-            "stage": "launch_verify_script",
+            "error": "FreeCAD executable niet gevonden (python of FreeCADCmd)",
+            "stage": "resolve_freecadcmd",
         }
-    finally:
-        if tmp_file and os.path.exists(tmp_file):
-            try:
-                os.remove(tmp_file)
-            except OSError:
-                pass
 
-    for line in reversed((proc.stdout or "").splitlines()):
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
+    tmp_file = None
+    last_error = ""
+    for executable in executables_to_try:
         try:
-            payload = json.loads(line)
-        except Exception:
+            with tempfile.NamedTemporaryFile("w", suffix="_verify_freecad.py", delete=False, encoding="utf-8") as handle:
+                handle.write(script)
+                tmp_file = handle.name
+            proc = subprocess.run(
+                [executable, tmp_file],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=120,
+                env=env,
+            )
+        except Exception as exc:
+            last_error = f"Runtime verificatie gefaald ({os.path.basename(executable)}): {exc}"
             continue
-        if payload.get("success"):
-            return {"success": True, "stage": "verified"}
+        finally:
+            if tmp_file and os.path.exists(tmp_file):
+                try:
+                    os.remove(tmp_file)
+                except OSError:
+                    pass
+                tmp_file = None
+
+        for line in reversed((proc.stdout or "").splitlines()):
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                payload = json.loads(line)
+            except Exception:
+                continue
+            if payload.get("success"):
+                return {"success": True, "stage": "verified"}
+
+        last_error = (proc.stderr or proc.stdout or "Runtime verificatie gaf geen geldig resultaat").strip()
 
     return {
         "success": False,
-        "error": (proc.stderr or proc.stdout or "Runtime verificatie gaf geen geldig resultaat").strip(),
+        "error": last_error,
         "stage": "verify_imports",
-        "stdout": (proc.stdout or "").strip()[-2000:],
-        "stderr": (proc.stderr or "").strip()[-2000:],
+        "stdout": "",
+        "stderr": last_error[:2000],
     }
 
 

@@ -41,8 +41,8 @@ import json
 import math
 
 # FreeCAD paths
-freecad_lib = "{fc_lib}"
-freecad_mod = "{fc_mod}"
+freecad_lib = {repr(fc_lib)}
+freecad_mod = {repr(fc_mod)}
 
 if platform.system() == "Darwin":
     freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
@@ -79,7 +79,7 @@ import Part
 import SheetMetalUnfolder
 
 # Load STEP
-step_path = "{step_file}"
+step_path = {repr(step_file)}
 shape = Part.Shape()
 shape.read(step_path)
 
@@ -262,13 +262,24 @@ def _merge_fold_segments(bend_line_segments, bends_logical):
 result = {{"success": False}}
 best_score = -1
 
+try:
+    pass  # placeholder for indent
+except Exception as e:
+    print(f"FATAL: {{e}}")
+    import traceback
+    traceback.print_exc()
+
+print(f"DEBUG: shape has {{len(shape.Solids)}} solids, {{len(shape.Faces)}} faces")
+
 # Get solids
 solids = shape.Solids if shape.Solids else [shape]
 sorted_solids = sorted(solids, key=lambda s: s.Volume, reverse=True)
 
-for solid in sorted_solids[:3]:  # Try top 3 by volume
+for solid_idx, solid in enumerate(sorted_solids[:3]):  # Try top 3 by volume
+    print(f"DEBUG: trying solid {{solid_idx}}, volume={{solid.Volume:.1f}}")
     # Calculate thickness first
     detected_thickness = get_thickness_from_solid(solid)
+    print(f"DEBUG: detected thickness={{detected_thickness}}")
 
     # Find planar faces for base
     planar_faces = []
@@ -279,28 +290,34 @@ for solid in sorted_solids[:3]:  # Try top 3 by volume
         except:
             pass
     planar_faces.sort(key=lambda x: x["area"], reverse=True)
+    print(f"DEBUG: {{len(planar_faces)}} planar faces")
 
     # Try top 10 largest faces to find the best base for unfolding
     for base_info in planar_faces[:10]:
         base_idx = base_info["index"]
+        print(f"DEBUG: trying base face {{base_idx}}, area={{base_info['area']:.1f}}")
         try:
             doc = FreeCAD.newDocument("UnfoldDoc")
             obj = doc.addObject("Part::Feature", "SheetPart")
             obj.Shape = solid
             doc.recompute()
 
-            unfold_tree = SheetMetalUnfolder.SheetTree(solid, base_idx, kFactorLookup)
+            unfold_tree = SheetMetalUnfolder.SheetTree(solid, base_idx, kFactorLookup, obj)
             if unfold_tree.error_code:
+                print(f"DEBUG: SheetTree error={{unfold_tree.error_code}} on face {{base_idx}}")
                 FreeCAD.closeDocument("UnfoldDoc")
                 continue
 
             unfold_tree.Bend_analysis(base_idx, None)
             if unfold_tree.error_code:
+                print(f"DEBUG: Bend_analysis error={{unfold_tree.error_code}} on face {{base_idx}}")
                 FreeCAD.closeDocument("UnfoldDoc")
                 continue
 
             if hasattr(unfold_tree, "root") and unfold_tree.root:
                 theFaceList, foldLines = unfold_tree.unfold_tree2(unfold_tree.root)
+
+                print(f"DEBUG: face {{base_idx}} -> error={{unfold_tree.error_code}}, faces={{len(theFaceList) if theFaceList else 0}}, folds={{len(foldLines) if foldLines else 0}}")
 
                 if not unfold_tree.error_code and theFaceList:
                     # Create flat shape - use FULL faces to preserve inner wires (holes)
@@ -322,11 +339,11 @@ for solid in sorted_solids[:3]:  # Try top 3 by volume
                             dims = sorted([bbox.XLength, bbox.YLength, bbox.ZLength], reverse=True)
 
                             # Export STEP
-                            flat_step_path = "{output_dir}/{part_name}_flat.step"
+                            flat_step_path = os.path.join({repr(output_dir)}, {repr(part_name)} + "_flat.step")
                             flat_compound.exportStep(flat_step_path)
 
                             # Export DXF
-                            dxf_path = "{output_dir}/{part_name}_flat.dxf"
+                            dxf_path = os.path.join({repr(output_dir)}, {repr(part_name)} + "_flat.dxf")
                             import importDXF
                             importDXF.export([flat_compound], dxf_path)
 
@@ -430,6 +447,7 @@ for solid in sorted_solids[:3]:  # Try top 3 by volume
                             
             FreeCAD.closeDocument("UnfoldDoc")
         except Exception as e:
+            print(f"DEBUG EXCEPTION on face {{base_idx}}: {{type(e).__name__}}: {{e}}")
             try:
                 FreeCAD.closeDocument("UnfoldDoc")
             except:
@@ -439,6 +457,20 @@ for solid in sorted_solids[:3]:  # Try top 3 by volume
 print("UNFOLD_RESULT:" + json.dumps(result))
 '''
 
+    # Pre-flight diagnostics
+    sys_config = SystemConfig.from_env()
+    print(f"    FreeCAD Python: {FREECAD_PYTHON or '(empty)'}")
+    print(f"    FreeCAD root:   {sys_config.freecad_path or '(empty)'}")
+    print(f"    FreeCAD cmd:    {sys_config.freecad_cmd or '(empty)'}")
+
+    if not FREECAD_PYTHON or not os.path.exists(FREECAD_PYTHON):
+        msg = (
+            f"FreeCAD Python not found at \"{FREECAD_PYTHON or '(empty)'}\".\n"
+            f"    Install FreeCAD or set FREECAD_PYTHON=C:\\path\\to\\python.exe"
+        )
+        print(f"    [!] {msg}")
+        return {"success": False, "error": msg}
+
     try:
         proc = subprocess.run(
             [FREECAD_PYTHON, "-c", unfold_script],
@@ -447,15 +479,49 @@ print("UNFOLD_RESULT:" + json.dumps(result))
             timeout=180
         )
 
+        if proc.returncode != 0:
+            stderr = (proc.stderr or "").strip()
+            if stderr:
+                for line in stderr.split('\n')[:10]:
+                    print(f"    [FreeCAD stderr] {line}")
+            return {"success": False, "error": f"FreeCAD exited {proc.returncode}: {stderr[:300]}"}
+
         # Parse result
-        for line in proc.stdout.split('\n'):
+        stdout_lines = (proc.stdout or "").strip().split('\n')
+        for line in stdout_lines:
             if line.startswith('UNFOLD_RESULT:'):
-                return json.loads(line[len('UNFOLD_RESULT:'):])
+                result = json.loads(line[len('UNFOLD_RESULT:'):])
+                if not result.get("success"):
+                    # Show intermediate debug lines from FreeCAD
+                    debug_lines = [l for l in stdout_lines if not l.startswith('UNFOLD_RESULT:')]
+                    if debug_lines:
+                        print(f"    [FreeCAD debug (last 10 lines)]:")
+                        for dl in debug_lines[-10:]:
+                            print(f"      {dl}")
+                return result
+
+        # Debug: show what FreeCAD actually output
+        if stdout_lines:
+            print(f"    [FreeCAD stdout (last 5 lines)]:")
+            for line in stdout_lines[-5:]:
+                print(f"      {line}")
+        stderr = (proc.stderr or "").strip()
+        if stderr:
+            print(f"    [FreeCAD stderr (last 5 lines)]:")
+            for line in stderr.split('\n')[-5:]:
+                print(f"      {line}")
 
         return {"success": False, "error": "No result returned"}
 
     except subprocess.TimeoutExpired:
         return {"success": False, "error": "Timeout (>180s)"}
+    except FileNotFoundError:
+        msg = (
+            f"FreeCAD executable not found: \"{FREECAD_PYTHON}\".\n"
+            f"    Install FreeCAD or set FREECAD_PYTHON=C:\\path\\to\\python.exe"
+        )
+        print(f"    [!] {msg}")
+        return {"success": False, "error": msg}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -468,7 +534,7 @@ def run_unfold(step_file, output_dir, part_name, analysis):
     unfold_result = {'success': False, 'error_details': []}
 
     if not os.path.exists(unfold_script):
-        print(f"  ⚠ Unfold script not found: {unfold_script}")
+        print(f"  [!] Unfold script not found: {unfold_script}")
         return unfold_result
 
     try:
@@ -538,11 +604,11 @@ def run_theoretical_unfold(step_file, analysis):
         # Run theoretical calculation via FreeCAD Python
         calc_code = f'''
 import sys
-sys.path.insert(0, "{PIPELINE_DIR}")
+sys.path.insert(0, {repr(PIPELINE_DIR)})
 from freecad_unfold import calculate_theoretical_unfold
 import json
 
-result = calculate_theoretical_unfold("{step_file}")
+result = calculate_theoretical_unfold({repr(step_file)})
 print("THEORETICAL_RESULT:" + json.dumps(result))
 '''
         result = subprocess.run(
@@ -570,7 +636,7 @@ print("THEORETICAL_RESULT:" + json.dumps(result))
         return None
 
     except Exception as e:
-        print(f"  ⚠ Theoretische berekening gefaald: {e}")
+        print(f"  [!] Theoretische berekening gefaald: {e}")
         return None
 
 

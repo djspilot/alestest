@@ -31,6 +31,14 @@ function Refresh-ProcessPath {
     }
 }
 
+function Test-IsWindowsPlatform {
+    if (($PSVersionTable.PSVersion.Major -ge 6) -and $IsWindows) {
+        return $true
+    }
+
+    return $env:OS -eq "Windows_NT"
+}
+
 function Get-SystemInstaller {
     if (Test-CommandAvailable "winget") {
         return "winget"
@@ -160,7 +168,7 @@ function Invoke-Python {
 
 Push-Location $RepoRoot
 try {
-    if (-not $IsWindows) {
+    if (-not (Test-IsWindowsPlatform)) {
         throw "Dit script is alleen bedoeld voor Windows."
     }
 
@@ -199,6 +207,13 @@ try {
         if (-not $SkipFreeCAD) {
             Write-Step "Controleer of installeer de headless FreeCAD runtime"
             $env:FREECAD_BOOTSTRAP_PACKAGE_MANAGER = "1"
+
+            # Ensure micromamba is on PATH if it was installed to %LOCALAPPDATA%
+            $micromambaDir = Join-Path $env:LOCALAPPDATA "micromamba"
+            if ((Test-Path (Join-Path $micromambaDir "micromamba.exe")) -and ($micromambaDir -notin ($env:Path -split ";"))) {
+                $env:Path = "$micromambaDir;$env:Path"
+            }
+
             Invoke-Checked -Command $venvPython -Arguments @("-m", "manufacturing_pipeline.tools.ensure_unfold_runtime")
         }
 

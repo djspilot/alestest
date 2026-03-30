@@ -46,9 +46,9 @@ def _load_step_via_xcaf(filepath):
     probe_script = f'''
 import sys
 try:
-    sys.path.insert(0, "{project_root}")
+    sys.path.insert(0, {repr(project_root)})
     from manufacturing_pipeline.core.xcaf_reader import xcaf_match_solids_to_names
-    result = xcaf_match_solids_to_names("{filepath}")
+    result = xcaf_match_solids_to_names({repr(filepath)})
     if result is None:
         print("0")
     else:
