@@ -9,6 +9,7 @@ import shutil
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 
 from manufacturing_pipeline.api.config import ALLOWED_EXTENSIONS, DISABLE_STAGES, MAX_FILE_SIZE_MB, UPLOAD_DIR, VALID_STAGE_KEYS
 from manufacturing_pipeline.api.schemas import (
@@ -30,6 +31,7 @@ from pathlib import Path
 import tempfile
 
 router = APIRouter(prefix="/api/v1")
+DEFAULT_VIEWER_STEP = Path(__file__).resolve().parents[2] / "data" / "testfile" / "nieuwmodel.step"
 
 
 def _refresh_live_summary(summary_raw: dict | None) -> dict | None:
@@ -221,6 +223,18 @@ async def health():
     return HealthResponse()
 
 
+@router.get("/viewer/default-step")
+async def get_viewer_default_step():
+    """Serve a repo-relative default STEP file for the viewer demo button."""
+    if not DEFAULT_VIEWER_STEP.exists():
+        raise HTTPException(status_code=404, detail="Default viewer STEP file not found")
+    return FileResponse(
+        DEFAULT_VIEWER_STEP,
+        filename=DEFAULT_VIEWER_STEP.name,
+        media_type="application/step",
+    )
+
+
 @router.get("/stats", response_model=JobStats)
 async def stats():
     """Get aggregated job statistics."""
@@ -303,5 +317,4 @@ def _result_to_xml(result: dict) -> str:
         if tmp_path.exists():
             tmp_path.unlink()
         raise HTTPException(status_code=500, detail=f"XML export failed: {str(e)}")
-
 

@@ -5,7 +5,7 @@ import StageDetailsPanel from './StageDetailsPanel'
 import { PipelineProvider, usePipelineContext } from './context/PipelineContext'
 import { SelectionProvider, useSelectionContext } from './context/SelectionContext'
 import { useViewer } from './hooks/useViewer'
-import { readFileAsArrayBuffer } from './lib/files'
+import { fetchFileAsBrowserFile, readFileAsArrayBuffer } from './lib/files'
 import { normalizeStageName, MERGED_HOLES_STAGE } from './pipelineUi'
 import { getDefaultPipelineApiBase } from './pipelineClient'
 
@@ -32,6 +32,7 @@ function AppContent() {
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [nowMs, setNowMs] = useState(() => Date.now())
+  const [loadingDefaultStep, setLoadingDefaultStep] = useState(false)
 
   // Pipeline hook manages all pipeline state + API communication
   const pipeline = usePipelineContext()
@@ -117,6 +118,25 @@ function AppContent() {
     if (controlsRef.current) controlsRef.current.reset()
   }, [])
 
+  const handleLoadDefaultStep = useCallback(async () => {
+    setLoadingDefaultStep(true)
+    viewer.setError(null)
+    try {
+      const file = await fetchFileAsBrowserFile(
+        `${pipeline.pipelineApiBase || getDefaultPipelineApiBase()}/api/v1/viewer/default-step`,
+        'nieuwmodel.step',
+        {
+          headers: pipeline.pipelineApiKey ? { 'X-API-Key': pipeline.pipelineApiKey } : undefined,
+        },
+      )
+      viewer.handleFile(file)
+    } catch (error) {
+      viewer.setError(error?.message || 'Demo STEP bestand laden mislukt.')
+    } finally {
+      setLoadingDefaultStep(false)
+    }
+  }, [pipeline.pipelineApiBase, pipeline.pipelineApiKey, viewer])
+
   return (
     <div className="app">
       <div className="header">
@@ -178,7 +198,13 @@ function AppContent() {
         )}
 
         <div className="viewer-container">
-          {!viewer.fileBuffer && !selection.activeMesh && !viewer.loading && <Dropzone onFile={viewer.handleFile} />}
+          {!viewer.fileBuffer && !selection.activeMesh && !viewer.loading && (
+            <Dropzone
+              onFile={viewer.handleFile}
+              onLoadDefaultStep={handleLoadDefaultStep}
+              loadingDefaultStep={loadingDefaultStep}
+            />
+          )}
 
           {viewer.loading && !viewer.fileBuffer && !selection.activeMesh && (
             <div className="loading-overlay">

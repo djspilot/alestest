@@ -62,6 +62,22 @@ body,
   min-height: 0;
 }
 
+.dropzone-demo-btn {
+  margin-top: 14px;
+  padding: 10px 14px;
+  border: 1px solid #1d3f74;
+  background: #17345e;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dropzone-demo-btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
 .sidebar {
   width: 320px;
   border-right: 1px solid #ddd;

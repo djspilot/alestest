@@ -1,6 +1,6 @@
 import React, { useCallback, useState, useRef } from 'react'
 
-export default function Dropzone({ onFile }) {
+export default function Dropzone({ onFile, onLoadDefaultStep, loadingDefaultStep = false }) {
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef()
 
@@ -41,6 +41,17 @@ export default function Dropzone({ onFile }) {
       <div className="dropzone-icon">⚙</div>
       <div className="dropzone-text">Sleep een STEP bestand hierheen</div>
       <div className="dropzone-hint">of klik om een bestand te selecteren (.step, .stp)</div>
+      <button
+        type="button"
+        className="dropzone-demo-btn"
+        onClick={(event) => {
+          event.stopPropagation()
+          onLoadDefaultStep?.()
+        }}
+        disabled={loadingDefaultStep}
+      >
+        {loadingDefaultStep ? 'Demo laden...' : 'Laad demo: nieuwmodel.step'}
+      </button>
       <input ref={inputRef} type="file" accept=".step,.stp,.STEP,.STP" onChange={handleChange} />
     </div>
   )
