@@ -1,14 +1,20 @@
-"""Compatibility layer for legacy imports.
+"""Compatibility shim -- imports forwarded to specific submodules.
 
-This module re-exports symbols directly from runtime and helper modules.
+Prefer importing from the specific submodule directly:
+  - paths: PROJECT_ROOT, DATA_DIR, etc.
+  - cache: get_file_hash, load_cache, etc.
+  - file_utils: find_step_files, get_output_dir, etc.
+  - runtime_analysis: run_analysis
+  - runtime_reporting: run_debug
 """
 
-from manufacturing_pipeline.core.runtime_analysis import *  # noqa: F401,F403
-from manufacturing_pipeline.core.runtime_reporting import *  # noqa: F401,F403
-from manufacturing_pipeline.core.runtime_unfold import *  # noqa: F401,F403
-
-from manufacturing_pipeline.core.cache import *  # noqa: F401,F403
-from manufacturing_pipeline.core.file_utils import *  # noqa: F401,F403
-from manufacturing_pipeline.core.analysis_pipeline import *  # noqa: F401,F403
-from manufacturing_pipeline.core.hole_detection_fallback import *  # noqa: F401,F403
-from manufacturing_pipeline.core.unfold_integration import *  # noqa: F401,F403
+# Keep backward-compat for any external/script imports we may have missed.
+from manufacturing_pipeline.core.paths import *  # noqa: F401,F403
+from manufacturing_pipeline.core.runtime_analysis import run_analysis  # noqa: F401
+from manufacturing_pipeline.core.runtime_reporting import run_debug  # noqa: F401
+from manufacturing_pipeline.core.cache import (  # noqa: F401
+    get_file_hash, load_cache, save_cache, get_cached_result, cache_result, CACHE_FILE,
+)
+from manufacturing_pipeline.core.file_utils import (  # noqa: F401
+    find_step_files, select_step_file, get_output_dir, process_single_file, process_batch,
+)

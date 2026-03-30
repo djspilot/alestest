@@ -14,13 +14,11 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
 from datetime import datetime
 
-from manufacturing_pipeline.core.utils import (
-    PROJECT_ROOT, DATA_DIR, DB_DIR, PARTS_DIR, OUTPUT_DIR,
-    find_step_files, select_step_file, get_output_dir,
-    run_analysis, run_debug,
-    process_single_file,
-    get_file_hash, load_cache, save_cache, cache_result,
-)
+from manufacturing_pipeline.core.paths import PROJECT_ROOT, DATA_DIR, DB_DIR, PARTS_DIR, OUTPUT_DIR
+from manufacturing_pipeline.core.file_utils import find_step_files, select_step_file, get_output_dir, process_single_file
+from manufacturing_pipeline.core.runtime_analysis import run_analysis
+from manufacturing_pipeline.core.runtime_reporting import run_debug
+from manufacturing_pipeline.core.cache import get_file_hash, load_cache, save_cache, cache_result, CACHE_FILE
 
 # ---------------------------------------------------------------------------
 # Quick-mode single-file runner
@@ -271,7 +269,7 @@ def main():
 
     # --- Quick cache clear ---
     if args.clear_cache:
-        from manufacturing_pipeline.core.utils import CACHE_FILE
+        # CACHE_FILE already imported at module level
         if os.path.exists(CACHE_FILE):
             os.remove(CACHE_FILE)
             print(f"Cache cleared: {CACHE_FILE}")

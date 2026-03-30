@@ -7,10 +7,8 @@ import os
 import shutil
 import json
 
-from manufacturing_pipeline.core.utils import (
-    run_analysis,
-    get_output_dir,
-)
+from manufacturing_pipeline.core.runtime_analysis import run_analysis
+from manufacturing_pipeline.core.file_utils import get_output_dir
 
 
 def _serialize_3d_bends(step_file: str, thickness: float | None = None) -> list[dict]:

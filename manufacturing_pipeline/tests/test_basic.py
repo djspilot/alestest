@@ -3,7 +3,8 @@ import unittest
 import os
 import sys
 from manufacturing_pipeline.core.config import SystemConfig
-from manufacturing_pipeline.core.utils import get_output_dir, PROJECT_ROOT
+from manufacturing_pipeline.core.paths import PROJECT_ROOT
+from manufacturing_pipeline.core.file_utils import get_output_dir
 
 class TestConfig(unittest.TestCase):
     def test_system_config_defaults(self):
