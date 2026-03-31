@@ -21,9 +21,43 @@ function getHoleStatusLabel(status) {
 
 function getHoleMethodLabel(method) {
   if (method === 'face_boundary_primary') return 'Face Boundary (primair)'
+  if (method === 'face_boundary_primary_for_irregular') return 'Face Boundary (irregulair)'
+  if (method === 'pre_unfold_face_boundary_bridge_for_missing_irregular') return 'Face Boundary bridge'
+  if (method === 'face_boundary_rejected_promoted') return 'Face Boundary promoted'
+  if (method === 'face_boundary_round_contour_fallback') return 'Face Boundary round fallback'
   if (method === 'recovery_bucket_fallback') return 'Recovery Bucket (fallback)'
+  if (method === 'recovery_bucket_fallback_for_unclassified') return 'Recovery Bucket'
+  if (method === 'detect_holes_cylindrical') return 'Cylindrical detector'
   if (method === 'cylindrical_detector') return 'Cylindrical detector'
   return method || 'Onbekend'
+}
+
+function getHoleMethodDescription(method) {
+  if (method === 'detect_holes_cylindrical' || method === 'cylindrical_detector') {
+    return 'Zoekt cilindrische gaten via faces.'
+  }
+  if (
+    method === 'face_boundary_primary' ||
+    method === 'face_boundary_primary_for_irregular' ||
+    method === 'pre_unfold_face_boundary_bridge_for_missing_irregular' ||
+    method === 'face_boundary_rejected_promoted' ||
+    method === 'face_boundary_round_contour_fallback'
+  ) {
+    return 'Werkt op face boundaries en inner contours.'
+  }
+  if (method === 'recovery_bucket_fallback' || method === 'recovery_bucket_fallback_for_unclassified') {
+    return 'Fallback voor resterende of onduidelijke kandidaten.'
+  }
+  return 'Detectiemethode voor deze kandidaatgroep.'
+}
+
+function isOverlapRejectedHole(hole) {
+  const reason = String(hole?.reason || '').toLowerCase()
+  const criteria = Array.isArray(hole?.criteria) ? hole.criteria : []
+  return (
+    reason.includes('onderdeel van een shaped hole') ||
+    criteria.some((criterion) => String(criterion?.name || '').toLowerCase() === 'duplicate_of_shaped_hole')
+  )
 }
 
 function getClassificationStatusLabel(status) {
@@ -65,8 +99,10 @@ export default function StageDetailsPanel({
   onHighlightHiddenHoleLocationsChange,
 }) {
   const [holeFilter, setHoleFilter] = useState('all')
+  const [activeHoleMethod, setActiveHoleMethod] = useState('all')
   const [exportFeedback, setExportFeedback] = useState('')
   const [showAdvancedHoleDebug, setShowAdvancedHoleDebug] = useState(false)
+  const [showHoleInspector, setShowHoleInspector] = useState(false)
   const selectedStage = groupedStages[selectedStageIndex] || null
   const selectedEvent = selectedStage?.events?.[selectedEventIndex] || null
   const selectedPayloadEntries = Object.entries(selectedEvent?.payload || {}).filter(([, value]) => value !== undefined)
@@ -164,6 +200,10 @@ export default function StageDetailsPanel({
     () => holeItems.filter((hole) => isIrregularHole(hole) || hole.status === 'rejected'),
     [holeItems],
   )
+  const overlapRejectedHoleItems = useMemo(
+    () => holeItems.filter((hole) => hole.status === 'rejected' && isOverlapRejectedHole(hole)),
+    [holeItems],
+  )
   const baseVisibleHoleItems = useMemo(() => {
     if (showHiddenHoles) return holeItems
     return holeItems.filter((hole) => !isHiddenHoleCandidate(hole))
@@ -173,10 +213,79 @@ export default function StageDetailsPanel({
     if (holeFilter === 'rejected') return baseVisibleHoleItems.filter((hole) => hole.status === 'rejected')
     return baseVisibleHoleItems
   }, [baseVisibleHoleItems, holeFilter])
+  const holeMethods = useMemo(() => {
+    const methodMap = new Map()
+    holeItems.forEach((hole) => {
+      const method = hole.method || 'unknown'
+      if (!methodMap.has(method)) {
+        methodMap.set(method, {
+          key: method,
+          label: getHoleMethodLabel(method),
+          description: getHoleMethodDescription(method),
+          items: [],
+        })
+      }
+      methodMap.get(method).items.push(hole)
+    })
+
+    const orderedKeys = [
+      ...(Array.isArray(holeVisuals?.method_order) ? holeVisuals.method_order : []),
+      ...Array.from(methodMap.keys()),
+    ].filter((value, index, array) => value && array.indexOf(value) === index)
+
+    return orderedKeys
+      .filter((key) => methodMap.has(key))
+      .map((key) => {
+        const group = methodMap.get(key)
+        const items = group.items
+        return {
+          ...group,
+          total: items.length,
+          accepted: items.filter((hole) => hole.status === 'accepted').length,
+          rejected: items.filter((hole) => hole.status === 'rejected').length,
+          overlapRejected: items.filter((hole) => hole.status === 'rejected' && isOverlapRejectedHole(hole)).length,
+          netUnique: items.filter((hole) => hole.status === 'accepted').length,
+          visible: items.filter((hole) => showHiddenHoles || !isHiddenHoleCandidate(hole)).length,
+        }
+      })
+  }, [holeItems, holeVisuals?.method_order, showHiddenHoles])
+  const overlapReductionSummary = useMemo(
+    () => ({
+      rawCandidates: holeItems.length,
+      overlapRejected: overlapRejectedHoleItems.length,
+      otherRejected: holeItems.filter((hole) => hole.status === 'rejected' && !isOverlapRejectedHole(hole)).length,
+      netUnique: holeItems.filter((hole) => hole.status === 'accepted').length,
+    }),
+    [holeItems, overlapRejectedHoleItems],
+  )
+  const activeHoleItems = useMemo(() => {
+    const methodFiltered =
+      activeHoleMethod === 'all'
+        ? visibleHoleItems
+        : visibleHoleItems.filter((hole) => (hole.method || 'unknown') === activeHoleMethod)
+    return methodFiltered
+  }, [activeHoleMethod, visibleHoleItems])
+  const activeHoleMethodSummary = useMemo(() => {
+    if (activeHoleMethod === 'all') {
+      return {
+        label: 'Alle tools',
+        description: 'Gecombineerde lijst van alle zichtbare kandidaten.',
+      }
+    }
+    const selectedMethod = holeMethods.find((method) => method.key === activeHoleMethod)
+    return (
+      selectedMethod || {
+        label: getHoleMethodLabel(activeHoleMethod),
+        description: getHoleMethodDescription(activeHoleMethod),
+      }
+    )
+  }, [activeHoleMethod, holeMethods])
 
   useEffect(() => {
     setShowAdvancedHoleDebug(false)
     setExportFeedback('')
+    setActiveHoleMethod('all')
+    setShowHoleInspector(false)
   }, [selectedStage?.stage])
 
   const downloadPreUnfoldDebug = () => {
@@ -313,20 +422,54 @@ export default function StageDetailsPanel({
             {(isMergedHoleStage || isPreUnfoldHoleStage) && holeVisuals && (
               <div className="visual-stage-card" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none' }}>
                 <div className="timeline-title">Hole Overlay</div>
-                <div className="timeline-text">
-                  Bron: {holeVisuals.source || '-'} | Geaccepteerd: {holeVisuals.accepted_total || 0} | Afgewezen:{' '}
-                  {holeVisuals.rejected_total || 0} | Kandidaten: {holeVisuals.total_candidates || 0}
+                <div className="hole-summary-grid">
+                  <div className="hole-summary-card">
+                    <div className="hole-summary-label">Kandidaten</div>
+                    <div className="hole-summary-value">{holeVisuals.total_candidates || 0}</div>
+                  </div>
+                  <div className="hole-summary-card">
+                    <div className="hole-summary-label">Gevonden</div>
+                    <div className="hole-summary-value">{holeVisuals.accepted_total || 0}</div>
+                  </div>
+                  <div className="hole-summary-card">
+                    <div className="hole-summary-label">Afgewezen</div>
+                    <div className="hole-summary-value">{holeVisuals.rejected_total || 0}</div>
+                  </div>
+                  <div className="hole-summary-card">
+                    <div className="hole-summary-label">Zichtbaar</div>
+                    <div className="hole-summary-value">{baseVisibleHoleItems.length}</div>
+                  </div>
+                  <div className="hole-summary-card">
+                    <div className="hole-summary-label">Overlap eruit</div>
+                    <div className="hole-summary-value">{overlapReductionSummary.overlapRejected}</div>
+                  </div>
+                  <div className="hole-summary-card">
+                    <div className="hole-summary-label">Netto uniek</div>
+                    <div className="hole-summary-value">{overlapReductionSummary.netUnique}</div>
+                  </div>
                 </div>
                 <div className="timeline-text">
-                  Viewer: zichtbaar {baseVisibleHoleItems.length} | incl. verborgen {holeItems.length}
-                  {hiddenHoleItems.length > 0 ? ` (verborgen: ${hiddenHoleItems.length})` : ''}
+                  Bron: {holeVisuals.source || '-'} | Viewer totaal {holeItems.length}
+                  {hiddenHoleItems.length > 0 ? ` | Verborgen ${hiddenHoleItems.length}` : ''}
+                </div>
+                <div className="timeline-text">
+                  Reductie: raw {overlapReductionSummary.rawCandidates}, overlap eruit {overlapReductionSummary.overlapRejected}, netto{' '}
+                  {overlapReductionSummary.netUnique}
+                  {overlapReductionSummary.otherRejected > 0
+                    ? ` | overige afwijzingen ${overlapReductionSummary.otherRejected}`
+                    : ''}
                 </div>
                 {holeVisuals.criteria_note && <div className="timeline-text">{holeVisuals.criteria_note}</div>}
                 <div className="timeline-text" style={{ marginTop: 8 }}>
-                  Snel overzicht: normale gaten {normalHoleItems.length} | irregulair/afgewezen{' '}
-                  {irregularHoleItems.length}
+                  Snel overzicht: normale gaten {normalHoleItems.length} | irregulair/afgewezen {irregularHoleItems.length}
                 </div>
                 <div className="hole-filter-row" style={{ marginTop: 8 }}>
+                  <button
+                    className={`hole-filter-btn ${showHoleInspector ? 'is-active' : ''}`}
+                    onClick={() => setShowHoleInspector((value) => !value)}
+                  >
+                    {showHoleInspector ? 'Sluit detailweergave' : 'Open detailweergave'}
+                  </button>
                   <button
                     className={`hole-filter-btn ${showAdvancedHoleDebug ? 'is-active' : ''}`}
                     onClick={() => setShowAdvancedHoleDebug((value) => !value)}
@@ -335,77 +478,165 @@ export default function StageDetailsPanel({
                   </button>
                 </div>
 
-                {!showAdvancedHoleDebug && (
+                <div className="timeline-text" style={{ marginTop: 4 }}>
+                  Kleur: <span style={{ color: '#ff4d3b' }}>rood</span> = cilindrisch,{' '}
+                  <span style={{ color: '#2dd4bf' }}>blauw-groen</span> = gevormd/irregulair,{' '}
+                  <span style={{ color: '#f5c542' }}>goud</span> = geselecteerd
+                </div>
+                <div className="hole-toggle-row" style={{ marginTop: 6 }}>
+                  <button
+                    className={`hole-filter-btn ${showHiddenHoles ? 'is-active' : ''}`}
+                    onClick={() => onShowHiddenHolesChange?.(!showHiddenHoles)}
+                    title="Toon of verberg afgewezen gaten in het 3D model"
+                  >
+                    {showHiddenHoles ? 'Verberg afgewezen' : 'Toon afgewezen'}
+                  </button>
+                  <button
+                    className={`hole-filter-btn ${highlightHiddenHoleLocations ? 'is-active' : ''}`}
+                    onClick={() => onHighlightHiddenHoleLocationsChange?.(!highlightHiddenHoleLocations)}
+                    title="Toon of verberg extra locatie-markers op het 3D model"
+                  >
+                    {highlightHiddenHoleLocations ? 'Locatie-markers aan' : 'Locatie-markers uit'}
+                  </button>
+                </div>
+
+                {holeMethods.length > 0 && (
+                  <div className="hole-method-grid">
+                    {holeMethods.map((method) => (
+                      <button
+                        key={method.key}
+                        className={`hole-method-card ${activeHoleMethod === method.key ? 'is-active' : ''}`}
+                        onClick={() => {
+                          setActiveHoleMethod(method.key)
+                          setShowHoleInspector(true)
+                        }}
+                        type="button"
+                      >
+                        <div className="timeline-item-head">
+                          <span className="timeline-stage">{method.label}</span>
+                          <span className="hole-status-pill is-neutral">{method.total}</span>
+                        </div>
+                        <div className="timeline-text">{method.description}</div>
+                        <div className="hole-method-stats">
+                          <span>Raw {method.total}</span>
+                          <span>Gevonden {method.accepted}</span>
+                          <span>Afgewezen {method.rejected}</span>
+                          <span>Overlap eruit {method.overlapRejected}</span>
+                          <span>Netto {method.netUnique}</span>
+                          <span>Zichtbaar {method.visible}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {!showAdvancedHoleDebug && !showHoleInspector && (
                   <>
-                    <div className="timeline-text" style={{ marginTop: 4 }}>
-                      Kleur: <span style={{ color: '#ff4d3b' }}>rood</span> = cilindrisch,{' '}
-                      <span style={{ color: '#2dd4bf' }}>blauw-groen</span> = gevormd/irregulair,{' '}
-                      <span style={{ color: '#f5c542' }}>goud</span> = geselecteerd
+                    <div className="timeline-text" style={{ marginTop: 8 }}>
+                      Kies een toolkaart om de kandidaten van alleen die methode te zien. Zo blijft de rechterkant compact.
                     </div>
-                    <div className="hole-toggle-row" style={{ marginTop: 6 }}>
-                      <button
-                        className={`hole-filter-btn ${showHiddenHoles ? 'is-active' : ''}`}
-                        onClick={() => onShowHiddenHolesChange?.(!showHiddenHoles)}
-                        title="Toon of verberg afgewezen gaten in het 3D model"
-                      >
-                        {showHiddenHoles ? 'Verberg afgewezen' : 'Toon afgewezen'}
-                      </button>
-                      <button
-                        className={`hole-filter-btn ${highlightHiddenHoleLocations ? 'is-active' : ''}`}
-                        onClick={() => onHighlightHiddenHoleLocationsChange?.(!highlightHiddenHoleLocations)}
-                        title="Toon of verberg extra locatie-markers op het 3D model"
-                      >
-                        {highlightHiddenHoleLocations ? 'Locatie-markers aan' : 'Locatie-markers uit'}
-                      </button>
-                    </div>
-                    <div className="timeline-title" style={{ marginTop: 8 }}>
-                      Normale gaten
-                    </div>
-                    <div className="hole-list">
-                      {normalHoleItems.map((hole) => (
-                        <button
-                          key={hole.id}
-                          className={`hole-list-item ${selectedHoleId === hole.id ? 'is-active' : ''} is-${hole.status}`}
-                          onClick={() => onHoleSelect?.(hole.id)}
-                        >
-                          <div className="timeline-item-head">
-                            <span className="timeline-stage">{hole.label || formatLabel(hole.type)}</span>
-                            <span className={`hole-status-pill is-${hole.status}`}>
-                              {getHoleStatusLabel(hole.status)}
-                            </span>
+                    {selectedInspection && (
+                      <div className="reasoning-list">
+                        <div className="reasoning-card">
+                          <div className="timeline-stage">
+                            {selectedInspection.label || formatLabel(selectedInspection.type)} |{' '}
+                            {getHoleStatusLabel(selectedInspection.status)}
                           </div>
-                          <div className="timeline-text">{hole.reason || 'Geen toelichting'}</div>
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="timeline-title" style={{ marginTop: 8 }}>
-                      Irregulair / afgewezen
-                    </div>
-                    <div className="hole-list">
-                      {irregularHoleItems.map((hole) => (
-                        <button
-                          key={hole.id}
-                          className={`hole-list-item ${selectedHoleId === hole.id ? 'is-active' : ''} is-${hole.status}`}
-                          onClick={() => onHoleSelect?.(hole.id)}
-                        >
-                          <div className="timeline-item-head">
-                            <span className="timeline-stage">{hole.label || formatLabel(hole.type)}</span>
-                            <span className={`hole-status-pill is-${hole.status}`}>
-                              {getHoleStatusLabel(hole.status)}
-                            </span>
+                          <div className="timeline-text">{selectedInspection.reason || 'Geen toelichting'}</div>
+                          <div className="timeline-text">
+                            Tool: {getHoleMethodLabel(selectedInspection.method)} | Positie{' '}
+                            {formatDetailValue(selectedInspection.position)}
                           </div>
-                          <div className="timeline-text">{hole.reason || 'Geen toelichting'}</div>
-                        </button>
-                      ))}
-                    </div>
-
+                        </div>
+                      </div>
+                    )}
                     {normalHoleItems.length === 0 && irregularHoleItems.length === 0 && (
                       <div className="timeline-text" style={{ marginTop: 8 }}>
                         Geen pre-unfold gaten gevonden in deze stap.
                       </div>
                     )}
                   </>
+                )}
+
+                {showHoleInspector && (
+                  <div className="hole-inspector-panel">
+                    <div className="timeline-item-head">
+                      <div>
+                        <div className="timeline-title" style={{ marginTop: 0 }}>
+                          Details: {activeHoleMethodSummary.label}
+                        </div>
+                        <div className="timeline-text">{activeHoleMethodSummary.description}</div>
+                      </div>
+                      <button className="hole-filter-btn" onClick={() => setShowHoleInspector(false)}>
+                        Sluiten
+                      </button>
+                    </div>
+                    <div className="hole-filter-row">
+                      <button
+                        className={`hole-filter-btn ${activeHoleMethod === 'all' ? 'is-active' : ''}`}
+                        onClick={() => setActiveHoleMethod('all')}
+                      >
+                        Alle tools
+                      </button>
+                      {holeMethods.map((method) => (
+                        <button
+                          key={`filter-${method.key}`}
+                          className={`hole-filter-btn ${activeHoleMethod === method.key ? 'is-active' : ''}`}
+                          onClick={() => setActiveHoleMethod(method.key)}
+                        >
+                          {method.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="hole-filter-row">
+                      <button
+                        className={`hole-filter-btn ${holeFilter === 'all' ? 'is-active' : ''}`}
+                        onClick={() => setHoleFilter('all')}
+                      >
+                        Alle
+                      </button>
+                      <button
+                        className={`hole-filter-btn ${holeFilter === 'accepted' ? 'is-active' : ''}`}
+                        onClick={() => setHoleFilter('accepted')}
+                      >
+                        Gevonden
+                      </button>
+                      <button
+                        className={`hole-filter-btn ${holeFilter === 'rejected' ? 'is-active' : ''}`}
+                        onClick={() => setHoleFilter('rejected')}
+                      >
+                        Afgewezen
+                      </button>
+                    </div>
+                    <div className="hole-list">
+                      {activeHoleItems.map((hole) => (
+                        <button
+                          key={hole.id}
+                          className={`hole-list-item ${selectedHoleId === hole.id ? 'is-active' : ''} is-${hole.status}`}
+                          onClick={() => onHoleSelect?.(hole.id)}
+                        >
+                          <div className="timeline-item-head">
+                            <span className="timeline-stage">{hole.label || formatLabel(hole.type)}</span>
+                            <span className={`hole-status-pill is-${hole.status}`}>
+                              {getHoleStatusLabel(hole.status)}
+                            </span>
+                          </div>
+                          <div className="timeline-text">{hole.reason || 'Geen toelichting'}</div>
+                          <div className="timeline-text">
+                            {getHoleMethodLabel(hole.method)} | {formatLabel(hole.type)} | {hole.source || '-'}
+                          </div>
+                          {isOverlapRejectedHole(hole) && (
+                            <div className="timeline-text">Overlap/dubbel met andere methode</div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    {activeHoleItems.length === 0 && (
+                      <div className="timeline-text" style={{ marginTop: 8 }}>
+                        Geen gaten in deze filter.
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {showAdvancedHoleDebug && (
@@ -450,72 +681,12 @@ export default function StageDetailsPanel({
                       In `Probe mode` wordt elke klik op het model altijd een probe op exact die plek, zonder snap naar
                       een bekende hole.
                     </div>
-                    <div className="timeline-text">
-                      Kleurlegenda: goud = geselecteerde hole-edge, rood = geaccepteerde hole-edge, blauw = afgewezen
-                      hole-edge, gedimd = niet geselecteerd.
-                    </div>
-                    <div className="hole-filter-row">
-                      <button
-                        className={`hole-filter-btn ${holeFilter === 'all' ? 'is-active' : ''}`}
-                        onClick={() => setHoleFilter('all')}
-                      >
-                        Alle
-                      </button>
-                      <button
-                        className={`hole-filter-btn ${holeFilter === 'accepted' ? 'is-active' : ''}`}
-                        onClick={() => setHoleFilter('accepted')}
-                      >
-                        Geaccepteerd
-                      </button>
-                      <button
-                        className={`hole-filter-btn ${holeFilter === 'rejected' ? 'is-active' : ''}`}
-                        onClick={() => setHoleFilter('rejected')}
-                      >
-                        Afgewezen
-                      </button>
-                    </div>
-                    <div className="hole-toggle-row">
-                      <button
-                        className={`hole-filter-btn ${showHiddenHoles ? 'is-active' : ''}`}
-                        onClick={() => onShowHiddenHolesChange?.(!showHiddenHoles)}
-                        title="Toon of verberg afgewezen en irregulaire kandidaten"
-                      >
-                        {showHiddenHoles ? 'Verberg afgewezen/irregulair' : 'Toon afgewezen/irregulair'}
-                      </button>
-                      <button
-                        className={`hole-filter-btn ${highlightHiddenHoleLocations ? 'is-active' : ''}`}
-                        onClick={() => onHighlightHiddenHoleLocationsChange?.(!highlightHiddenHoleLocations)}
-                        title="Toon of verberg extra locatie-markers op het 3D model"
-                      >
-                        {highlightHiddenHoleLocations ? 'Locatie-markers aan' : 'Locatie-markers uit'}
-                      </button>
-                    </div>
                     {hiddenHoleItems.length > 0 && (
                       <div className="timeline-text">
                         Extra locatie-markers staan op de afgewezen/irregulaire gaten zodat direct zichtbaar is waar de
                         ontbrekende gaten op het model zitten.
                       </div>
                     )}
-                    <div className="hole-list">
-                      {visibleHoleItems.map((hole) => (
-                        <button
-                          key={hole.id}
-                          className={`hole-list-item ${selectedHoleId === hole.id ? 'is-active' : ''} is-${hole.status}`}
-                          onClick={() => onHoleSelect?.(hole.id)}
-                        >
-                          <div className="timeline-item-head">
-                            <span className="timeline-stage">{hole.label || formatLabel(hole.type)}</span>
-                            <span className={`hole-status-pill is-${hole.status}`}>
-                              {getHoleStatusLabel(hole.status)}
-                            </span>
-                          </div>
-                          <div className="timeline-text">{hole.reason || 'Geen toelichting'}</div>
-                          <div className="timeline-text">
-                            {formatLabel(hole.type)} | {hole.source || '-'}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
                   </>
                 )}
                 {selectedInspection && showAdvancedHoleDebug && (
@@ -527,6 +698,9 @@ export default function StageDetailsPanel({
                       </div>
                       <div className="timeline-text">{selectedInspection.reason || 'Geen toelichting'}</div>
                       <div className="timeline-text">Methodiek: {getHoleMethodLabel(selectedInspection.method)}</div>
+                      {isOverlapRejectedHole(selectedInspection) && (
+                        <div className="timeline-text">Deze kandidaat is afgewezen als overlap/dubbel met een shaped detectie.</div>
+                      )}
                       <pre className="timeline-payload-value">{formatDetailValue(selectedInspection.position)}</pre>
                       {selectedInspection.inferredContour && (
                         <div className="timeline-text">
@@ -587,11 +761,6 @@ export default function StageDetailsPanel({
                 {selectedInspection == null && showAdvancedHoleDebug && (
                   <div className="timeline-text" style={{ marginTop: 8 }}>
                     Kies een gat links of klik in het 3D-model om criteria en viewer-focus te zien.
-                  </div>
-                )}
-                {visibleHoleItems.length === 0 && showAdvancedHoleDebug && (
-                  <div className="timeline-text" style={{ marginTop: 8 }}>
-                    Geen gaten in deze filter.
                   </div>
                 )}
               </div>

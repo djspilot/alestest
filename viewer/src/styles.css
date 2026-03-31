@@ -501,16 +501,74 @@ body,
   padding: 8px;
 }
 
+.hole-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.hole-summary-card {
+  border: 1px solid #e2e7ee;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  padding: 10px;
+}
+
+.hole-summary-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #5a6878;
+}
+
+.hole-summary-value {
+  margin-top: 4px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #16202a;
+}
+
 .hole-filter-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 10px;
 }
 
 .hole-toggle-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 6px;
+}
+
+.hole-method-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.hole-method-card {
+  border: 1px solid #d7dee7;
+  background: #fff;
+  padding: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hole-method-card.is-active {
+  background: #eef6ff;
+  border-color: #bcd4f0;
+}
+
+.hole-method-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 0.68rem;
+  color: #5a6878;
 }
 
 .hole-filter-btn {
@@ -554,6 +612,13 @@ body,
 
 .hole-list-item.is-rejected {
   border-left: 3px solid #60a5fa;
+}
+
+.hole-inspector-panel {
+  margin-top: 10px;
+  border: 1px solid #d7dee7;
+  background: #f8fbff;
+  padding: 10px;
 }
 
 .hole-status-pill {
