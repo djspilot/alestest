@@ -19,5 +19,5 @@ export function isIrregularHole(hole) {
 }
 
 export function isHiddenHoleCandidate(hole) {
-  return hole?.status === 'rejected' || isIrregularHole(hole)
+  return hole?.status === 'rejected'
 }

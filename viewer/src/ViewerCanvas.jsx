@@ -311,6 +311,19 @@ function holePalette(hole, isSelected, hasSelection) {
     }
   }
 
+  // Accepted: differentiate cylindrical vs shaped/irregular
+  const typeStr = String(hole?.type || '').toLowerCase()
+  const isShaped = isIrregularHole(hole) || !typeStr.includes('cylindrical')
+  if (isShaped) {
+    return {
+      primary: '#0a6e5c',
+      secondary: '#2dd4bf',
+      echoOpacity: dimmed ? 0.16 : 0.56,
+      primaryOpacity: dimmed ? 0.24 : 0.95,
+      selectionOpacity: dimmed ? 0.2 : 0.72,
+    }
+  }
+
   return {
     primary: '#7f0008',
     secondary: '#ff4d3b',

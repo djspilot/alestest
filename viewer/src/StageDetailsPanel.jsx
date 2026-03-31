@@ -337,6 +337,27 @@ export default function StageDetailsPanel({
 
                 {!showAdvancedHoleDebug && (
                   <>
+                    <div className="timeline-text" style={{ marginTop: 4 }}>
+                      Kleur: <span style={{ color: '#ff4d3b' }}>rood</span> = cilindrisch,{' '}
+                      <span style={{ color: '#2dd4bf' }}>blauw-groen</span> = gevormd/irregulair,{' '}
+                      <span style={{ color: '#f5c542' }}>goud</span> = geselecteerd
+                    </div>
+                    <div className="hole-toggle-row" style={{ marginTop: 6 }}>
+                      <button
+                        className={`hole-filter-btn ${showHiddenHoles ? 'is-active' : ''}`}
+                        onClick={() => onShowHiddenHolesChange?.(!showHiddenHoles)}
+                        title="Toon of verberg afgewezen gaten in het 3D model"
+                      >
+                        {showHiddenHoles ? 'Verberg afgewezen' : 'Toon afgewezen'}
+                      </button>
+                      <button
+                        className={`hole-filter-btn ${highlightHiddenHoleLocations ? 'is-active' : ''}`}
+                        onClick={() => onHighlightHiddenHoleLocationsChange?.(!highlightHiddenHoleLocations)}
+                        title="Toon of verberg extra locatie-markers op het 3D model"
+                      >
+                        {highlightHiddenHoleLocations ? 'Locatie-markers aan' : 'Locatie-markers uit'}
+                      </button>
+                    </div>
                     <div className="timeline-title" style={{ marginTop: 8 }}>
                       Normale gaten
                     </div>
