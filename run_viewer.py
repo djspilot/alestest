@@ -109,6 +109,13 @@ def main() -> int:
     python_executable = sys.executable
     npm_command = require_command("npm.cmd" if os.name == "nt" else "npm")
 
+    # Ensure viewer dependencies are installed (vite etc.)
+    node_modules = VIEWER_DIR / "node_modules"
+    if not node_modules.exists():
+        print("Viewer dependencies not found. Running npm install...")
+        subprocess.run([npm_command, "install"], cwd=VIEWER_DIR, check=True)
+        print("Viewer dependencies installed.")
+
     API_PORT = find_free_port(API_HOST, API_PORT, API_PORT_FALLBACK_RANGE, "API")
     VIEWER_PORT = find_free_port(VIEWER_HOST, VIEWER_PORT, VIEWER_PORT_FALLBACK_RANGE, "Viewer")
     API_URL = f"http://{API_HOST}:{API_PORT}"

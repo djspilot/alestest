@@ -218,10 +218,17 @@ try {
         }
 
         if (-not $SkipViewer) {
-            Write-Step "Installeer viewer Node dependencies"
+            Write-Step "Installeer viewer Node dependencies (incl. vite)"
             Push-Location (Join-Path $RepoRoot "viewer")
             try {
                 Invoke-Checked -Command $npmCommand -Arguments @("install")
+                # Verify vite is available via npx
+                $viteCheck = & $npmCommand "list" "vite" 2>&1
+                if ($LASTEXITCODE -ne 0 -or ($viteCheck -notmatch "vite")) {
+                    Write-Host "  vite niet gevonden na npm install, opnieuw proberen..." -ForegroundColor Yellow
+                    Invoke-Checked -Command $npmCommand -Arguments @("install", "--legacy-peer-deps")
+                }
+                Write-Host "  vite geinstalleerd" -ForegroundColor Green
             }
             finally {
                 Pop-Location
@@ -248,6 +255,18 @@ try {
     }
     Invoke-Checked -Command $npmCommand -Arguments @("--version")
     Invoke-Checked -Command "git" -Arguments @("--version")
+
+    # Verify vite is available for the viewer
+    if (-not $SkipViewer) {
+        Push-Location (Join-Path $RepoRoot "viewer")
+        try {
+            Write-Host "  vite check:" -ForegroundColor Cyan
+            Invoke-Checked -Command $npmCommand -Arguments @("list", "vite")
+        }
+        finally {
+            Pop-Location
+        }
+    }
 }
 finally {
     Pop-Location
