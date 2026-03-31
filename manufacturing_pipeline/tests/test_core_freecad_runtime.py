@@ -168,6 +168,47 @@ def test_ensure_managed_runtime_uses_bootstrapped_package_manager(monkeypatch, t
     assert calls["commands"][0][0] == "/tmp/micromamba"
 
 
+def test_ensure_managed_runtime_force_reinstall_removes_existing_runtime(monkeypatch, tmp_path):
+    runtime_root = tmp_path / "freecad"
+    runtime_root.mkdir(parents=True)
+    stale_file = runtime_root / "stale.txt"
+    stale_file.write_text("old")
+
+    metadata_path = tmp_path / "freecad_runtime.json"
+    metadata_path.write_text("{}")
+
+    commands = []
+
+    monkeypatch.setattr(freecad_runtime, "managed_runtime_metadata_path", lambda project_root=None: str(metadata_path))
+    monkeypatch.setattr(freecad_runtime, "choose_package_manager", lambda: "/tmp/micromamba")
+    monkeypatch.setattr(
+        freecad_runtime,
+        "_run_command",
+        lambda command, capture_output=False, text=True: commands.append(command),
+    )
+    monkeypatch.setattr(
+        freecad_runtime,
+        "_install_sheetmetal_source",
+        lambda runtime_info, sheetmetal_repo, update_sheetmetal: {"success": True},
+    )
+    monkeypatch.setattr(freecad_runtime, "_verify_runtime", lambda info: {"success": True, "stage": "verified"})
+    monkeypatch.setattr(freecad_runtime, "save_runtime_metadata", lambda data, metadata_path=None: str(tmp_path / "meta.json"))
+
+    result = freecad_runtime.ensure_managed_runtime(
+        install_if_missing=True,
+        runtime_root=str(runtime_root),
+        force_reinstall=True,
+    )
+
+    assert result["success"] is True
+    assert result["installed"] is True
+    assert "removed_existing_runtime" in result["actions"]
+    assert "removed_runtime_metadata" in result["actions"]
+    assert commands
+    assert commands[0][0] == "/tmp/micromamba"
+    assert stale_file.exists() is False
+
+
 def test_doctor_runtime_reports_verify_failure(monkeypatch, tmp_path):
     runtime_root = tmp_path / "freecad"
     monkeypatch.setattr(freecad_runtime, "managed_runtime_root", lambda project_root=None: str(runtime_root))

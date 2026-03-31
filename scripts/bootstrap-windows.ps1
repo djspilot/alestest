@@ -4,6 +4,8 @@ param(
     [switch]$SkipPythonDeps,
     [switch]$SkipViewer,
     [switch]$SkipFreeCAD,
+    [switch]$ForceReinstall,
+    [switch]$ForceFreeCADReinstall,
     [string]$VenvPath = ".venv"
 )
 
@@ -166,6 +168,59 @@ function Invoke-Python {
     }
 }
 
+function Remove-IfExists {
+    param([string]$Path)
+    if (Test-Path $Path) {
+        Remove-Item -LiteralPath $Path -Recurse -Force
+    }
+}
+
+function Set-FreeCADEnvironmentFromDoctor {
+    param(
+        [string]$PythonExe
+    )
+
+    $doctorJson = & $PythonExe -m manufacturing_pipeline.tools.ensure_unfold_runtime --doctor --json
+    if ($LASTEXITCODE -ne 0) {
+        throw "FreeCAD doctor commando gefaald."
+    }
+
+    $doctor = $doctorJson | ConvertFrom-Json
+    $configured = $doctor.configured
+    if (-not $configured) {
+        return
+    }
+
+    foreach ($pair in @(
+        @{ Name = "FREECAD_RUNTIME_ROOT"; Value = $configured.runtime_root },
+        @{ Name = "FREECAD_PATH"; Value = $configured.freecad_path },
+        @{ Name = "FREECAD_PYTHON"; Value = $configured.freecad_python },
+        @{ Name = "FREECAD_CMD"; Value = $configured.freecad_cmd },
+        @{ Name = "FREECAD_LIB"; Value = $configured.freecad_lib },
+        @{ Name = "FREECAD_MOD"; Value = $configured.freecad_mod }
+    )) {
+        if (-not [string]::IsNullOrWhiteSpace($pair.Value)) {
+            [Environment]::SetEnvironmentVariable($pair.Name, $pair.Value, "Process")
+        }
+    }
+
+    $runtimeBinPaths = @(
+        (Join-Path $configured.runtime_root "Library\bin"),
+        (Join-Path $configured.runtime_root "Library\mingw-w64\bin"),
+        (Join-Path $configured.runtime_root "bin")
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
+    foreach ($runtimeBin in ($runtimeBinPaths | Select-Object -Unique)) {
+        if ($env:Path -notlike "*$runtimeBin*") {
+            $env:Path = "$runtimeBin;$env:Path"
+        }
+    }
+
+    Write-Host "  FreeCAD runtime ingesteld:" -ForegroundColor Green
+    Write-Host "    FREECAD_CMD=$($env:FREECAD_CMD)"
+    Write-Host "    FREECAD_PYTHON=$($env:FREECAD_PYTHON)"
+}
+
 Push-Location $RepoRoot
 try {
     if (-not (Test-IsWindowsPlatform)) {
@@ -188,8 +243,19 @@ try {
 
     $venvRoot = Join-Path $RepoRoot $VenvPath
     $venvPython = Join-Path $venvRoot "Scripts\python.exe"
+    $runtimeRoot = Join-Path $RepoRoot ".runtime\freecad"
+    $runtimeMetadata = Join-Path $RepoRoot ".runtime\freecad_runtime.json"
 
     if (-not $DoctorOnly) {
+        if ($ForceReinstall) {
+            Write-Step "Verwijder bestaande lokale bootstrap artefacts"
+            Remove-IfExists -Path $venvRoot
+            Remove-IfExists -Path $runtimeRoot
+            if (Test-Path $runtimeMetadata) {
+                Remove-Item -LiteralPath $runtimeMetadata -Force
+            }
+        }
+
         if (-not (Test-Path $venvPython)) {
             Write-Step "Maak virtuele omgeving aan in $VenvPath"
             Invoke-Python -PythonCommand $pythonLaunch.Command -PythonArgs $pythonLaunch.Arguments -Arguments @("-m", "venv", $VenvPath)
@@ -214,7 +280,12 @@ try {
                 $env:Path = "$micromambaDir;$env:Path"
             }
 
-            Invoke-Checked -Command $venvPython -Arguments @("-m", "manufacturing_pipeline.tools.ensure_unfold_runtime")
+            $freecadArgs = @("-m", "manufacturing_pipeline.tools.ensure_unfold_runtime")
+            if ($ForceReinstall -or $ForceFreeCADReinstall) {
+                $freecadArgs += "--force-reinstall"
+            }
+            Invoke-Checked -Command $venvPython -Arguments $freecadArgs
+            Set-FreeCADEnvironmentFromDoctor -PythonExe $venvPython
         }
 
         if (-not $SkipViewer) {
@@ -242,6 +313,7 @@ try {
         if (-not $SkipFreeCAD) {
             $env:FREECAD_BOOTSTRAP_PACKAGE_MANAGER = "1"
             Invoke-Checked -Command $venvPython -Arguments @("-m", "manufacturing_pipeline.tools.ensure_unfold_runtime", "--doctor")
+            Set-FreeCADEnvironmentFromDoctor -PythonExe $venvPython
         }
         Invoke-Checked -Command $venvPython -Arguments @("--version")
     }

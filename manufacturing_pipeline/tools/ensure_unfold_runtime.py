@@ -22,6 +22,11 @@ def parse_args() -> argparse.Namespace:
         help="Pull the SheetMetal source if it already exists.",
     )
     parser.add_argument(
+        "--force-reinstall",
+        action="store_true",
+        help="Remove the managed runtime and install it opnieuw from scratch.",
+    )
+    parser.add_argument(
         "--package-manager",
         help="Override package manager path or command (micromamba/conda).",
     )
@@ -68,6 +73,7 @@ def main() -> int:
         package_manager=args.package_manager,
         sheetmetal_repo=args.sheetmetal_repo,
         update_sheetmetal=args.update_sheetmetal,
+        force_reinstall=args.force_reinstall,
     )
 
     if args.json:

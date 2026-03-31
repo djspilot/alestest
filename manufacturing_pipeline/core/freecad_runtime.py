@@ -422,10 +422,24 @@ def ensure_managed_runtime(
     package_manager: Optional[str] = None,
     sheetmetal_repo: str = DEFAULT_SHEETMETAL_REPO,
     update_sheetmetal: bool = False,
+    force_reinstall: bool = False,
 ) -> Dict[str, Any]:
     runtime_root = runtime_root or managed_runtime_root()
     runtime_info = detect_runtime_layout(runtime_root)
     actions: List[str] = []
+    metadata_path = managed_runtime_metadata_path()
+
+    if force_reinstall:
+        if os.path.isdir(runtime_root):
+            shutil.rmtree(runtime_root, ignore_errors=True)
+            actions.append("removed_existing_runtime")
+        if os.path.exists(metadata_path):
+            try:
+                os.remove(metadata_path)
+                actions.append("removed_runtime_metadata")
+            except OSError:
+                pass
+        runtime_info = detect_runtime_layout(runtime_root)
 
     if os.path.exists(runtime_info["freecad_cmd"]):
         actions.append("found_existing_runtime")

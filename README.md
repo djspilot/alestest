@@ -60,7 +60,14 @@ Handige varianten:
 .\scripts\bootstrap-windows.ps1 -SkipViewer
 .\scripts\bootstrap-windows.ps1 -SkipFreeCAD
 .\scripts\bootstrap-windows.ps1 -SkipPythonDeps
+.\scripts\bootstrap-windows.ps1 -ForceReinstall
+.\scripts\bootstrap-windows.ps1 -ForceFreeCADReinstall
 ```
+
+Extra:
+- `-ForceReinstall` verwijdert `.venv` en `.runtime/freecad` en bouwt alles opnieuw op
+- `-ForceFreeCADReinstall` herinstalleert alleen de managed FreeCAD runtime
+- na de bootstrap worden `FREECAD_RUNTIME_ROOT`, `FREECAD_CMD`, `FREECAD_PYTHON`, `FREECAD_LIB` en `FREECAD_MOD` in de huidige sessie gezet op de gedetecteerde runtime
 
 ### Host Python dependencies
 
@@ -98,6 +105,7 @@ Extra opties:
 ```bash
 python -m manufacturing_pipeline.tools.ensure_unfold_runtime --no-install
 python -m manufacturing_pipeline.tools.ensure_unfold_runtime --update-sheetmetal
+python -m manufacturing_pipeline.tools.ensure_unfold_runtime --force-reinstall
 python -m manufacturing_pipeline.tools.ensure_unfold_runtime --json
 ```
 
