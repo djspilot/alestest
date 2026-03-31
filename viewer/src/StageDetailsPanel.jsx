@@ -20,6 +20,8 @@ function getHoleStatusLabel(status) {
 }
 
 function getHoleMethodLabel(method) {
+  if (method === 'face_boundary_missing_round') return 'Face Boundary (missend rond)'
+  if (method === 'face_boundary_missing_contour') return 'Face Boundary (missende contour)'
   if (method === 'face_boundary_primary') return 'Face Boundary (primair)'
   if (method === 'face_boundary_primary_for_irregular') return 'Face Boundary (irregulair)'
   if (method === 'pre_unfold_face_boundary_bridge_for_missing_irregular') return 'Face Boundary bridge'
@@ -35,6 +37,9 @@ function getHoleMethodLabel(method) {
 function getHoleMethodDescription(method) {
   if (method === 'detect_holes_cylindrical' || method === 'cylindrical_detector') {
     return 'Zoekt cilindrische gaten via faces.'
+  }
+  if (method === 'face_boundary_missing_round' || method === 'face_boundary_missing_contour') {
+    return 'Aanvulling alleen op plekken zonder bestaande hole-match.'
   }
   if (
     method === 'face_boundary_primary' ||
@@ -58,6 +63,23 @@ function isOverlapRejectedHole(hole) {
     reason.includes('onderdeel van een shaped hole') ||
     criteria.some((criterion) => String(criterion?.name || '').toLowerCase() === 'duplicate_of_shaped_hole')
   )
+}
+
+function buildOverlapSummary(items, providedSummary) {
+  if (Array.isArray(providedSummary) && providedSummary.length > 0) return providedSummary
+  const summary = new Map()
+  items.forEach((item) => {
+    const overlapWith = item?.overlap_with
+    if (!overlapWith) return
+    const fromMethod = String(item.method || 'unknown')
+    const toMethod = String(overlapWith.method || 'unknown')
+    const key = `${fromMethod}__${toMethod}`
+    if (!summary.has(key)) {
+      summary.set(key, { from_method: fromMethod, to_method: toMethod, count: 0 })
+    }
+    summary.get(key).count += 1
+  })
+  return Array.from(summary.values()).sort((a, b) => b.count - a.count)
 }
 
 function getClassificationStatusLabel(status) {
@@ -103,6 +125,9 @@ export default function StageDetailsPanel({
   const [exportFeedback, setExportFeedback] = useState('')
   const [showAdvancedHoleDebug, setShowAdvancedHoleDebug] = useState(false)
   const [showHoleInspector, setShowHoleInspector] = useState(false)
+  const [showStageExtraOptions, setShowStageExtraOptions] = useState(false)
+  const [showHoleExtraOptions, setShowHoleExtraOptions] = useState(false)
+  const [showUnfoldExtraOptions, setShowUnfoldExtraOptions] = useState(false)
   const selectedStage = groupedStages[selectedStageIndex] || null
   const selectedEvent = selectedStage?.events?.[selectedEventIndex] || null
   const selectedPayloadEntries = Object.entries(selectedEvent?.payload || {}).filter(([, value]) => value !== undefined)
@@ -119,6 +144,7 @@ export default function StageDetailsPanel({
     : pipelineVisuals?.holes || null
   const unfoldVisuals = pipelineVisuals?.unfold || null
   const holeItems = holeVisuals?.items || []
+  const boundarySuppressedItems = holeVisuals?.boundary_suppressed || []
   const foldRows = useMemo(() => {
     const bends = unfoldVisuals?.bends_logical || []
     const foldDetails = unfoldVisuals?.fold_details || []
@@ -258,6 +284,10 @@ export default function StageDetailsPanel({
     }),
     [holeItems, overlapRejectedHoleItems],
   )
+  const overlapSummary = useMemo(
+    () => buildOverlapSummary(holeItems, holeVisuals?.overlap_summary),
+    [holeItems, holeVisuals?.overlap_summary],
+  )
   const activeHoleItems = useMemo(() => {
     const methodFiltered =
       activeHoleMethod === 'all'
@@ -265,6 +295,18 @@ export default function StageDetailsPanel({
         : visibleHoleItems.filter((hole) => (hole.method || 'unknown') === activeHoleMethod)
     return methodFiltered
   }, [activeHoleMethod, visibleHoleItems])
+  const overlapSummaryForActiveMethod = useMemo(() => {
+    if (activeHoleMethod === 'all') return overlapSummary
+    return overlapSummary.filter(
+      (entry) => entry.from_method === activeHoleMethod || entry.to_method === activeHoleMethod,
+    )
+  }, [activeHoleMethod, overlapSummary])
+  const visibleHoleCriteriaNote = useMemo(() => {
+    const note = String(holeVisuals?.criteria_note || '').trim()
+    if (!note) return ''
+    if (note.includes('tijdelijk uitgeschakeld')) return ''
+    return note
+  }, [holeVisuals?.criteria_note])
   const activeHoleMethodSummary = useMemo(() => {
     if (activeHoleMethod === 'all') {
       return {
@@ -286,6 +328,9 @@ export default function StageDetailsPanel({
     setExportFeedback('')
     setActiveHoleMethod('all')
     setShowHoleInspector(false)
+    setShowStageExtraOptions(false)
+    setShowHoleExtraOptions(false)
+    setShowUnfoldExtraOptions(false)
   }, [selectedStage?.stage])
 
   const downloadPreUnfoldDebug = () => {
@@ -399,24 +444,6 @@ export default function StageDetailsPanel({
           </div>
         </div>
 
-        <div className="timeline-event-list">
-          {selectedStage.events.map((event, index) => (
-            <button
-              key={`${event.type}-${event.stage}-${event.originalIndex}`}
-              className={`timeline-item ${selectedEventIndex === index ? 'is-active' : ''}`}
-              onClick={() => onSelectEventIndex(index)}
-            >
-              <div className="timeline-item-head">
-                <span className="timeline-stage">{formatLabel(event.type)}</span>
-                <span className="timeline-type">
-                  {event.status || '-'} · {formatDuration((event.timestamp_ms || 0) / 1000)}
-                </span>
-              </div>
-              <div className="timeline-text">{summarizePayload(event.payload)}</div>
-            </button>
-          ))}
-        </div>
-
         {selectedEvent && (
           <div className="timeline-payload">
             {(isMergedHoleStage || isPreUnfoldHoleStage) && holeVisuals && (
@@ -447,6 +474,10 @@ export default function StageDetailsPanel({
                     <div className="hole-summary-label">Netto uniek</div>
                     <div className="hole-summary-value">{overlapReductionSummary.netUnique}</div>
                   </div>
+                  <div className="hole-summary-card">
+                    <div className="hole-summary-label">Boundary onderdrukt</div>
+                    <div className="hole-summary-value">{boundarySuppressedItems.length}</div>
+                  </div>
                 </div>
                 <div className="timeline-text">
                   Bron: {holeVisuals.source || '-'} | Viewer totaal {holeItems.length}
@@ -459,16 +490,18 @@ export default function StageDetailsPanel({
                     ? ` | overige afwijzingen ${overlapReductionSummary.otherRejected}`
                     : ''}
                 </div>
-                {holeVisuals.criteria_note && <div className="timeline-text">{holeVisuals.criteria_note}</div>}
-                <div className="timeline-text" style={{ marginTop: 8 }}>
-                  Snel overzicht: normale gaten {normalHoleItems.length} | irregulair/afgewezen {irregularHoleItems.length}
-                </div>
                 <div className="hole-filter-row" style={{ marginTop: 8 }}>
                   <button
                     className={`hole-filter-btn ${showHoleInspector ? 'is-active' : ''}`}
                     onClick={() => setShowHoleInspector((value) => !value)}
                   >
                     {showHoleInspector ? 'Sluit detailweergave' : 'Open detailweergave'}
+                  </button>
+                  <button
+                    className={`hole-filter-btn ${showHoleExtraOptions ? 'is-active' : ''}`}
+                    onClick={() => setShowHoleExtraOptions((value) => !value)}
+                  >
+                    {showHoleExtraOptions ? 'Verberg hole extra opties' : 'Toon hole extra opties'}
                   </button>
                   <button
                     className={`hole-filter-btn ${showAdvancedHoleDebug ? 'is-active' : ''}`}
@@ -478,8 +511,64 @@ export default function StageDetailsPanel({
                   </button>
                 </div>
 
+                {showHoleExtraOptions && overlapSummary.length > 0 && (
+                  <div className="reasoning-list" style={{ marginTop: 8 }}>
+                    <div className="reasoning-card">
+                      <div className="timeline-title">Overlap Tussen Tools</div>
+                      <div className="timeline-payload-grid">
+                        {overlapSummary.map((entry) => (
+                          <div className="timeline-payload-row" key={`overlap-${entry.from_method}-${entry.to_method}`}>
+                            <div className="timeline-item-head">
+                              <div className="timeline-payload-key">
+                                {getHoleMethodLabel(entry.from_method)} -&gt; {getHoleMethodLabel(entry.to_method)}
+                              </div>
+                              <span className="hole-status-pill is-warning">{entry.count}</span>
+                            </div>
+                            <div className="timeline-text">
+                              {entry.count} kandidaat{entry.count === 1 ? '' : 'en'} van {getHoleMethodLabel(entry.from_method)} zijn
+                              weggefilterd door {getHoleMethodLabel(entry.to_method)}.
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {showHoleExtraOptions && visibleHoleCriteriaNote && <div className="timeline-text">{visibleHoleCriteriaNote}</div>}
+                {showHoleExtraOptions && boundarySuppressedItems.length > 0 && (
+                  <div className="reasoning-list" style={{ marginTop: 8 }}>
+                    <div className="reasoning-card">
+                      <div className="timeline-title">Boundary Onderdrukt Door Cilindrisch</div>
+                      <div className="timeline-payload-grid">
+                        {boundarySuppressedItems.slice(0, 8).map((item) => (
+                          <div className="timeline-payload-row" key={item.id}>
+                            <div className="timeline-item-head">
+                              <div className="timeline-payload-key">{item.label || item.size || 'Boundary contour'}</div>
+                              <span className="hole-status-pill is-neutral">Onderdrukt</span>
+                            </div>
+                            <div className="timeline-text">{item.reason}</div>
+                            <div className="timeline-text">
+                              Match: {getHoleMethodLabel(item.suppressed_by?.method)} | {item.suppressed_by?.label || '-'}
+                            </div>
+                            <div className="timeline-text">Positie {formatDetailValue(item.position)}</div>
+                          </div>
+                        ))}
+                      </div>
+                      {boundarySuppressedItems.length > 8 && (
+                        <div className="timeline-text">
+                          Nog {boundarySuppressedItems.length - 8} onderdrukte boundary-kandidaten buiten dit compacte overzicht.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                <div className="timeline-text" style={{ marginTop: 8 }}>
+                  Snel overzicht: normale gaten {normalHoleItems.length} | irregulair/afgewezen {irregularHoleItems.length}
+                </div>
+
                 <div className="timeline-text" style={{ marginTop: 4 }}>
                   Kleur: <span style={{ color: '#ff4d3b' }}>rood</span> = cilindrisch,{' '}
+                  <span style={{ color: '#d97706' }}>oranje</span> = Face Boundary aanvulling,{' '}
                   <span style={{ color: '#2dd4bf' }}>blauw-groen</span> = gevormd/irregulair,{' '}
                   <span style={{ color: '#f5c542' }}>goud</span> = geselecteerd
                 </div>
@@ -608,6 +697,28 @@ export default function StageDetailsPanel({
                         Afgewezen
                       </button>
                     </div>
+                    {overlapSummaryForActiveMethod.length > 0 && (
+                      <div className="reasoning-list">
+                        <div className="reasoning-card">
+                          <div className="timeline-title">Overlap In Deze Selectie</div>
+                          <div className="timeline-payload-grid">
+                            {overlapSummaryForActiveMethod.map((entry) => (
+                              <div
+                                className="timeline-payload-row"
+                                key={`active-overlap-${entry.from_method}-${entry.to_method}`}
+                              >
+                                <div className="timeline-item-head">
+                                  <div className="timeline-payload-key">
+                                    {getHoleMethodLabel(entry.from_method)} -&gt; {getHoleMethodLabel(entry.to_method)}
+                                  </div>
+                                  <span className="hole-status-pill is-warning">{entry.count}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     <div className="hole-list">
                       {activeHoleItems.map((hole) => (
                         <button
@@ -625,6 +736,17 @@ export default function StageDetailsPanel({
                           <div className="timeline-text">
                             {getHoleMethodLabel(hole.method)} | {formatLabel(hole.type)} | {hole.source || '-'}
                           </div>
+                          {hole.overlap_with && (
+                            <div className="timeline-text">
+                              Overlap: {getHoleMethodLabel(hole.method)} -&gt; {getHoleMethodLabel(hole.overlap_with.method)} | wint:{' '}
+                              {hole.overlap_with.label || formatLabel(hole.overlap_with.type)}
+                            </div>
+                          )}
+                          {hole.recovered_from && (
+                            <div className="timeline-text">
+                              Recovery: boundary toegevoegd nadat {hole.recovered_from.label || 'cilindrische kandidaat'} afviel
+                            </div>
+                          )}
                           {isOverlapRejectedHole(hole) && (
                             <div className="timeline-text">Overlap/dubbel met andere methode</div>
                           )}
@@ -701,6 +823,22 @@ export default function StageDetailsPanel({
                       {isOverlapRejectedHole(selectedInspection) && (
                         <div className="timeline-text">Deze kandidaat is afgewezen als overlap/dubbel met een shaped detectie.</div>
                       )}
+                      {selectedInspection.overlap_with && (
+                        <div className="timeline-text">
+                          Koppeling: {getHoleMethodLabel(selectedInspection.method)} -&gt;{' '}
+                          {getHoleMethodLabel(selectedInspection.overlap_with.method)} | wint:{' '}
+                          {selectedInspection.overlap_with.label || formatLabel(selectedInspection.overlap_with.type)}
+                          {selectedInspection.overlap_with.distance != null
+                            ? ` op ${formatDetailValue(selectedInspection.overlap_with.distance)} mm`
+                            : ''}
+                        </div>
+                      )}
+                      {selectedInspection.recovered_from && (
+                        <div className="timeline-text">
+                          Recovery vanaf reject: {selectedInspection.recovered_from.label || 'cilindrische kandidaat'} |{' '}
+                          {selectedInspection.recovered_from.reason || 'cilindrische detectie afgewezen'}
+                        </div>
+                      )}
                       <pre className="timeline-payload-value">{formatDetailValue(selectedInspection.position)}</pre>
                       {selectedInspection.inferredContour && (
                         <div className="timeline-text">
@@ -763,23 +901,6 @@ export default function StageDetailsPanel({
                     Kies een gat links of klik in het 3D-model om criteria en viewer-focus te zien.
                   </div>
                 )}
-              </div>
-            )}
-
-            <div className="timeline-title">Geselecteerde keuze</div>
-            <div className="timeline-text">
-              {formatLabel(selectedEvent.type)} {selectedEvent.status ? `| ${selectedEvent.status}` : ''}
-            </div>
-            {selectedPayloadEntries.length === 0 ? (
-              <div className="timeline-text">Geen extra details voor dit event.</div>
-            ) : (
-              <div className="timeline-payload-grid">
-                {selectedPayloadEntries.map(([key, value]) => (
-                  <div className="timeline-payload-row" key={key}>
-                    <div className="timeline-payload-key">{formatLabel(key)}</div>
-                    <pre className="timeline-payload-value">{formatDetailValue(value)}</pre>
-                  </div>
-                ))}
               </div>
             )}
 
@@ -1022,6 +1143,14 @@ export default function StageDetailsPanel({
             {selectedStage.stage === MERGED_HOLES_STAGE && (
               <div className="visual-stage-card">
                 <div className="timeline-title">Unfold data</div>
+                <div className="hole-filter-row" style={{ marginTop: 8 }}>
+                  <button
+                    className={`hole-filter-btn ${showUnfoldExtraOptions ? 'is-active' : ''}`}
+                    onClick={() => setShowUnfoldExtraOptions((value) => !value)}
+                  >
+                    {showUnfoldExtraOptions ? 'Verberg unfold extra opties' : 'Toon unfold extra opties'}
+                  </button>
+                </div>
 
                 {/* ── Status ── */}
                 {unfoldVisuals ? (
@@ -1074,30 +1203,32 @@ export default function StageDetailsPanel({
                 )}
 
                 {/* ── Criteria / thresholds ── */}
-                <div style={{ marginTop: 12 }}>
-                  <div className="timeline-stage" style={{ marginBottom: 4 }}>
-                    Criteria &amp; thresholds (freecad_unfold)
+                {showUnfoldExtraOptions && (
+                  <div style={{ marginTop: 12 }}>
+                    <div className="timeline-stage" style={{ marginBottom: 4 }}>
+                      Criteria &amp; thresholds (freecad_unfold)
+                    </div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, color: '#ccc' }}>
+                      <tbody>
+                        {[
+                          ['K-factor', '0.44 (vast voor alle plaatdiktes)'],
+                          ['Max pogingen (base face)', '5'],
+                          ['Subprocess timeout', '300 s'],
+                          ['Bend filter: min hoek', '> 0.3 rad (≈ 17°)'],
+                          ['Bend filter: min lengte', '> 5 mm'],
+                          ['Deduplicatie key', '(round(hoek,1), round(lengte,1))'],
+                          ['Bij duplicaat', 'Kleinste radius wint (inner radius)'],
+                          ['Merge gesplitste bends', 'Exact gelijke hoek + radius'],
+                        ].map(([label, val]) => (
+                          <tr key={label}>
+                            <td style={{ padding: '2px 8px 2px 0', color: '#888', whiteSpace: 'nowrap' }}>{label}</td>
+                            <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{val}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, color: '#ccc' }}>
-                    <tbody>
-                      {[
-                        ['K-factor', '0.44 (vast voor alle plaatdiktes)'],
-                        ['Max pogingen (base face)', '5'],
-                        ['Subprocess timeout', '300 s'],
-                        ['Bend filter: min hoek', '> 0.3 rad (≈ 17°)'],
-                        ['Bend filter: min lengte', '> 5 mm'],
-                        ['Deduplicatie key', '(round(hoek,1), round(lengte,1))'],
-                        ['Bij duplicaat', 'Kleinste radius wint (inner radius)'],
-                        ['Merge gesplitste bends', 'Exact gelijke hoek + radius'],
-                      ].map(([label, val]) => (
-                        <tr key={label}>
-                          <td style={{ padding: '2px 8px 2px 0', color: '#888', whiteSpace: 'nowrap' }}>{label}</td>
-                          <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{val}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                )}
 
                 {/* ── Zetlijnen tabel ── */}
                 {unfoldVisuals?.success &&
@@ -1190,30 +1321,81 @@ export default function StageDetailsPanel({
                 )}
 
                 {/* ── Error handling codes ── */}
-                <div style={{ marginTop: 12 }}>
-                  <div className="timeline-stage" style={{ marginBottom: 4 }}>
-                    SheetMetalUnfolder foutcodes
+                {showUnfoldExtraOptions && (
+                  <div style={{ marginTop: 12 }}>
+                    <div className="timeline-stage" style={{ marginBottom: 4 }}>
+                      SheetMetalUnfolder foutcodes
+                    </div>
+                    <div style={{ fontSize: 11, color: '#777', lineHeight: 1.6 }}>
+                      {[
+                        [1, 'Volume onbruikbaar'],
+                        [3, 'Dikte inconsistent of te complex'],
+                        [5, 'Onnodige edges (Refine Shape nodig)'],
+                        [11, 'Dubbele buigingen niet ondersteund'],
+                        [12, 'Meer dan één bend-child'],
+                        [17, 'Oppervlaktype niet ondersteund'],
+                        [21, 'Section wire niet gesloten'],
+                        [26, 'Niet-ondersteund curve type in unbendFace'],
+                      ].map(([code, msg]) => (
+                        <div key={code}>
+                          <span style={{ color: '#555', fontFamily: 'monospace', marginRight: 8 }}>{code}</span>
+                          {msg}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 11, color: '#777', lineHeight: 1.6 }}>
-                    {[
-                      [1, 'Volume onbruikbaar'],
-                      [3, 'Dikte inconsistent of te complex'],
-                      [5, 'Onnodige edges (Refine Shape nodig)'],
-                      [11, 'Dubbele buigingen niet ondersteund'],
-                      [12, 'Meer dan één bend-child'],
-                      [17, 'Oppervlaktype niet ondersteund'],
-                      [21, 'Section wire niet gesloten'],
-                      [26, 'Niet-ondersteund curve type in unbendFace'],
-                    ].map(([code, msg]) => (
-                      <div key={code}>
-                        <span style={{ color: '#555', fontFamily: 'monospace', marginRight: 8 }}>{code}</span>
-                        {msg}
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                )}
               </div>
             )}
+
+            <div className="visual-stage-card">
+              <div className="timeline-title">Extra opties</div>
+              <div className="hole-filter-row" style={{ marginTop: 8 }}>
+                <button
+                  className={`hole-filter-btn ${showStageExtraOptions ? 'is-active' : ''}`}
+                  onClick={() => setShowStageExtraOptions((value) => !value)}
+                >
+                  {showStageExtraOptions ? 'Verberg stage extra opties' : 'Toon stage extra opties'}
+                </button>
+              </div>
+              {showStageExtraOptions && (
+                <>
+                  <div className="timeline-event-list">
+                    {selectedStage.events.map((event, index) => (
+                      <button
+                        key={`${event.type}-${event.stage}-${event.originalIndex}`}
+                        className={`timeline-item ${selectedEventIndex === index ? 'is-active' : ''}`}
+                        onClick={() => onSelectEventIndex(index)}
+                      >
+                        <div className="timeline-item-head">
+                          <span className="timeline-stage">{formatLabel(event.type)}</span>
+                          <span className="timeline-type">
+                            {event.status || '-'} · {formatDuration((event.timestamp_ms || 0) / 1000)}
+                          </span>
+                        </div>
+                        <div className="timeline-text">{summarizePayload(event.payload)}</div>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="timeline-title">Geselecteerde keuze</div>
+                  <div className="timeline-text">
+                    {formatLabel(selectedEvent.type)} {selectedEvent.status ? `| ${selectedEvent.status}` : ''}
+                  </div>
+                  {selectedPayloadEntries.length === 0 ? (
+                    <div className="timeline-text">Geen extra details voor dit event.</div>
+                  ) : (
+                    <div className="timeline-payload-grid">
+                      {selectedPayloadEntries.map(([key, value]) => (
+                        <div className="timeline-payload-row" key={key}>
+                          <div className="timeline-payload-key">{formatLabel(key)}</div>
+                          <pre className="timeline-payload-value">{formatDetailValue(value)}</pre>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         )}
       </div>

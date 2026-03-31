@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { normalizeStageName, STATUS_LABELS, formatDuration, getStageMeta } from './pipelineUi'
 
 export default function Sidebar({
@@ -30,6 +30,8 @@ export default function Sidebar({
   pipelineDebug,
   onResetPipelineApiBase,
 }) {
+  const [showExtraOptions, setShowExtraOptions] = useState(false)
+
   return (
     <div className="sidebar">
       <div className="sidebar-section">
@@ -48,20 +50,6 @@ export default function Sidebar({
           <div style={{ fontSize: '0.85rem', color: '#999' }}>Geen bestand geladen</div>
         )}
       </div>
-
-      {modelInfo && (
-        <div className="sidebar-section">
-          <h3>3D Model</h3>
-          <div className="sidebar-row">
-            <span className="label">Vertices</span>
-            <span className="value">{modelInfo.vertexCount?.toLocaleString() || '-'}</span>
-          </div>
-          <div className="sidebar-row">
-            <span className="label">Driehoeken</span>
-            <span className="value">{modelInfo.triangleCount?.toLocaleString() || '-'}</span>
-          </div>
-        </div>
-      )}
 
       <div className="sidebar-section">
         <h3>Pipeline Koppeling</h3>
@@ -104,58 +92,6 @@ export default function Sidebar({
           ))}
         </div>
 
-        <div style={{ marginTop: 10 }}>
-          <div className="sidebar-row" style={{ paddingBottom: 6 }}>
-            <span className="label">API status</span>
-            <span className={`status-pill status-${pipelineState?.status || 'idle'}`}>
-              {STATUS_LABELS[pipelineState?.status] || pipelineState?.status || 'Onbekend'}
-            </span>
-          </div>
-          <input
-            className="sidebar-input"
-            value={pipelineApiBase}
-            onChange={(event) => onPipelineApiBaseChange(event.target.value)}
-            placeholder="http://localhost:8000"
-          />
-          <input
-            className="sidebar-input"
-            style={{ marginTop: 8 }}
-            value={pipelineApiKey}
-            onChange={(event) => onPipelineApiKeyChange(event.target.value)}
-            placeholder="Optionele X-API-Key"
-          />
-          {pipelineState?.jobId && (
-            <div className="sidebar-row" style={{ marginTop: 6 }}>
-              <span className="label">Job ID</span>
-              <span className="value" style={{ maxWidth: 170, wordBreak: 'break-all' }}>
-                {pipelineState.jobId}
-              </span>
-            </div>
-          )}
-          {pipelineState?.error && <div className="sidebar-error">{pipelineState.error}</div>}
-          {(pipelineState?.status === 'unavailable' ||
-            pipelineState?.status === 'failed' ||
-            pipelineState?.status === 'auth_required') && (
-            <div style={{ marginTop: 8, fontSize: '0.78rem', color: '#888', lineHeight: 1.45 }}>
-              <div>
-                <strong>Debug</strong>
-              </div>
-              {pipelineDebug?.checkedBase && <div>Base: {pipelineDebug.checkedBase}</div>}
-              {pipelineDebug?.checkedUrl && <div>Check: {pipelineDebug.checkedUrl}</div>}
-              {pipelineDebug?.code && <div>Code: {pipelineDebug.code}</div>}
-              {pipelineDebug?.fallbackBase && <div>Fallback: {pipelineDebug.fallbackBase}</div>}
-              {pipelineDebug?.fallbackUrl && <div>Fallback check: {pipelineDebug.fallbackUrl}</div>}
-              <button className="toolbar-btn" style={{ marginTop: 8, width: '100%' }} onClick={onResetPipelineApiBase}>
-                API URL reset naar launcher default
-              </button>
-            </div>
-          )}
-          {fileName && pipelineEnabled && (
-            <button className="toolbar-btn" style={{ marginTop: 8, width: '100%' }} onClick={onRetryPipeline}>
-              Pipeline analyse opnieuw
-            </button>
-          )}
-        </div>
       </div>
 
       <div className="sidebar-section">
@@ -208,24 +144,100 @@ export default function Sidebar({
       </div>
 
       <div className="sidebar-section">
-        <h3>Bediening</h3>
-        <div style={{ fontSize: '0.82rem', color: '#888', lineHeight: 1.6 }}>
-          🖱 Links slepen — roteren
-          <br />
-          🖱 Scrollwiel — zoomen
-        </div>
-      </div>
+        <button
+          className="toolbar-btn"
+          style={{ width: '100%' }}
+          onClick={() => setShowExtraOptions((value) => !value)}
+        >
+          {showExtraOptions ? 'Verberg extra opties' : 'Toon extra opties'}
+        </button>
 
-      <div className="sidebar-section">
-        <h3>Engine</h3>
-        <div className="sidebar-row">
-          <span className="label">Backend</span>
-          <span className="value">OpenCascade WASM</span>
-        </div>
-        <div className="sidebar-row">
-          <span className="label">Viewer</span>
-          <span className="value">buerli.io + Three.js</span>
-        </div>
+        {showExtraOptions && (
+          <div style={{ marginTop: 10 }}>
+            <h3 style={{ marginTop: 0 }}>API status</h3>
+            <div className="sidebar-row" style={{ paddingBottom: 6 }}>
+              <span className="label">Status</span>
+              <span className={`status-pill status-${pipelineState?.status || 'idle'}`}>
+                {STATUS_LABELS[pipelineState?.status] || pipelineState?.status || 'Onbekend'}
+              </span>
+            </div>
+            <input
+              className="sidebar-input"
+              value={pipelineApiBase}
+              onChange={(event) => onPipelineApiBaseChange(event.target.value)}
+              placeholder="http://localhost:8000"
+            />
+            <input
+              className="sidebar-input"
+              style={{ marginTop: 8 }}
+              value={pipelineApiKey}
+              onChange={(event) => onPipelineApiKeyChange(event.target.value)}
+              placeholder="Optionele X-API-Key"
+            />
+            {pipelineState?.jobId && (
+              <div className="sidebar-row" style={{ marginTop: 6 }}>
+                <span className="label">Job ID</span>
+                <span className="value" style={{ maxWidth: 170, wordBreak: 'break-all' }}>
+                  {pipelineState.jobId}
+                </span>
+              </div>
+            )}
+            {pipelineState?.error && <div className="sidebar-error">{pipelineState.error}</div>}
+            {(pipelineState?.status === 'unavailable' ||
+              pipelineState?.status === 'failed' ||
+              pipelineState?.status === 'auth_required') && (
+              <div style={{ marginTop: 8, fontSize: '0.78rem', color: '#888', lineHeight: 1.45 }}>
+                <div>
+                  <strong>Debug</strong>
+                </div>
+                {pipelineDebug?.checkedBase && <div>Base: {pipelineDebug.checkedBase}</div>}
+                {pipelineDebug?.checkedUrl && <div>Check: {pipelineDebug.checkedUrl}</div>}
+                {pipelineDebug?.code && <div>Code: {pipelineDebug.code}</div>}
+                {pipelineDebug?.fallbackBase && <div>Fallback: {pipelineDebug.fallbackBase}</div>}
+                {pipelineDebug?.fallbackUrl && <div>Fallback check: {pipelineDebug.fallbackUrl}</div>}
+                <button className="toolbar-btn" style={{ marginTop: 8, width: '100%' }} onClick={onResetPipelineApiBase}>
+                  API URL reset naar launcher default
+                </button>
+              </div>
+            )}
+            {fileName && pipelineEnabled && (
+              <button className="toolbar-btn" style={{ marginTop: 8, width: '100%' }} onClick={onRetryPipeline}>
+                Pipeline analyse opnieuw
+              </button>
+            )}
+
+            {modelInfo && (
+              <>
+                <h3>3D Model</h3>
+                <div className="sidebar-row">
+                  <span className="label">Vertices</span>
+                  <span className="value">{modelInfo.vertexCount?.toLocaleString() || '-'}</span>
+                </div>
+                <div className="sidebar-row">
+                  <span className="label">Driehoeken</span>
+                  <span className="value">{modelInfo.triangleCount?.toLocaleString() || '-'}</span>
+                </div>
+              </>
+            )}
+
+            <h3>Bediening</h3>
+            <div style={{ fontSize: '0.82rem', color: '#888', lineHeight: 1.6 }}>
+              🖱 Links slepen — roteren
+              <br />
+              🖱 Scrollwiel — zoomen
+            </div>
+
+            <h3>Engine</h3>
+            <div className="sidebar-row">
+              <span className="label">Backend</span>
+              <span className="value">OpenCascade WASM</span>
+            </div>
+            <div className="sidebar-row">
+              <span className="label">Viewer</span>
+              <span className="value">buerli.io + Three.js</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

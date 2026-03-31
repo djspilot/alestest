@@ -111,8 +111,8 @@ function AppContent() {
     selection.setSelectedEventIndex(0)
     viewer.setError(null)
     viewer.setEngineStatus('Klaar')
-    selection.setShowHiddenHoles(true)
-    selection.setHighlightHiddenHoleLocations(true)
+    selection.setShowHiddenHoles(false)
+    selection.setHighlightHiddenHoleLocations(false)
     pipeline.setPipelineState(EMPTY_PIPELINE_STATE)
   }, [pipeline.stopPipelineRequest, viewer, selection, pipeline.setPipelineState])
 

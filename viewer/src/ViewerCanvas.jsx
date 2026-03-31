@@ -280,6 +280,7 @@ function buildSectionContours(partType, size, thickness, axisKey) {
 
 function holePalette(hole, isSelected, hasSelection) {
   const dimmed = hasSelection && !isSelected
+  const method = String(hole?.method || '').toLowerCase()
 
   if (hole.status === 'probe') {
     return {
@@ -308,6 +309,16 @@ function holePalette(hole, isSelected, hasSelection) {
       echoOpacity: dimmed ? 0.14 : 0.52,
       primaryOpacity: dimmed ? 0.22 : 0.92,
       selectionOpacity: dimmed ? 0.18 : 0.68,
+    }
+  }
+
+  if (method.includes('face_boundary_missing')) {
+    return {
+      primary: '#b45309',
+      secondary: '#f59e0b',
+      echoOpacity: dimmed ? 0.16 : 0.56,
+      primaryOpacity: dimmed ? 0.24 : 0.95,
+      selectionOpacity: dimmed ? 0.2 : 0.72,
     }
   }
 
@@ -1431,7 +1442,7 @@ export default function ViewerCanvas({
   controlsRef,
   useFlatView,
   showHiddenHoles = false,
-  highlightHiddenHoleLocations = true,
+  highlightHiddenHoleLocations = false,
 }) {
   const renderMode = 'clean'
   const holeItems = activeHoleVisuals?.items || backendVisuals?.holes?.items || []

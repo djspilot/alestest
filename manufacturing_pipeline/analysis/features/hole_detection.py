@@ -875,6 +875,14 @@ def deduplicate_holes(circular_holes, shaped_holes, return_debug=False):
                 rejected.append({
                     "id": getattr(circ, "id", None),
                     "reason": "Afgewezen als onderdeel van een shaped hole",
+                    "overlap_with": {
+                        "id": shaped.get("id"),
+                        "method": shaped.get("method"),
+                        "type": shaped.get("type"),
+                        "label": shaped.get("dim") or shaped.get("type"),
+                        "position": shaped.get("center"),
+                        "distance": round(dist, 3),
+                    },
                     "criteria": [
                         {
                             "name": "duplicate_of_shaped_hole",

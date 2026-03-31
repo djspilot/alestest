@@ -15,8 +15,8 @@ export function useSelection({ pipelineVisuals, flatMesh, backendMesh, groupedSt
   const [probeMode, setProbeMode] = useState(false)
   const [selectedStageIndex, setSelectedStageIndex] = useState(0)
   const [selectedEventIndex, setSelectedEventIndex] = useState(0)
-  const [showHiddenHoles, setShowHiddenHoles] = useState(true)
-  const [highlightHiddenHoleLocations, setHighlightHiddenHoleLocations] = useState(true)
+  const [showHiddenHoles, setShowHiddenHoles] = useState(false)
+  const [highlightHiddenHoleLocations, setHighlightHiddenHoleLocations] = useState(false)
 
   // Derived values
   const selectedStage = groupedStages[selectedStageIndex] || null
