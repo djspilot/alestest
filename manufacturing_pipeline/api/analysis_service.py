@@ -6,6 +6,7 @@ Wraps process_single_file() and enriches the result with AAG details.
 import os
 import shutil
 import json
+import math
 
 from manufacturing_pipeline.core.runtime_analysis import run_analysis
 from manufacturing_pipeline.core.file_utils import get_output_dir
@@ -214,6 +215,36 @@ def _build_timeline(result: dict, analysis, total_holes: int, timing_data: dict 
     return events, summary
 
 
+def _summarize_hole_cut_lengths(hole_visuals: dict | None) -> tuple[float, list[float]]:
+    """Aggregate per-hole cut length from accepted detection items.
+
+    Prefers explicit perimeter when available. Falls back to circular perimeter from diameter.
+    """
+    if not isinstance(hole_visuals, dict):
+        return 0.0, []
+
+    per_hole: list[float] = []
+    for item in hole_visuals.get("items") or []:
+        if str(item.get("status") or "accepted") != "accepted":
+            continue
+
+        perimeter = float(item.get("perimeter") or 0.0)
+        if perimeter > 0:
+            per_hole.append(perimeter)
+            continue
+
+        diameter = item.get("diameter")
+        if diameter is not None:
+            try:
+                dia = float(diameter)
+            except (TypeError, ValueError):
+                dia = 0.0
+            if dia > 0:
+                per_hole.append(math.pi * dia)
+
+    return sum(per_hole), per_hole
+
+
 def _serialize_analysis_reasoning(analysis) -> list[dict]:
     serialized = []
     for item in getattr(analysis, "reasoning", []) or []:
@@ -379,6 +410,10 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
                 "bends_3d": _serialize_3d_bends(step_file, result.get("thickness")),
             },
         }
+
+        holes_cut_length_total, hole_cut_lengths = _summarize_hole_cut_lengths(result["visuals"].get("holes"))
+        result["production"]["holes_cut_length_total"] = holes_cut_length_total
+        result["production"]["hole_cut_lengths"] = hole_cut_lengths
 
         # Build replay timeline from profiler + analysis outputs
         timeline_events, timeline_summary = _build_timeline(result, analysis, total_holes, timing_data)

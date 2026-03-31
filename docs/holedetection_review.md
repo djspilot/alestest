@@ -41,12 +41,26 @@ Belangrijke architectuurnoot:
 
 ---
 
-## Primaire strategie: gesloten contour als basis
+## Primaire strategie: productie-metrics als basis
 
-**Aantal gaten en snijlengte worden bepaald op basis van gesloten binnencontouren.**
+**Voor productie worden aantal gaten en gat-snijlengte bepaald op basis van geaccepteerde detector-kandidaten (na dedup).**
+
+Concreet:
+- `holes_total`: aantal geaccepteerde kandidaten na deduplicatie
+- `holes_cut_length_total`: som van gat-snijlengtes per geaccepteerde kandidaat
+- `hole_cut_lengths`: lijst met snijlengte per geaccepteerde kandidaat
+
+Snijlengte per kandidaat:
+- gebruik `perimeter` uit detectie als die beschikbaar is
+- anders fallback naar `pi * diameter` voor cilindrische gaten
+
+Deze velden worden in API-output gepubliceerd onder `production`.
+
+---
+
+## Secundaire strategie: gesloten contouren voor robuuste perimeter op complexe vormen
 
 `_detect_closed_inner_contours(shape)` is de leidende methode voor:
-- `nr_holes` (aantal gaten)
 - `hole_contours` (snijlengte per gat, gemeten perimeterlengte uit geometrie)
 - `total_contour` (totale snijlengte = sum(gatcontouren) + buitencontour)
 
@@ -63,7 +77,9 @@ De cylinder-detectie blijft nodig uitsluitend voor labels:
 Volgorde in de wrappers (`cut_features.py`):
 1. `_detect_closed_inner_contours` → aantal + snijlengte
 2. `detect_holes` + thread/countersink logica → labels (thread/countersunk/round)
-3. Als `closed_contours` niet leeg: overschrijf `hole_contours` en `nr_holes` met gesloten contour data
+3. Auto-keuze bron voor `nr_holes`/snijlengte:
+   - gebruik `closed_contours` als die minstens evenveel gaten opleveren als detector-set
+   - anders gebruik detector-set (voorkomt ondertelling)
 
 Profiel-noot (actief):
 - in de profiel-wrapper worden `closed_contours` eerst gefilterd op profiel-uiteinde-openingen
@@ -85,7 +101,7 @@ Stopregel:
 - er is geen enkele globale "eerste match stopt alles" regel zoals bij Step 0
 - alle subdetectoren leveren kandidaten op
 - de wrapper beslist daarna hoe deze kandidaten worden gelabeld en geteld
-- **voor aantal en snijlengte geldt: `closed_contours` wint altijd als die niet leeg is**
+- **voor productie telt de geaccepteerde detector-set; in cut-features geldt een auto-keuze tussen contour-set en detector-set**
 
 ---
 
@@ -121,7 +137,7 @@ Na `_detect_closed_inner_contours` wordt `_label_contours_from_holes()` aangeroe
 - **3D solid** (profiel): gaten die een planaire wandface snijden
 
 ### Samenvatting
-`nr_holes` en `hole_contours` worden uitsluitend van gesloten contouren afgeleid als `closed_contours` niet leeg is. Labels (thread/countersunk/round) volgen daarna via matching met cylindrische gaten.
+`hole_contours` kunnen uit gesloten contouren komen, maar alleen als de contour-set niet ondertelt ten opzichte van detector-kandidaten. Labels (thread/countersunk/round) volgen via matching met cylindrische gaten.
 
 Profiel-uitzondering (actief):
 - vóór de telling worden profiel-uiteinde-openingen uit `closed_contours` verwijderd

@@ -20,6 +20,7 @@ from manufacturing_pipeline.analysis.cut_features import (
 )
 from manufacturing_pipeline.analysis.features.hole_detection import precompute_face_properties
 from manufacturing_pipeline.analysis.io.step_file_io import load_step_file
+from manufacturing_pipeline.api.analysis_service import run_step_analysis
 
 
 @dataclass
@@ -175,7 +176,114 @@ def _build_rows_from_fallback(
     return rows
 
 
+def _normalize_debug_items(
+    cyl_debug: Sequence[Dict[str, Any]],
+    shaped_debug: Sequence[Dict[str, Any]],
+    dedup_debug: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = [dict(item) for item in (*cyl_debug, *shaped_debug)]
+
+    for rejection in dedup_debug:
+        rej_id = rejection.get("id")
+        matched = False
+        for item in items:
+            if item.get("id") == rej_id:
+                item["status"] = "rejected"
+                item["reason"] = rejection.get("reason")
+                item["criteria"] = [
+                    *(item.get("criteria") or []),
+                    *(rejection.get("criteria") or []),
+                ]
+                matched = True
+                break
+        if not matched:
+            items.append(dict(rejection))
+
+    return items
+
+
+def _build_rows_from_debug_items(items: Sequence[Dict[str, Any]]) -> List[HoleRow]:
+    rows: List[HoleRow] = []
+    idx = 1
+    for item in items:
+        if str(item.get("status") or "accepted") != "accepted":
+            continue
+
+        perimeter = _safe_float(item.get("perimeter"), 0.0)
+        diameter = item.get("diameter")
+        diameter_mm = _safe_float(diameter, 0.0) if diameter is not None else None
+
+        if perimeter <= 0.0 and diameter_mm and diameter_mm > 0.0:
+            perimeter = math.pi * diameter_mm
+        if perimeter <= 0.0:
+            continue
+
+        rows.append(
+            HoleRow(
+                index=idx,
+                source="accepted_detector_candidate",
+                hole_type=str(item.get("type") or "hole"),
+                cut_length_mm=perimeter,
+                diameter_mm=diameter_mm,
+                note=str(item.get("note") or ""),
+            )
+        )
+        idx += 1
+
+    return rows
+
+
 def analyze_step_holes(step_path: Path, part_mode: str) -> Dict[str, Any]:
+    # Primary path: use production pipeline output so validation mirrors runtime metrics.
+    try:
+        api_result = run_step_analysis(str(step_path), use_aag=False, disable_stages={"unfold"})
+        production = (api_result or {}).get("production") or {}
+        hole_visuals = ((api_result or {}).get("visuals") or {}).get("holes") or {}
+        criteria_items = list(hole_visuals.get("items") or [])
+
+        rows_sorted = _build_rows_from_debug_items(criteria_items)
+        for idx, row in enumerate(rows_sorted, start=1):
+            row.index = idx
+
+        total_holes = int(production.get("holes_total") or len(rows_sorted))
+        total_cut_length = _safe_float(
+            production.get("holes_cut_length_total"),
+            sum(row.cut_length_mm for row in rows_sorted),
+        )
+        threaded = sum(1 for row in rows_sorted if row.hole_type == "thread")
+        countersunk = sum(1 for row in rows_sorted if "countersunk" in row.hole_type)
+
+        return {
+            "step_path": str(step_path),
+            "part_mode": part_mode,
+            "summary": {
+                "aantal_gaten": total_holes,
+                "aantal_gaten_bron": "production_pipeline",
+                "aantal_draadgaten": threaded,
+                "aantal_verzonken_gaten": countersunk,
+                "totale_snijlengte_mm": total_cut_length,
+            },
+            "holes": [
+                {
+                    "index": row.index,
+                    "source": row.source,
+                    "type": row.hole_type,
+                    "snijlengte_mm": row.cut_length_mm,
+                    "diameter_mm": row.diameter_mm,
+                    "note": row.note,
+                }
+                for row in rows_sorted
+            ],
+            "criteria": criteria_items,
+            "notes": [
+                "Aantal gaten + snijlengte volgen direct de production pipeline output.",
+                "Per gat: perimeter uit detectie, of fallback pi * diameter als perimeter ontbreekt.",
+                "Bij pipeline-fout schakelt dit script terug naar lokale detector-validatie.",
+            ],
+        }
+    except Exception:
+        pass
+
     loaded = load_step_file(str(step_path))
     workplane = _ensure_workplane(loaded)
 
@@ -244,17 +352,22 @@ def analyze_step_holes(step_path: Path, part_mode: str) -> Dict[str, Any]:
                         )
                     )
 
-        all_debug.extend(cyl_debug)
-        all_debug.extend(shaped_debug)
-        all_debug.extend(dedup_debug)
+        debug_items = _normalize_debug_items(cyl_debug, shaped_debug, dedup_debug)
+        for item in debug_items:
+            existing_note = str(item.get("note") or "").strip()
+            solid_note = f"solid_{solid_index}"
+            item["note"] = f"{existing_note}, {solid_note}" if existing_note else solid_note
+        all_debug.extend(debug_items)
 
-    rows_sorted = list(all_rows)
+    metric_rows = _build_rows_from_debug_items(all_debug)
+    rows_sorted = metric_rows if metric_rows else list(all_rows)
     for idx, row in enumerate(rows_sorted, start=1):
         row.index = idx
 
     total_holes = len(rows_sorted)
-    threaded = sum(1 for row in rows_sorted if row.hole_type == "thread")
-    countersunk = sum(1 for row in rows_sorted if "countersunk" in row.hole_type)
+    typed_rows = all_rows if all_rows else rows_sorted
+    threaded = sum(1 for row in typed_rows if row.hole_type == "thread")
+    countersunk = sum(1 for row in typed_rows if "countersunk" in row.hole_type)
 
     total_cut_length = sum(row.cut_length_mm for row in rows_sorted)
 
@@ -263,6 +376,7 @@ def analyze_step_holes(step_path: Path, part_mode: str) -> Dict[str, Any]:
         "part_mode": part_mode,
         "summary": {
             "aantal_gaten": total_holes,
+            "aantal_gaten_bron": "accepted_detector_candidates" if metric_rows else "closed_contours_fallback",
             "aantal_draadgaten": threaded,
             "aantal_verzonken_gaten": countersunk,
             "totale_snijlengte_mm": total_cut_length,
@@ -280,7 +394,8 @@ def analyze_step_holes(step_path: Path, part_mode: str) -> Dict[str, Any]:
         ],
         "criteria": all_debug,
         "notes": [
-            "Aantal gaten + snijlengte per gat volgen closed inner contours als die gevonden zijn.",
+            "Aantal gaten + snijlengte per gat volgen geaccepteerde detector-kandidaten (dedup verwerkt), gelijk aan production holes_total-logica.",
+            "Per kandidaat: gebruik perimeter uit detectie, of fallback pi * diameter als perimeter ontbreekt.",
             "Draadgat-herkenning gebruikt de actieve ISO-threadtabellen (M3 t/m M24 met tap- en major-diameters).",
             "Criteria en afwijsredenen komen direct uit detect_holes, detect_shaped_holes en deduplicate_holes debug-output.",
         ],
@@ -321,6 +436,7 @@ def main() -> int:
     print(f"STEP: {result['step_path']}")
     print(f"Mode: {result['part_mode']}")
     print(f"Aantal gaten: {summary['aantal_gaten']}")
+    print(f"Bron gatentelling: {summary.get('aantal_gaten_bron', '-')}")
     print(f"Aantal draadgaten: {summary['aantal_draadgaten']}")
     print(f"Aantal verzonken gaten: {summary['aantal_verzonken_gaten']}")
     print(f"Totale snijlengte: {summary['totale_snijlengte_mm']:.3f} mm")

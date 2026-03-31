@@ -500,6 +500,7 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                 "axis": list(item.get("axis") or (1.0, 0.0, 0.0)),
                 "normal": list(item.get("normal") or (1.0, 0.0, 0.0)),
                 "size": str(item.get("size", "")),
+                "perimeter": float(item.get("perimeter", 0.0) or 0.0),
                 "source": str(item.get("source") or source_label),
                 "method": str(item.get("method") or ("cylindrical_detector" if str(item.get("type", "hole")).lower() == "cylindrical" else "unknown")),
                 "criteria": item.get("criteria") or [],
