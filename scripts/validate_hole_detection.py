@@ -12,6 +12,7 @@ import cadquery as cq
 from manufacturing_pipeline.analysis.cut_features import (
     _detect_closed_inner_contours,
     _detect_countersunk_holes,
+    _filter_profile_end_opening_shaped_holes,
     _detect_standalone_countersunk_holes,
     _label_contours_from_holes,
     deduplicate_holes,
@@ -203,6 +204,26 @@ def analyze_step_holes(step_path: Path, part_mode: str) -> Dict[str, Any]:
             is_flat_pattern=(part_mode == "plate"),
             return_debug=True,
         )
+
+        closed_contours = _detect_closed_inner_contours(solid.wrapped)
+
+        if part_mode == "profile":
+            # Keep validation aligned with profile production logic:
+            # profile end openings should not count as closed hole contours.
+            try:
+                from OCP.Bnd import Bnd_Box
+                from OCP.BRepBndLib import BRepBndLib
+
+                bbox = Bnd_Box()
+                BRepBndLib.Add_s(solid.wrapped if hasattr(solid, "wrapped") else solid, bbox)
+                xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
+                bbox_min = (xmin, ymin, zmin)
+                bbox_max = (xmax, ymax, zmax)
+                shaped_holes = _filter_profile_end_opening_shaped_holes(shaped_holes, bbox_min, bbox_max)
+                closed_contours = _filter_profile_end_opening_shaped_holes(closed_contours, bbox_min, bbox_max)
+            except Exception:
+                pass
+
         cylindrical_holes, dedup_debug = deduplicate_holes(
             cylindrical_holes,
             shaped_holes,
@@ -212,7 +233,6 @@ def analyze_step_holes(step_path: Path, part_mode: str) -> Dict[str, Any]:
         countersink_matches = _detect_countersunk_holes(wp, cylindrical_holes)
         standalone_cs = _detect_standalone_countersunk_holes(wp, cylindrical_holes)
 
-        closed_contours = _detect_closed_inner_contours(solid.wrapped)
         contour_labels = _label_contours_from_holes(
             closed_contours,
             cylindrical_holes,

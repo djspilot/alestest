@@ -81,6 +81,10 @@ Kernpunten:
 - Plaat-specifieke disambiguatie voorkomt foutieve threadlabels.
 - Labeling wordt toegepast in `cut_features_extractors` en contour-labeling helpers.
 
+Vaste afspraak (niet opnieuw ter discussie zonder expliciete wijzigingsvraag):
+- Diameter 8.5 mm mag als `thread` worden geclassificeerd wanneer de actieve ISO-regels dat toelaten.
+- Deze afspraak blijft staan; dit is geen fout zolang de threadcriteria verder worden gehaald.
+
 ## Feature 5: countersink-detectie
 Kernpunten:
 - Primair: cone-face detectie.
@@ -97,6 +101,11 @@ In deze baseline geldt expliciet:
 Procedure-afspraak:
 - Open contour = signaal voor kwaliteitscontrole/modelreview, geen productie-gat.
 - Alleen gesloten contouren of gevalideerde cilindrische gaten tellen mee in productiecijfers.
+
+Aanvullende vaste afspraak voor profielonderdelen:
+- Gesloten contouren die overeenkomen met profiel-uiteinden (open kokerdoorsnede aan de einden) tellen niet mee als gat.
+- Deze uitsluiting geldt alleen voor profiel-uiteinden en mag niet gebruikt worden om reguliere gaten of draadgaten te onderdrukken.
+- Doel: uitsluitend eind-openingen uitsluiten, niet het aantal tapgaten verlagen.
 
 ## Verwachte validatie op referentiebestand 336027
 Verwachte baseline-uitkomst:
@@ -117,3 +126,4 @@ Bij elke wijziging in hole-detection:
    - `sum(hole_contours)`
 3. Documenteer impact op beslislogica in dit document.
 4. Geen merge als thread/countersink-semantiek impliciet verandert zonder expliciete akkoord.
+5. Voor profielcases altijd expliciet controleren dat profiel-uiteinde-filtering actief is en dat 8.5 mm threadclassificatie niet onbedoeld wordt teruggedraaid.
