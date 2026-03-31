@@ -186,7 +186,13 @@ function Set-FreeCADEnvironmentFromDoctor {
     }
 
     $doctor = $doctorJson | ConvertFrom-Json
-    $configured = $doctor.configured
+    $configured = $null
+    if ($null -ne $doctor.PSObject.Properties['configured']) {
+        $configured = $doctor.configured
+    }
+    elseif ($null -ne $doctor.PSObject.Properties['configured_runtime']) {
+        $configured = $doctor.configured_runtime
+    }
     if (-not $configured) {
         return
     }
@@ -292,14 +298,29 @@ try {
             Write-Step "Installeer viewer Node dependencies (incl. vite)"
             Push-Location (Join-Path $RepoRoot "viewer")
             try {
-                Invoke-Checked -Command $npmCommand -Arguments @("install")
-                # Verify vite is available via npx
-                $viteCheck = & $npmCommand "list" "vite" 2>&1
-                if ($LASTEXITCODE -ne 0 -or ($viteCheck -notmatch "vite")) {
-                    Write-Host "  vite niet gevonden na npm install, opnieuw proberen..." -ForegroundColor Yellow
+                $npmInstallSucceeded = $true
+                try {
+                    Invoke-Checked -Command $npmCommand -Arguments @("install")
+                }
+                catch {
+                    $npmInstallSucceeded = $false
+                    Write-Host "  npm install faalde, opnieuw met --legacy-peer-deps..." -ForegroundColor Yellow
+                }
+                if (-not $npmInstallSucceeded) {
                     Invoke-Checked -Command $npmCommand -Arguments @("install", "--legacy-peer-deps")
                 }
-                Write-Host "  vite geinstalleerd" -ForegroundColor Green
+
+                # Verify vite command is executable
+                $viteVersion = & $npmCommand "exec" "--" "vite" "--version" 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "  vite check faalde, opnieuw met --legacy-peer-deps..." -ForegroundColor Yellow
+                    Invoke-Checked -Command $npmCommand -Arguments @("install", "--legacy-peer-deps")
+                    $viteVersion = & $npmCommand "exec" "--" "vite" "--version" 2>&1
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "vite niet uitvoerbaar na npm install: $viteVersion"
+                    }
+                }
+                Write-Host "  vite geinstalleerd ($viteVersion)" -ForegroundColor Green
             }
             finally {
                 Pop-Location
@@ -333,7 +354,11 @@ try {
         Push-Location (Join-Path $RepoRoot "viewer")
         try {
             Write-Host "  vite check:" -ForegroundColor Cyan
-            Invoke-Checked -Command $npmCommand -Arguments @("list", "vite")
+            $viteVersion = & $npmCommand "exec" "--" "vite" "--version" 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                throw "vite check gefaald: $viteVersion"
+            }
+            Write-Host "  $viteVersion"
         }
         finally {
             Pop-Location
