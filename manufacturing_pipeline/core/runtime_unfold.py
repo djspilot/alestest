@@ -10,6 +10,28 @@ from manufacturing_pipeline.core.config import SystemConfig
 
 from manufacturing_pipeline.core.paths import PIPELINE_DIR, SCRIPTS_DIR
 
+UNFOLD_ERROR_MESSAGES = {
+    1: "Volume onbruikbaar - geen echt 3D sheet metal met uniforme dikte",
+    2: "Ongeldige punt voor dikte meting",
+    3: "Ongeldige dikte - plaatdikte niet consistent of te complex",
+    4: "Ongeldige shape",
+    5: "Shape heeft onnodige edges - gebruik 'Refine Shape' eerst",
+    10: "Geen wires in sheet edge analyse",
+    11: "Dubbele buigingen niet ondersteund",
+    12: "Meer dan een bend-child niet ondersteund",
+    13: "Plaatdikte ongeldig voor dit vlak",
+    14: "Edges zonder buur-vlakken",
+    15: "Alle sheet edges moeten een vlak hebben",
+    16: "Starthoek van buiging niet gevonden",
+    17: "Type oppervlak niet ondersteund voor sheet metal",
+    20: "Section wire met minder dan 4 edges",
+    21: "Section wire niet gesloten",
+    22: "Section gefaald",
+    23: "CutToolWire niet gesloten",
+    24: "Bend-face zonder child niet geimplementeerd",
+    26: "Niet-ondersteund curve type in unbendFace",
+}
+
 FREECAD_PYTHON = SystemConfig.from_env().freecad_python
 HOST_PYTHON = sys.executable
 
@@ -17,6 +39,46 @@ if PIPELINE_DIR not in sys.path:
     sys.path.insert(0, PIPELINE_DIR)
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
+
+
+def _summarize_unfold_failure(result):
+    """Build a readable error from structured unfold failure details."""
+    if not result:
+        return "Unfold gefaald zonder resultaat"
+
+    explicit_error = (result.get("error") or "").strip()
+    if explicit_error:
+        return explicit_error
+
+    details = result.get("error_details") or []
+    attempts = result.get("attempts") or 0
+    if not details:
+        return f"Unfold gefaald na {attempts} pogingen zonder diagnose"
+
+    exception_messages = []
+    regular_messages = []
+    seen = set()
+    for detail in details:
+        message = (detail.get("message") or "").strip()
+        if not message or message in seen:
+            continue
+        seen.add(message)
+        if detail.get("stage") == "exception":
+            exception_messages.append(message)
+        else:
+            regular_messages.append(message)
+
+    if exception_messages:
+        summary = f"Interne SheetMetal fout tijdens unfold: {exception_messages[0]}"
+        if regular_messages:
+            summary += f". Eerder ook gezien: {'; '.join(regular_messages[:2])}"
+        return summary
+
+    joined = "; ".join(regular_messages[:3])
+    if joined:
+        return f"Geen geldige unfold-route gevonden na {attempts} pogingen: {joined}"
+
+    return f"Unfold gefaald na {attempts} pogingen zonder bruikbare foutmelding"
 
 def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     """Run FreeCAD unfold and export both DXF and STEP of flat pattern.
@@ -39,10 +101,12 @@ import os
 import platform
 import json
 import math
+import traceback
 
 # FreeCAD paths
 freecad_lib = {repr(fc_lib)}
 freecad_mod = {repr(fc_mod)}
+UNFOLD_ERROR_MESSAGES = {repr(UNFOLD_ERROR_MESSAGES)}
 
 if platform.system() == "Darwin":
     freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
@@ -259,7 +323,24 @@ def _merge_fold_segments(bend_line_segments, bends_logical):
 
     return merged_details, merged_bends, merged_groups
 
-result = {{"success": False}}
+def _record_error(target, face_idx, stage, error_code, message, tb=None):
+    detail = {{
+        "face_idx": int(face_idx),
+        "stage": stage,
+        "error_code": int(error_code),
+        "message": str(message),
+    }}
+    if tb:
+        detail["traceback"] = tb
+    target["error_details"].append(detail)
+
+result = {{
+    "success": False,
+    "error": None,
+    "attempts": 0,
+    "error_details": [],
+    "first_traceback": None,
+}}
 best_score = -1
 
 try:
@@ -295,6 +376,7 @@ for solid_idx, solid in enumerate(sorted_solids[:3]):  # Try top 3 by volume
     # Try top 10 largest faces to find the best base for unfolding
     for base_info in planar_faces[:10]:
         base_idx = base_info["index"]
+        result["attempts"] += 1
         print(f"DEBUG: trying base face {{base_idx}}, area={{base_info['area']:.1f}}")
         try:
             doc = FreeCAD.newDocument("UnfoldDoc")
@@ -305,12 +387,26 @@ for solid_idx, solid in enumerate(sorted_solids[:3]):  # Try top 3 by volume
             unfold_tree = SheetMetalUnfolder.SheetTree(solid, base_idx, kFactorLookup, obj)
             if unfold_tree.error_code:
                 print(f"DEBUG: SheetTree error={{unfold_tree.error_code}} on face {{base_idx}}")
+                _record_error(
+                    result,
+                    base_idx,
+                    "init",
+                    unfold_tree.error_code,
+                    UNFOLD_ERROR_MESSAGES.get(unfold_tree.error_code, f"Onbekende fout ({{unfold_tree.error_code}})"),
+                )
                 FreeCAD.closeDocument("UnfoldDoc")
                 continue
 
             unfold_tree.Bend_analysis(base_idx, None)
             if unfold_tree.error_code:
                 print(f"DEBUG: Bend_analysis error={{unfold_tree.error_code}} on face {{base_idx}}")
+                _record_error(
+                    result,
+                    base_idx,
+                    "analysis",
+                    unfold_tree.error_code,
+                    UNFOLD_ERROR_MESSAGES.get(unfold_tree.error_code, f"Onbekende fout ({{unfold_tree.error_code}})"),
+                )
                 FreeCAD.closeDocument("UnfoldDoc")
                 continue
 
@@ -442,17 +538,58 @@ for solid_idx, solid in enumerate(sorted_solids[:3]):  # Try top 3 by volume
                                 "fold_details": display_fold_details,
                                 "bend_line_segments": bend_line_segments,
                                 "bend_line_groups": bend_line_groups,
-                                "bends_logical": display_bends_logical
+                                "bends_logical": display_bends_logical,
+                                "attempts": result.get("attempts", 0),
+                                "error_details": result.get("error_details", []),
+                                "first_traceback": result.get("first_traceback"),
                             }}
+                elif unfold_tree.error_code:
+                    _record_error(
+                        result,
+                        base_idx,
+                        "unfold",
+                        unfold_tree.error_code,
+                        UNFOLD_ERROR_MESSAGES.get(unfold_tree.error_code, f"Onbekende fout ({{unfold_tree.error_code}})"),
+                    )
+                else:
+                    _record_error(
+                        result,
+                        base_idx,
+                        "unfold",
+                        -2,
+                        "Unfold leverde geen vlak patroon op voor dit basisvlak",
+                    )
                             
             FreeCAD.closeDocument("UnfoldDoc")
         except Exception as e:
             print(f"DEBUG EXCEPTION on face {{base_idx}}: {{type(e).__name__}}: {{e}}")
+            tb = traceback.format_exc()
+            if not result.get("first_traceback"):
+                result["first_traceback"] = tb
+            _record_error(result, base_idx, "exception", -1, f"{{type(e).__name__}}: {{e}}", tb=tb)
             try:
                 FreeCAD.closeDocument("UnfoldDoc")
             except:
                 pass
             continue
+
+if not result.get("success"):
+    exception_details = [d for d in result["error_details"] if d.get("stage") == "exception"]
+    regular_messages = []
+    for detail in result["error_details"]:
+        if detail.get("stage") == "exception":
+            continue
+        message = detail.get("message")
+        if message and message not in regular_messages:
+            regular_messages.append(message)
+    if exception_details:
+        result["error"] = f"Interne SheetMetal fout tijdens unfold: {{exception_details[0]['message']}}"
+        if regular_messages:
+            result["error"] += f". Eerder ook gezien: {{'; '.join(regular_messages[:2])}}"
+    elif regular_messages:
+        result["error"] = f"Geen geldige unfold-route gevonden na {{result['attempts']}} pogingen: {{'; '.join(regular_messages[:3])}}"
+    else:
+        result["error"] = f"Unfold gefaald na {{result['attempts']}} pogingen zonder diagnose"
 
 print("UNFOLD_RESULT:" + json.dumps(result))
 '''
@@ -492,12 +629,18 @@ print("UNFOLD_RESULT:" + json.dumps(result))
             if line.startswith('UNFOLD_RESULT:'):
                 result = json.loads(line[len('UNFOLD_RESULT:'):])
                 if not result.get("success"):
+                    result["error"] = _summarize_unfold_failure(result)
                     # Show intermediate debug lines from FreeCAD
                     debug_lines = [l for l in stdout_lines if not l.startswith('UNFOLD_RESULT:')]
                     if debug_lines:
                         print(f"    [FreeCAD debug (last 10 lines)]:")
                         for dl in debug_lines[-10:]:
                             print(f"      {dl}")
+                    first_traceback = (result.get("first_traceback") or "").strip()
+                    if first_traceback:
+                        print("    [FreeCAD traceback (first failure)]:")
+                        for line in first_traceback.splitlines()[:12]:
+                            print(f"      {line}")
                 return result
 
         # Debug: show what FreeCAD actually output
@@ -638,5 +781,4 @@ print("THEORETICAL_RESULT:" + json.dumps(result))
     except Exception as e:
         print(f"  [!] Theoretische berekening gefaald: {e}")
         return None
-
 

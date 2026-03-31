@@ -102,3 +102,61 @@ def test_run_unfold_uses_host_python_wrapper(tmp_path) -> None:
     assert commands
     assert commands[0][0] == runtime_unfold.HOST_PYTHON
     assert commands[0][1].endswith("freecad_unfold.py")
+
+
+def test_summarize_unfold_failure_prefers_exception_details() -> None:
+    result = {
+        "attempts": 4,
+        "error_details": [
+            {
+                "face_idx": 12,
+                "stage": "analysis",
+                "error_code": 17,
+                "message": "Type oppervlak niet ondersteund voor sheet metal",
+            },
+            {
+                "face_idx": 7,
+                "stage": "init",
+                "error_code": 3,
+                "message": "Ongeldige dikte - plaatdikte niet consistent of te complex",
+            },
+            {
+                "face_idx": 3,
+                "stage": "exception",
+                "error_code": -1,
+                "message": "TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'",
+            },
+        ],
+    }
+
+    summary = runtime_unfold._summarize_unfold_failure(result)
+
+    assert "Interne SheetMetal fout tijdens unfold" in summary
+    assert "TypeError" in summary
+    assert "Type oppervlak niet ondersteund voor sheet metal" in summary
+
+
+def test_summarize_unfold_failure_lists_readable_causes() -> None:
+    result = {
+        "attempts": 3,
+        "error_details": [
+            {
+                "face_idx": 12,
+                "stage": "analysis",
+                "error_code": 17,
+                "message": "Type oppervlak niet ondersteund voor sheet metal",
+            },
+            {
+                "face_idx": 7,
+                "stage": "init",
+                "error_code": 3,
+                "message": "Ongeldige dikte - plaatdikte niet consistent of te complex",
+            },
+        ],
+    }
+
+    summary = runtime_unfold._summarize_unfold_failure(result)
+
+    assert "Geen geldige unfold-route gevonden na 3 pogingen" in summary
+    assert "Type oppervlak niet ondersteund voor sheet metal" in summary
+    assert "Ongeldige dikte - plaatdikte niet consistent of te complex" in summary
