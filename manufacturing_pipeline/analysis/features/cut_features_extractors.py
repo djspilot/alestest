@@ -128,51 +128,22 @@ def extract_cut_features_for_sheet(
             hole_types.append("thread")
             threaded_holes += 1
 
-        detected_hole_contours = list(hole_contours)
-        detected_hole_types = list(hole_types)
-        detected_hole_radii = list(hole_radii)
-        detected_threaded_holes = threaded_holes
-        detected_countersunk_holes = countersunk_holes
-        detected_countersunk_angles = list(countersunk_angles)
-
         logger.info("[CutFeatures] Bereken buitencontour...")
         outer_contour = get_outer_contour_length(analysis_shape)
         logger.info(f"[CutFeatures] Buitencontour: {outer_contour:.2f} mm")
 
-        hole_count_source = "detector"
         if closed_contours:
-            contour_hole_contours = [float(item["perimeter"]) for item in closed_contours]
+            hole_contours = [float(item["perimeter"]) for item in closed_contours]
             label_results = label_contours_from_holes(
                 closed_contours,
                 cylindrical_holes,
                 countersink_matches,
             )
-            contour_hole_types = [r["label"] for r in label_results]
-            contour_hole_radii = [r["radius"] for r in label_results if r["radius"] is not None]
-            contour_threaded_holes = sum(1 for r in label_results if r["label"] == "thread")
-            contour_countersunk_holes = sum(1 for r in label_results if r["label"] == "countersunk")
-            contour_countersunk_angles = [r["cs_angle"] for r in label_results if r.get("cs_angle") is not None]
-
-            if len(contour_hole_contours) >= len(detected_hole_contours):
-                hole_count_source = "closed_contours"
-                hole_contours = contour_hole_contours
-                hole_types = contour_hole_types
-                hole_radii = contour_hole_radii
-                threaded_holes = contour_threaded_holes
-                countersunk_holes = contour_countersunk_holes
-                countersunk_angles = contour_countersunk_angles
-            else:
-                logger.info(
-                    "[CutFeatures] Closed contour count (%d) < detector count (%d): gebruik detector-set",
-                    len(contour_hole_contours),
-                    len(detected_hole_contours),
-                )
-                hole_contours = detected_hole_contours
-                hole_types = detected_hole_types
-                hole_radii = detected_hole_radii
-                threaded_holes = detected_threaded_holes
-                countersunk_holes = detected_countersunk_holes
-                countersunk_angles = detected_countersunk_angles
+            hole_types = [r["label"] for r in label_results]
+            hole_radii = [r["radius"] for r in label_results if r["radius"] is not None]
+            threaded_holes = sum(1 for r in label_results if r["label"] == "thread")
+            countersunk_holes = sum(1 for r in label_results if r["label"] == "countersunk")
+            countersunk_angles = [r["cs_angle"] for r in label_results if r.get("cs_angle") is not None]
 
         total_contour = sum(hole_contours) + outer_contour
         logger.info(f"[CutFeatures] Totale snijlengte: {total_contour:.2f} mm")
@@ -182,8 +153,7 @@ def extract_cut_features_for_sheet(
         box_y = bbox["ylen"]
         logger.info(f"[CutFeatures] Box dimensions: X={box_x:.2f} mm, Y={box_y:.2f} mm")
 
-        total_holes = len(hole_types)
-        logger.info(f"[CutFeatures] Hole bron voor telling/snijlengte: {hole_count_source}")
+        total_holes = len(closed_contours) if closed_contours else len(hole_types)
         result = CutFeaturesCls(
             nr_holes=total_holes,
             hole_contours=hole_contours,
@@ -351,16 +321,8 @@ def extract_cut_features_for_profile(
             threaded_holes += 1
 
         outer_contour = 0.0
-        detected_hole_contours = list(hole_contours)
-        detected_hole_types = list(hole_types)
-        detected_hole_radii = list(hole_radii)
-        detected_threaded_holes = threaded_holes
-        detected_countersunk_holes = countersunk_holes
-        detected_countersunk_angles = list(countersunk_angles)
-
-        hole_count_source = "detector"
         if closed_contours:
-            contour_hole_contours = [float(item["perimeter"]) for item in closed_contours]
+            hole_contours = [float(item["perimeter"]) for item in closed_contours]
             label_results = label_contours_from_holes(
                 closed_contours,
                 cylindrical_holes,
@@ -368,36 +330,14 @@ def extract_cut_features_for_profile(
                 inferred_countersunk=inferred_countersunk,
                 is_profile=True,
             )
-            contour_hole_types = [r["label"] for r in label_results]
-            contour_hole_radii = [r["radius"] for r in label_results if r["radius"] is not None]
-            contour_threaded_holes = sum(1 for r in label_results if r["label"] == "thread")
-            contour_countersunk_holes = sum(1 for r in label_results if r["label"] == "countersunk")
-            contour_countersunk_angles = [r["cs_angle"] for r in label_results if r.get("cs_angle") is not None]
-
-            if len(contour_hole_contours) >= len(detected_hole_contours):
-                hole_count_source = "closed_contours"
-                hole_contours = contour_hole_contours
-                hole_types = contour_hole_types
-                hole_radii = contour_hole_radii
-                threaded_holes = contour_threaded_holes
-                countersunk_holes = contour_countersunk_holes
-                countersunk_angles = contour_countersunk_angles
-            else:
-                logger.info(
-                    "[CutFeatures] Profiel closed contour count (%d) < detector count (%d): gebruik detector-set",
-                    len(contour_hole_contours),
-                    len(detected_hole_contours),
-                )
-                hole_contours = detected_hole_contours
-                hole_types = detected_hole_types
-                hole_radii = detected_hole_radii
-                threaded_holes = detected_threaded_holes
-                countersunk_holes = detected_countersunk_holes
-                countersunk_angles = detected_countersunk_angles
+            hole_types = [r["label"] for r in label_results]
+            hole_radii = [r["radius"] for r in label_results if r["radius"] is not None]
+            threaded_holes = sum(1 for r in label_results if r["label"] == "thread")
+            countersunk_holes = sum(1 for r in label_results if r["label"] == "countersunk")
+            countersunk_angles = [r["cs_angle"] for r in label_results if r.get("cs_angle") is not None]
         total_contour = sum(hole_contours)
 
-        total_holes = len(hole_types)
-        logger.info(f"[CutFeatures] Profiel hole bron voor telling/snijlengte: {hole_count_source}")
+        total_holes = len(closed_contours) if closed_contours else len(hole_types)
         logger.info(f"[CutFeatures] Profiel: {total_holes} gaten, snijlengte={total_contour:.2f} mm")
 
         result = CutFeaturesCls(
