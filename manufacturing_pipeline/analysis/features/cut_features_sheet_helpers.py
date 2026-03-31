@@ -11,13 +11,112 @@ from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 
 
+def _detect_countersunk_by_coaxial_pairs(cylindrical_holes, matches, *, normalize_vector, as_point_tuple, dot, distance_point_to_axis, signed_axis_distance) -> Dict[int, float]:
+    """Fallback: infer countersinks from coaxial large/small cylindrical pairs.
+
+    This is used when conical faces are missing in STEP export or when cone matching
+    does not cover all holes. The larger diameter member of the pair gets the
+    countersunk label.
+    """
+    if not cylindrical_holes:
+        return matches
+
+    used_indices = set(matches.keys())
+    for idx in range(len(cylindrical_holes)):
+        if idx in used_indices:
+            continue
+
+        h1 = cylindrical_holes[idx]
+        axis1 = normalize_vector(h1.axis)
+        origin1 = as_point_tuple(getattr(h1, "axis_origin", None)) or as_point_tuple(h1.position)
+        if axis1 is None or origin1 is None:
+            continue
+
+        best_candidate = None
+        best_score = None
+
+        for jdx in range(idx + 1, len(cylindrical_holes)):
+            if jdx in used_indices:
+                continue
+
+            h2 = cylindrical_holes[jdx]
+            axis2 = normalize_vector(h2.axis)
+            origin2 = as_point_tuple(getattr(h2, "axis_origin", None)) or as_point_tuple(h2.position)
+            if axis2 is None or origin2 is None:
+                continue
+
+            axis_dot = abs(dot(axis1, axis2))
+            if axis_dot < 0.995:
+                continue
+
+            radial_dist = distance_point_to_axis(origin2, origin1, axis1)
+            if radial_dist > 3.5:
+                continue
+
+            axial_dist = abs(signed_axis_distance(origin2, origin1, axis1))
+            if axial_dist > 40.0:
+                continue
+
+            d1 = float(getattr(h1, "diameter", 0.0) or 0.0)
+            d2 = float(getattr(h2, "diameter", 0.0) or 0.0)
+            if d1 <= 0.0 or d2 <= 0.0:
+                continue
+
+            d_large = max(d1, d2)
+            d_small = min(d1, d2)
+            ratio = d_large / d_small if d_small > 0.0 else 0.0
+
+            # Countersink-like diameter step (e.g. 17 -> 8.5 gives ratio 2.0)
+            if ratio < 1.65 or ratio > 2.35:
+                continue
+
+            depth1 = float(getattr(h1, "depth", 0.0) or 0.0)
+            depth2 = float(getattr(h2, "depth", 0.0) or 0.0)
+            depth_large = depth1 if d1 >= d2 else depth2
+            depth_small = depth2 if d1 >= d2 else depth1
+
+            # Large diameter should be relatively shallow; small one continues deeper.
+            if depth_large > max(8.0, d_large * 0.7):
+                continue
+            if depth_small + 1e-6 < depth_large:
+                continue
+
+            score = radial_dist + axial_dist * 0.1 + abs(ratio - 2.0)
+            if best_score is None or score < best_score:
+                best_score = score
+                best_candidate = jdx
+
+        if best_candidate is None:
+            continue
+
+        h2 = cylindrical_holes[best_candidate]
+        d1 = float(getattr(h1, "diameter", 0.0) or 0.0)
+        d2 = float(getattr(h2, "diameter", 0.0) or 0.0)
+        large_idx = idx if d1 >= d2 else best_candidate
+
+        # Fallback angle when cone geometry is absent.
+        matches[large_idx] = 90.0
+        used_indices.add(idx)
+        used_indices.add(best_candidate)
+
+    return matches
+
+
 def _detect_countersunk_holes(cq_object, cylindrical_holes, *, collect_conical_faces, normalize_vector, as_point_tuple, dot, distance_point_to_axis, signed_axis_distance) -> Dict[int, float]:
     if not cylindrical_holes:
         return {}
 
     conical_faces = collect_conical_faces(cq_object)
     if not conical_faces:
-        return {}
+        return _detect_countersunk_by_coaxial_pairs(
+            cylindrical_holes,
+            {},
+            normalize_vector=normalize_vector,
+            as_point_tuple=as_point_tuple,
+            dot=dot,
+            distance_point_to_axis=distance_point_to_axis,
+            signed_axis_distance=signed_axis_distance,
+        )
 
     matches: Dict[int, float] = {}
 
@@ -60,7 +159,15 @@ def _detect_countersunk_holes(cq_object, cylindrical_holes, *, collect_conical_f
         if best_angle is not None:
             matches[idx] = round(best_angle, 2)
 
-    return matches
+    return _detect_countersunk_by_coaxial_pairs(
+        cylindrical_holes,
+        matches,
+        normalize_vector=normalize_vector,
+        as_point_tuple=as_point_tuple,
+        dot=dot,
+        distance_point_to_axis=distance_point_to_axis,
+        signed_axis_distance=signed_axis_distance,
+    )
 
 
 def _group_conical_countersink_faces(conical_faces: List[Dict[str, Any]], *, dot, distance_point_to_axis, signed_axis_distance) -> List[Dict[str, Any]]:

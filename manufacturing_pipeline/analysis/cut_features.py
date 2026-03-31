@@ -11,17 +11,21 @@ from .features import cut_features_geometry_helpers as _geometry_helpers
 from .features import cut_features_profile_helpers as _profile_helpers
 from .features import cut_features_sheet_helpers as _sheet_helpers
 from .step_processing import deduplicate_holes, detect_holes, detect_shaped_holes
+from .iso_standards import IsoStandards
 
 
 class _IsoStandardsFallback:
-    """Minimal fallback used after removing analysis/iso_standards.py."""
+    """Fallback only used when IsoStandards fails to initialize."""
 
     @staticmethod
     def identify_thread_from_diameter(_diameter, _tolerance=0.2):
         return []
 
 
-iso_standards = _IsoStandardsFallback()
+try:
+    iso_standards = IsoStandards()
+except Exception:
+    iso_standards = _IsoStandardsFallback()
 logger = logging.getLogger(__name__)
 
 

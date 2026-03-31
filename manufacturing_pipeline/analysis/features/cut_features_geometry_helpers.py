@@ -163,15 +163,17 @@ def _label_contours_from_holes(
                                     label = "thread"
                                     break
                 else:
+                    depth_gate_ok = hole_depth <= 0.0 or hole_depth >= (hole.diameter * 0.5)
                     if tapped_matches and major_matches:
-                        tapped_matches = []
-                    if tapped_matches and hole_depth > 0:
-                        plausible = [
+                        tapped_matches = [
                             m
                             for m in tapped_matches
-                            if float(getattr(m, "major_diameter", 0.0) or 0.0) <= hole_depth * 1.35
+                            if 0.8 <= (float(getattr(m, "major_diameter", 0.0) or 0.0) - float(hole.diameter)) <= 1.4
                         ]
-                        tapped_matches = plausible if plausible else []
+                        if not (depth_gate_ok and hole.diameter <= 6.2):
+                            tapped_matches = []
+                    elif tapped_matches and not depth_gate_ok:
+                        tapped_matches = []
                     if tapped_matches:
                         label = "thread"
 

@@ -58,12 +58,16 @@ Reden:
 
 De cylinder-detectie blijft nodig uitsluitend voor labels:
 - tapgaten (`thread`): diameter-matching via ISO 68-1
-- verzonken gaten (`countersunk`): conische face matching
+- verzonken gaten (`countersunk`): conische face matching met fallback via coaxiale cilindrische paren
 
 Volgorde in de wrappers (`cut_features.py`):
 1. `_detect_closed_inner_contours` → aantal + snijlengte
 2. `detect_holes` + thread/countersink logica → labels (thread/countersunk/round)
 3. Als `closed_contours` niet leeg: overschrijf `hole_contours` en `nr_holes` met gesloten contour data
+
+Profiel-noot (actief):
+- in de profiel-wrapper worden `closed_contours` eerst gefilterd op profiel-uiteinde-openingen
+- die gefilterde contouren tellen dus niet mee in `nr_holes` en `hole_contours`
 
 ---
 
@@ -118,6 +122,10 @@ Na `_detect_closed_inner_contours` wordt `_label_contours_from_holes()` aangeroe
 
 ### Samenvatting
 `nr_holes` en `hole_contours` worden uitsluitend van gesloten contouren afgeleid als `closed_contours` niet leeg is. Labels (thread/countersunk/round) volgen daarna via matching met cylindrische gaten.
+
+Profiel-uitzondering (actief):
+- vóór de telling worden profiel-uiteinde-openingen uit `closed_contours` verwijderd
+- daarmee beïnvloeden koker/holprofiel-einden de gatentelling en snijlengte niet
 
 ---
 
@@ -348,30 +356,57 @@ Lookup-tolerantie in wrappers:
 De functie probeert meerdere matches te vinden:
 - match op major diameter van metrische draad
 - match op interne draad / minor-diameter logica
-- match op fijne draadseries
+- match op tapped boordiameter-logica
 
 Resultaat:
 - lijst met mogelijke thread matches
+
+Actieve providerstatus:
+- `analysis/iso_standards.py` is weer actief
+- metrische threadtabellen voor M3 t/m M24 (major + tap drill) worden gebruikt
 
 ### Beslislogica voor plaat (`extract_cut_features_for_sheet`)
 1. zoek alle thread matches met `tolerance=0.20`
 2. splits in:
    - `tapped_matches`: designation bevat `"tapped"`
    - `major_matches`: designation bevat geen `"tapped"`
-3. als beide aanwezig zijn:
-   - behandel als clearance/ambigu
-   - `tapped_matches = []`
-4. extra plausibility gate voor plaat:
+3. bepaal depth gate:
+
+$$
+depth\_gate\_ok = (hole\_depth \le 0) \;\text{of}\; (hole\_depth \ge 0.5 \cdot hole\_diameter)
+$$
+
+4. als zowel `tapped_matches` als `major_matches` aanwezig zijn (ambigu):
+   - filter `tapped_matches` op delta-criterium:
+
+$$
+0.8 \le (major\_diameter - hole\_diameter) \le 1.4
+$$
+
+   - houd tapped alleen aan als:
+      - `depth_gate_ok = True`
+      - `hole_diameter <= 6.2 mm`
+
+5. als alleen `tapped_matches` aanwezig is:
+   - behoud tapped alleen als `depth_gate_ok = True`
+
+6. als na filtering tapped overblijft:
+   - label wordt `thread`
+
+7. anders:
+   - label blijft `round`/`hole`
+
+Rationale voor plaat:
+- kleine gaten met ambigu M-major versus M-tapped overlap (zoals Ø5.0) worden niet meer direct als clearance afgewezen
+- tegelijk blijft een ondergrens op diepte actief om onwaarschijnlijke taplabels te beperken
+- grote ambigu gaten blijven conservatief (geen taplabel) door de `<= 6.2 mm` grens
+
+### Legacy gate (niet meer actief voor plaat)
+De vorige gate is vervangen en is niet meer de primaire beslisregel:
 
 $$
 major\_diameter \le 1.35 \cdot hole\_depth
 $$
-
-Als geen plausibele tapmatch overblijft:
-- label blijft `round`
-
-Als wel plausibele tapmatch overblijft:
-- label wordt `thread`
 
 ### Beslislogica voor profiel (`extract_cut_features_for_profile`)
 1. zoek alle thread matches met `tolerance=0.20`
@@ -401,7 +436,7 @@ Als match gevonden → label = `thread`, doorgaan bij eerste treffer.
 
 Rationale:
 - voor kleine gaten in een profielwand (dunne sectie) is de kans dat een gat als tapgat is uitgevoerd groter dan als speling-gat
-- de delta-eis filtert op de typische relatie M×taphoor → M(×+1) major
+- de delta-eis filtert op de typische relatie Mx tapboor -> M(x+1) major
 - voorbeeld M6: tapboord Ø5.0, major Ø6.0 → delta = 1.0 ✓
 - bij grotere gaten (> 6 mm) blijft de strenge regel van kracht
 
@@ -472,6 +507,45 @@ Als minimaal één cone voldoende goed matcht:
 - gatlabel = `countersunk`
 - teller `countersunk_holes += 1`
 - angle wordt opgeslagen
+
+### Fallback zonder cone-face: coaxiale cilindrische paren
+
+Actieve uitbreiding:
+- als geen conische faces aanwezig zijn, of voor niet-gematchte gaten,
+  wordt een tweede pad gebruikt op basis van cilindrische paren
+
+Doel:
+- verzonken gaten blijven herkennen in STEP-exporten zonder expliciete `GeomAbs_Cone`
+
+Matchcriteria cilindrisch paar:
+- as-paralleliteit: `axis_dot >= 0.995`
+- radiale afstand tot elkaars as: `radial_dist <= 3.5 mm`
+- axiale afstand centra: `axial_dist <= 40.0 mm`
+- diameter ratio:
+
+$$
+1.65 \le \frac{d_{groot}}{d_{klein}} \le 2.35
+$$
+
+- dieptegate groot gat (verzonken deel ondieper):
+
+$$
+depth_{groot} \le max(8.0, 0.7 \cdot d_{groot})
+$$
+
+- dieptevolgorde:
+
+$$
+depth_{klein} \ge depth_{groot}
+$$
+
+Beslissing:
+- bij geldige pair krijgt de grote diameter-index label `countersunk`
+- als fallback wordt `included_angle = 90.0` opgeslagen (synthetische hoek)
+
+Belangrijke noot:
+- cone-face matching blijft primair
+- pair-fallback vult alleen ontbrekende countersink-matches aan
 
 ---
 
@@ -561,6 +635,19 @@ Actieve criteria (alleen profiel-wrapper):
 
 Als alle criteria waar zijn:
 - shaped hole wordt onderdrukt (niet geteld, niet gelabeld)
+
+### Profiel end-face closed-contour filter
+
+Doel:
+- voorkom dat de holle profielkern op het uiteinde als gesloten contour-gat wordt meegeteld
+
+Actieve logica:
+- dezelfde eindopening-filter wordt ook toegepast op `closed_contours`
+- filtering gebeurt vóór `nr_holes` en `hole_contours` uit `closed_contours` worden afgeleid
+
+Gevolg:
+- profiel-uiteinden tellen niet mee in gatenaantal
+- profiel-uiteinden tellen niet mee in snijlengte van gaten
 
 ### Aanvullende methode: inferentie via gestapelde cylinders (`_infer_profile_countersink_pairs`)
 

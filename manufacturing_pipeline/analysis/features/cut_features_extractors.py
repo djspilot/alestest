@@ -81,17 +81,18 @@ def extract_cut_features_for_sheet(
                 thread_matches = iso_standards.identify_thread_from_diameter(hole.diameter, 0.20)
                 tapped_matches = [m for m in thread_matches if "tapped" in m.designation.lower()]
                 major_matches = [m for m in thread_matches if "tapped" not in m.designation.lower()]
-                if tapped_matches and major_matches:
-                    tapped_matches = []
-
                 hole_depth = float(getattr(hole, "depth", 0.0) or 0.0)
-                if tapped_matches and hole_depth > 0:
-                    plausible_matches = [
+                depth_gate_ok = hole_depth <= 0.0 or hole_depth >= (hole.diameter * 0.5)
+                if tapped_matches and major_matches:
+                    tapped_matches = [
                         m
                         for m in tapped_matches
-                        if float(getattr(m, "major_diameter", 0.0) or 0.0) <= (hole_depth * 1.35)
+                        if 0.8 <= (float(getattr(m, "major_diameter", 0.0) or 0.0) - float(hole.diameter)) <= 1.4
                     ]
-                    tapped_matches = plausible_matches if plausible_matches else []
+                    if not (depth_gate_ok and hole.diameter <= 6.2):
+                        tapped_matches = []
+                elif tapped_matches and not depth_gate_ok:
+                    tapped_matches = []
 
                 if tapped_matches:
                     hole_type = "thread"

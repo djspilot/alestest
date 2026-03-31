@@ -21,6 +21,7 @@ from manufacturing_pipeline.analysis.features import manufacturing_orchestration
 from manufacturing_pipeline.analysis.features import manufacturing_features
 from manufacturing_pipeline.analysis.features import runtime_support
 from manufacturing_pipeline.analysis.io import step_file_io
+from manufacturing_pipeline.analysis.iso_standards import IsoStandards
 from manufacturing_pipeline.analysis.sheetmetal import orchestration as sheetmetal_orchestration
 import os
 import uuid
@@ -43,7 +44,10 @@ class HoleFeature:
 _IsoThreadMatch = runtime_support._IsoThreadMatch
 _IsoStandardsFallback = runtime_support._IsoStandardsFallback
 _WerkvoorbereidingFallback = runtime_support._WerkvoorbereidingFallback
-iso_standards = _IsoStandardsFallback()
+try:
+    iso_standards = IsoStandards()
+except Exception:
+    iso_standards = _IsoStandardsFallback()
 werkvoorbereiding = _WerkvoorbereidingFallback()
 
 
