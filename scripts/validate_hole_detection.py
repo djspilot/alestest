@@ -176,6 +176,32 @@ def _build_rows_from_fallback(
     return rows
 
 
+def _build_open_contour_note(criteria_items: Sequence[Dict[str, Any]]) -> str | None:
+    open_like_ids: List[str] = []
+    for item in criteria_items:
+        if str(item.get("status") or "").lower() != "rejected":
+            continue
+        item_id = str(item.get("id") or "")
+        for criterion in item.get("criteria") or []:
+            name = str(criterion.get("name") or "").strip().lower()
+            passed = bool(criterion.get("passed", True))
+            if name == "angle_coverage" and not passed:
+                if item_id:
+                    open_like_ids.append(item_id)
+                break
+
+    if not open_like_ids:
+        return None
+
+    unique_ids = list(dict.fromkeys(open_like_ids))
+    sample = ", ".join(unique_ids[:5])
+    return (
+        "open_contour_candidate_not_counted: "
+        f"{len(unique_ids)} kandidaat(en) afgewezen (onvoldoende angle coverage; vermoedelijk niet-gesloten/open contour). "
+        f"Voorbeelden: {sample}"
+    )
+
+
 def analyze_step_holes(step_path: Path, part_mode: str) -> Dict[str, Any]:
     loaded = load_step_file(str(step_path))
     workplane = _ensure_workplane(loaded)
@@ -278,6 +304,15 @@ def analyze_step_holes(step_path: Path, part_mode: str) -> Dict[str, Any]:
 
     total_cut_length = sum(row.cut_length_mm for row in rows_sorted)
 
+    notes = [
+        "Aantal gaten + snijlengte per gat volgen closed inner contours als die gevonden zijn.",
+        "Draadgat-herkenning gebruikt de actieve ISO-threadtabellen (M3 t/m M24 met tap- en major-diameters).",
+        "Criteria en afwijsredenen komen direct uit detect_holes, detect_shaped_holes en deduplicate_holes debug-output.",
+    ]
+    open_note = _build_open_contour_note(all_debug)
+    if open_note:
+        notes.append(open_note)
+
     return {
         "step_path": str(step_path),
         "part_mode": part_mode,
@@ -299,11 +334,7 @@ def analyze_step_holes(step_path: Path, part_mode: str) -> Dict[str, Any]:
             for row in rows_sorted
         ],
         "criteria": all_debug,
-        "notes": [
-            "Aantal gaten + snijlengte per gat volgen closed inner contours als die gevonden zijn.",
-            "Draadgat-herkenning gebruikt de actieve ISO-threadtabellen (M3 t/m M24 met tap- en major-diameters).",
-            "Criteria en afwijsredenen komen direct uit detect_holes, detect_shaped_holes en deduplicate_holes debug-output.",
-        ],
+        "notes": notes,
     }
 
 
