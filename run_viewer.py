@@ -113,7 +113,7 @@ def main() -> int:
     node_modules = VIEWER_DIR / "node_modules"
     if not node_modules.exists():
         print("Viewer dependencies not found. Running npm install...")
-        subprocess.run([npm_command, "install"], cwd=VIEWER_DIR, check=True)
+        subprocess.run([npm_command, "install", "--legacy-peer-deps"], cwd=VIEWER_DIR, check=True)
         print("Viewer dependencies installed.")
 
     API_PORT = find_free_port(API_HOST, API_PORT, API_PORT_FALLBACK_RANGE, "API")
