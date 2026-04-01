@@ -234,7 +234,7 @@ export default function Sidebar({
             </div>
             <div className="sidebar-row">
               <span className="label">Viewer</span>
-              <span className="value">buerli.io + Three.js</span>
+              <span className="value">Three.js</span>
             </div>
           </div>
         )}
