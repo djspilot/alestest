@@ -345,7 +345,7 @@ def analyze_part_geometry(shape, name: str = "Part") -> PartAnalysis:
         # Wanneer de planaire-face-methode een onjuiste dikte oplevert (bijv. 1mm i.p.v. 5mm)
         # door cilindrische buitenvlakken die niet als planair worden herkend.
         # Heuristiek: volume ≈ dikte × lengte × breedte → dikte ≈ volume / grootste_face_area
-        if is_sheet_metal and cylindrical_area > 0 and detected_thickness < 1.5:
+        if not is_turned and cylindrical_area > 0 and detected_thickness < 1.5:
             try:
                 from OCC.Core.BRep import BRep_Builder
                 from OCC.Core.GProp import GProp_GProps
@@ -353,10 +353,19 @@ def analyze_part_geometry(shape, name: str = "Part") -> PartAnalysis:
                 props = GProp_GProps()
                 brepgprop_VolumeProperties(shape, props)
                 vol = props.Mass()
-                all_face_areas = sorted([area for _, area in planar_faces] +
-                                        [area for _, area, _ in cylindrical_faces], reverse=True)
-                if all_face_areas and vol > 0:
-                    top_area = all_face_areas[0]
+                planar_face_areas = [area for _, area in planar_faces if area > 0]
+                curved_face_areas = [area for _, area, _ in cylindrical_faces if area > 0]
+
+                # Prefer planar outer face area when available. For bent plates,
+                # largest cylindrical area can significantly overestimate area.
+                if planar_face_areas:
+                    top_area = max(planar_face_areas)
+                elif curved_face_areas:
+                    top_area = max(curved_face_areas)
+                else:
+                    top_area = 0.0
+
+                if top_area > 0 and vol > 0:
                     if top_area > 0:
                         estimated = vol / top_area
                         if 0.5 <= estimated <= 20.0:

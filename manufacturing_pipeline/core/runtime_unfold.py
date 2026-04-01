@@ -209,12 +209,18 @@ def get_thickness_from_solid(solid):
                     if dist > 0:
                         return dist
 
-        # Strategy 2: volume / largest_any_face (fallback for curved sheet metal)
-        # For a bent plate: volume ≈ thickness × length × width
-        # largest face area ≈ length × width → thickness ≈ volume / area
-        all_faces = sorted(solid.Faces, key=lambda f: f.Area, reverse=True)
-        if all_faces and solid.Volume > 0:
-            top_area = all_faces[0].Area
+        # Strategy 2: volume / top_area fallback for curved sheet metal.
+        # Prefer the largest planar face area when available.
+        # For bent plates the largest cylindrical face can be much larger than
+        # the projected plate area and underestimates thickness.
+        if solid.Volume > 0:
+            planar_areas = [f.Area for f in solid.Faces if "Plane" in f.Surface.TypeId and f.Area > 0]
+            if planar_areas:
+                top_area = max(planar_areas)
+            else:
+                all_areas = [f.Area for f in solid.Faces if f.Area > 0]
+                top_area = max(all_areas) if all_areas else 0.0
+
             if top_area > 0:
                 estimated = solid.Volume / top_area
                 if 0.3 < estimated < 20.0:
