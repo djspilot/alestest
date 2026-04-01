@@ -16,6 +16,8 @@ from manufacturing_pipeline.core.config import (
     create_minimal_config,
     apply_module_toggles,
     _freecad_root_candidates,
+    _is_valid_freecad_root,
+    diagnose_freecad_setup,
 )
 
 
@@ -51,6 +53,37 @@ def test_freecad_root_candidates_darwin():
 def test_freecad_root_candidates_windows():
     candidates = _freecad_root_candidates(platform="win32")
     assert any("FreeCAD" in c for c in candidates)
+
+
+def test_is_valid_freecad_root_accepts_mac_app_with_freecadcmd(tmp_path):
+    app_root = tmp_path / "FreeCAD.app"
+    cmd_path = app_root / "Contents" / "MacOS" / "FreeCADCmd"
+    cmd_path.parent.mkdir(parents=True)
+    cmd_path.write_text("")
+
+    assert _is_valid_freecad_root(str(app_root), platform="darwin") is True
+
+
+def test_is_valid_freecad_root_rejects_incomplete_runtime(tmp_path):
+    runtime_root = tmp_path / "freecad"
+    runtime_root.mkdir()
+
+    assert _is_valid_freecad_root(str(runtime_root), platform="darwin") is False
+
+
+def test_diagnose_freecad_setup_reports_missing_paths(monkeypatch):
+    monkeypatch.setenv("FREECAD_PATH", "/missing/freecad")
+    monkeypatch.delenv("FREECAD_PYTHON", raising=False)
+    monkeypatch.delenv("FREECAD_CMD", raising=False)
+    monkeypatch.setenv("FREECAD_AUTO_INSTALL", "0")
+
+    info = diagnose_freecad_setup(platform="darwin")
+
+    assert info["freecad_path"] == "/missing/freecad"
+    assert info["freecad_path_valid"] is False
+    assert info["freecad_python_exists"] is False
+    assert info["freecad_cmd_exists"] is False
+    assert info["recommendations"]
 
 
 def test_system_config_to_dict():

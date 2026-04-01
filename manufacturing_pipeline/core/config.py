@@ -13,6 +13,46 @@ import sys
 from manufacturing_pipeline.core import freecad_runtime
 
 
+def _is_valid_freecad_root(path: str, platform: Optional[str] = None) -> bool:
+    """Return True when the path looks like a usable FreeCAD installation root."""
+    if not path:
+        return False
+
+    platform = platform or sys.platform
+    if platform == "darwin":
+        return any(
+            os.path.exists(candidate)
+            for candidate in (
+                os.path.join(path, "Contents", "MacOS", "FreeCADCmd"),
+                os.path.join(path, "Contents", "Resources", "bin", "python"),
+                os.path.join(path, "Contents", "Resources", "bin", "python3"),
+                os.path.join(path, "bin", "FreeCADCmd"),
+                os.path.join(path, "bin", "freecadcmd"),
+            )
+        )
+
+    if platform.startswith("win"):
+        return any(
+            os.path.exists(candidate)
+            for candidate in (
+                os.path.join(path, "bin", "FreeCADCmd.exe"),
+                os.path.join(path, "bin", "freecadcmd.exe"),
+                os.path.join(path, "Library", "bin", "FreeCADCmd.exe"),
+                os.path.join(path, "Library", "bin", "python.exe"),
+            )
+        )
+
+    return any(
+        os.path.exists(candidate)
+        for candidate in (
+            os.path.join(path, "bin", "FreeCADCmd"),
+            os.path.join(path, "bin", "freecadcmd"),
+            os.path.join(path, "bin", "python"),
+            os.path.join(path, "bin", "python3"),
+        )
+    )
+
+
 def _freecad_root_candidates(platform: Optional[str] = None) -> List[str]:
     """Return likely FreeCAD installation roots for the current platform."""
     platform = platform or sys.platform
@@ -54,9 +94,51 @@ def _default_freecad_path(platform: Optional[str] = None) -> str:
     """Pick the first existing FreeCAD root, else return the primary platform default."""
     candidates = _freecad_root_candidates(platform=platform)
     for candidate in candidates:
+        if _is_valid_freecad_root(candidate, platform=platform):
+            return candidate
+    for candidate in candidates:
         if candidate and os.path.exists(candidate):
             return candidate
     return candidates[0] if candidates else ""
+
+
+def diagnose_freecad_setup(platform: Optional[str] = None) -> Dict[str, Any]:
+    """Return a compact diagnostic snapshot for FreeCAD runtime selection."""
+    platform = platform or sys.platform
+    cfg = SystemConfig.from_env()
+    candidates = _freecad_root_candidates(platform=platform)
+
+    python_path = cfg.freecad_python
+    cmd_path = cfg.freecad_cmd
+    freecad_path = cfg.freecad_path
+
+    recommendations: List[str] = []
+    if not _is_valid_freecad_root(freecad_path, platform=platform):
+        recommendations.append("Install FreeCAD locally or set FREECAD_PATH to a valid installation root.")
+    if not python_path or not os.path.exists(python_path):
+        recommendations.append("Set FREECAD_PYTHON to a valid FreeCAD-capable Python executable.")
+    if not cmd_path or not os.path.exists(cmd_path):
+        recommendations.append("Set FREECAD_CMD to a valid FreeCADCmd executable.")
+    if freecad_runtime.auto_install_enabled():
+        recommendations.append("Set FREECAD_AUTO_INSTALL=0 to avoid managed runtime bootstrap during diagnostics.")
+
+    return {
+        "platform": platform,
+        "freecad_path": freecad_path,
+        "freecad_path_valid": _is_valid_freecad_root(freecad_path, platform=platform),
+        "freecad_python": python_path,
+        "freecad_python_exists": bool(python_path and os.path.exists(python_path)),
+        "freecad_cmd": cmd_path,
+        "freecad_cmd_exists": bool(cmd_path and os.path.exists(cmd_path)),
+        "env": {
+            "FREECAD_PATH": os.environ.get("FREECAD_PATH"),
+            "FREECAD_PYTHON": os.environ.get("FREECAD_PYTHON"),
+            "FREECAD_CMD": os.environ.get("FREECAD_CMD"),
+            "FREECAD_AUTO_INSTALL": os.environ.get("FREECAD_AUTO_INSTALL"),
+        },
+        "candidates": candidates[:8],
+        "recommendations": recommendations,
+    }
 
 
 @dataclass

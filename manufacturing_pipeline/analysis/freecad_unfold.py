@@ -65,6 +65,15 @@ def _measure_flat_pattern_dimensions(flat_shape):
     return _freecad_geometry._measure_flat_pattern_dimensions(flat_shape)
 
 
+def _build_sheet_tree(sheetmetal_unfolder, shape, face_idx, k_factor_lookup, obj=None):
+    try:
+        return sheetmetal_unfolder.SheetTree(shape, face_idx, k_factor_lookup, obj)
+    except TypeError as exc:
+        if "takes 4 positional arguments but 5 were given" not in str(exc):
+            raise
+        return sheetmetal_unfolder.SheetTree(shape, face_idx, k_factor_lookup)
+
+
 def _unfold_via_freecadcmd(step_path, output_dxf=None, k_factor=0.44, max_attempts=5, max_bends=None):
     """Run unfold in external FreeCAD runtime to avoid Python ABI conflicts."""
     freecadcmd = _find_freecadcmd_executable()
@@ -629,6 +638,16 @@ def _merge_bends_by_collinear_segments(
 
     usable.sort(key=lambda item: (item[0], item[1], item[3]))
 
+    def _effective_gap_tol(prev_span, next_span):
+        prev_len = max(0.0, float(prev_span[1]) - float(prev_span[0]))
+        next_len = max(0.0, float(next_span[1]) - float(next_span[0]))
+        dynamic_tol = max(
+            float(gap_tol),
+            2.0 * max(prev_len, next_len),
+            5.0 * min(prev_len, next_len),
+        )
+        return min(dynamic_tol, 500.0)
+
     clusters = []
     current = None
     for axis, offset, idx, span_min, span_max, angle, radius, seg in usable:
@@ -670,8 +689,10 @@ def _merge_bends_by_collinear_segments(
         overlap = max(0.0, min(last_span_max, span_max) - max(last_span_min, span_min))
         gap = max(0.0, span_min - last_span_max)
 
-        # Merge only when segments are in extension (small gap) and not stacked overlaps.
-        extension_ok = overlap <= float(overlap_tol) and gap <= float(gap_tol)
+        # Treat hole interruptions as one physical bend when the gap is still
+        # reasonable relative to the neighboring segment lengths.
+        gap_limit = _effective_gap_tol((last_span_min, last_span_max), (span_min, span_max))
+        extension_ok = overlap <= float(overlap_tol) and gap <= gap_limit
 
         if angle_ok and radius_ok and extension_ok:
             current['members'].append(idx)
@@ -932,22 +953,13 @@ def unfold_sheet_metal(
                 wrapped_obj = ObjWrapper(obj)
                 MockSelection._selection = [wrapped_obj]
 
-                # SheetTree signature verschilt per SheetMetal versie
-                try:
-                    # Nieuwere versies: (shape, face_idx, k_lookup, obj)
-                    unfold_tree = SheetMetalUnfolder.SheetTree(
-                        solid,
-                        base_face_idx,
-                        kFactorLookup,
-                        wrapped_obj
-                    )
-                except TypeError:
-                    # Oudere versies: (shape, face_idx, k_lookup)
-                    unfold_tree = SheetMetalUnfolder.SheetTree(
-                        solid,
-                        base_face_idx,
-                        kFactorLookup
-                    )
+                unfold_tree = _build_sheet_tree(
+                    SheetMetalUnfolder,
+                    solid,
+                    base_face_idx,
+                    kFactorLookup,
+                    wrapped_obj,
+                )
 
                 # Check for init errors
                 if unfold_tree.error_code:

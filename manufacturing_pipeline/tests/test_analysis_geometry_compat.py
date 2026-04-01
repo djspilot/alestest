@@ -248,6 +248,32 @@ def test_freecad_unfold_delegates_geometry_helpers(monkeypatch):
     assert captured["flat_shape"] == "flat-shape"
 
 
+def test_merge_bends_by_collinear_segments_merges_hole_interrupted_lines():
+    bend_angles = [90.0, 90.0, -90.0, -90.0]
+    bend_radii = [1.0, 1.0, 1.0, 1.0]
+    bend_lengths = [40.0, 35.0, 42.0, 38.0]
+    segments = [
+        {"index": 0, "axis": "X", "line_offset": 10.0, "axis_span": [0.0, 40.0], "pos_along_length": -50.0},
+        {"index": 1, "axis": "X", "line_offset": 10.2, "axis_span": [190.0, 225.0], "pos_along_length": -48.0},
+        {"index": 2, "axis": "X", "line_offset": 90.0, "axis_span": [5.0, 47.0], "pos_along_length": 48.0},
+        {"index": 3, "axis": "X", "line_offset": 89.8, "axis_span": [205.0, 243.0], "pos_along_length": 50.0},
+    ]
+
+    merged_angles, merged_radii, merged_lengths, merged_groups = freecad_unfold._merge_bends_by_collinear_segments(
+        bend_angles,
+        bend_radii,
+        bend_lengths,
+        segments,
+    )
+
+    assert merged_angles == [90.0, -90.0]
+    assert merged_radii == [1.0, 1.0]
+    assert merged_lengths == [75.0, 80.0]
+    assert len(merged_groups) == 2
+    assert merged_groups[0]["segment_indices"] == [0, 1]
+    assert merged_groups[1]["segment_indices"] == [2, 3]
+
+
 def test_sheetmetal_analysis_reexports_internal_standards():
     assert sheetmetal_analysis.STANDARD_THICKNESSES is sheetmetal_standards.STANDARD_THICKNESSES
     assert sheetmetal_analysis.STANDARD_BEND_ANGLES is sheetmetal_standards.STANDARD_BEND_ANGLES

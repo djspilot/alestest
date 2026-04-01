@@ -10,14 +10,17 @@ import sys
 import os
 import argparse
 import json
+from types import SimpleNamespace
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
 from datetime import datetime
 
 from manufacturing_pipeline.core.paths import PROJECT_ROOT, DATA_DIR, DB_DIR, PARTS_DIR, OUTPUT_DIR
+from manufacturing_pipeline.core.config import diagnose_freecad_setup
 from manufacturing_pipeline.core.file_utils import find_step_files, select_step_file, get_output_dir, process_single_file
 from manufacturing_pipeline.core.runtime_analysis import run_analysis
 from manufacturing_pipeline.core.runtime_reporting import run_debug
+from manufacturing_pipeline.core.runtime_unfold import run_unfold_to_step
 from manufacturing_pipeline.core.cache import get_file_hash, load_cache, save_cache, cache_result, CACHE_FILE
 from manufacturing_pipeline.core.python_dependencies import (
     auto_install_python_dependencies_enabled,
@@ -56,6 +59,110 @@ def run_quick(step_file, args):
             import traceback
             traceback.print_exc()
         sys.exit(1)
+
+
+def run_unfold_only(step_file, args):
+    """Run only the unfold pipeline through the external FreeCAD runtime."""
+    output_dir, part_name = get_output_dir(step_file)
+    dxf_output = os.path.join(output_dir, f"{part_name}_flat.dxf")
+    flat_step_output = os.path.join(output_dir, f"{part_name}_flat.step")
+
+    print(f"\n{'=' * 60}")
+    print(f"UNFOLD ONLY: {part_name}")
+    print(f"{'=' * 60}")
+    print(f"Input:  {step_file}")
+    print(f"Output: {output_dir}/")
+    print("Mode:   Unfold only")
+
+    try:
+        analysis = SimpleNamespace(bend_count_erp=0, thickness=0.0, is_sheet_metal=True)
+        result = run_unfold_to_step(step_file, output_dir, part_name, analysis)
+    except Exception as e:
+        print(f"\nError: {e}")
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+    if args.json:
+        bend_count = result.get("bend_count")
+        if bend_count is None:
+            bend_count = result.get("fold_lines")
+        payload = {
+            "success": bool(result.get("success")),
+            "error": result.get("error"),
+            "flat_length": result.get("flat_length"),
+            "flat_width": result.get("flat_width"),
+            "bend_count": bend_count,
+            "bend_angles": result.get("bend_angles", []),
+            "bend_radii": result.get("bend_radii", []),
+            "bend_lengths": result.get("bend_lengths", []),
+            "bend_line_segments": result.get("bend_line_segments", []),
+            "bend_line_groups": result.get("bend_line_groups", []),
+            "used_face_idx": result.get("used_face_idx"),
+            "output_dxf": dxf_output if os.path.exists(dxf_output) else None,
+            "flat_step_path": flat_step_output if os.path.exists(flat_step_output) else result.get("flat_step_path"),
+            "raw_fold_lines": result.get("raw_fold_lines"),
+        }
+        print(json.dumps(payload, indent=2))
+        return
+
+    if result.get("success"):
+        bend_count = result.get("bend_count")
+        if bend_count is None:
+            bend_count = result.get("fold_lines", 0)
+        print("\nUNFOLD COMPLETE")
+        print(f"Flat pattern: {result.get('flat_length', 0):.1f} x {result.get('flat_width', 0):.1f} mm")
+        print(f"Bends:        {bend_count}")
+        if result.get("bend_angles"):
+            print(f"Angles:       {result.get('bend_angles')}")
+        if result.get("bend_radii"):
+            print(f"Radii:        {result.get('bend_radii')}")
+        if result.get("bend_lengths"):
+            print(f"Lengths:      {result.get('bend_lengths')}")
+        if result.get("raw_fold_lines") is not None:
+            print(f"Raw folds:    {result.get('raw_fold_lines')}")
+        groups = result.get("bend_line_groups") or []
+        if groups:
+            print("Bend groups:")
+            for group in groups:
+                print(
+                    f"  - #{group.get('id')}: axis={group.get('axis')} "
+                    f"segments={group.get('segment_indices')} count={group.get('segment_count')}"
+                )
+        if os.path.exists(dxf_output):
+            print(f"DXF:          {dxf_output}")
+        if os.path.exists(flat_step_output):
+            print(f"Flat STEP:    {flat_step_output}")
+        return
+
+    print(f"\nUNFOLD FAILED: {result.get('error') or 'unknown error'}")
+    print_freecad_setup_check()
+    sys.exit(1)
+
+
+def print_freecad_setup_check(json_output: bool = False):
+    """Print a compact FreeCAD runtime diagnostic."""
+    info = diagnose_freecad_setup()
+    if json_output:
+        print(json.dumps(info, indent=2))
+        return
+
+    print("\nFREECAD SETUP CHECK")
+    print(f"Path:    {info.get('freecad_path') or '(empty)'}")
+    print(f"  valid: {info.get('freecad_path_valid')}")
+    print(f"Python:  {info.get('freecad_python') or '(empty)'}")
+    print(f"  exists: {info.get('freecad_python_exists')}")
+    print(f"Cmd:     {info.get('freecad_cmd') or '(empty)'}")
+    print(f"  exists: {info.get('freecad_cmd_exists')}")
+    if info.get("candidates"):
+        print("Candidates:")
+        for candidate in info["candidates"]:
+            print(f"  - {candidate}")
+    if info.get("recommendations"):
+        print("Hints:")
+        for recommendation in info["recommendations"]:
+            print(f"  - {recommendation}")
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +317,8 @@ Examples - Batch Mode:
     parser.add_argument("--debug", action="store_true", help="Debug hole detection")
     parser.add_argument("--no-unfold", action="store_true", help="Skip automatic unfolding")
     parser.add_argument("--no-pdf", action="store_true", help="Skip PDF generation")
+    parser.add_argument("--unfold-only", action="store_true", help="Run only unfold and bend-line detection")
+    parser.add_argument("--check-freecad", action="store_true", help="Print FreeCAD runtime diagnostics and exit")
 
     # Batch options
     parser.add_argument("--batch", action="store_true", help="Process all STEP files in folder")
@@ -281,6 +390,10 @@ def main():
             print("No cache file found.")
         return
 
+    if args.check_freecad:
+        print_freecad_setup_check(json_output=args.json)
+        return
+
     # Determine search directory
     search_dir = None
     if args.file and os.path.isdir(args.file):
@@ -341,6 +454,10 @@ def main():
 
     if args.debug:
         run_debug(step_file)
+        return
+
+    if args.unfold_only:
+        run_unfold_only(step_file, args)
         return
 
     run_quick(step_file, args)

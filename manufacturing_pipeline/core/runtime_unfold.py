@@ -150,6 +150,14 @@ shape.read(step_path)
 # K-factor lookup
 kFactorLookup = {{t: 0.44 for t in [0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 15.0, 20.0]}}
 
+def build_sheet_tree(shape, face_idx, k_factor_lookup, obj):
+    try:
+        return SheetMetalUnfolder.SheetTree(shape, face_idx, k_factor_lookup, obj)
+    except TypeError as exc:
+        if "takes 4 positional arguments but 5 were given" not in str(exc):
+            raise
+        return SheetMetalUnfolder.SheetTree(shape, face_idx, k_factor_lookup)
+
 def get_thickness_from_solid(solid):
     try:
         # Strategy: Find largest planar face, then find opposite face
@@ -211,6 +219,16 @@ def _merge_fold_segments(bend_line_segments, bends_logical):
 
     usable.sort(key=lambda item: (item["axis"], round(item["line_offset"], 3), item["span_min"]))
 
+    def _effective_gap_tol(prev_item, next_item):
+        prev_len = max(0.0, float(prev_item["span_max"]) - float(prev_item["span_min"]))
+        next_len = max(0.0, float(next_item["span_max"]) - float(next_item["span_min"]))
+        dynamic_tol = max(
+            120.0,
+            2.0 * max(prev_len, next_len),
+            5.0 * min(prev_len, next_len),
+        )
+        return min(dynamic_tol, 500.0)
+
     clusters = []
     current = None
     for item in usable:
@@ -231,7 +249,7 @@ def _merge_fold_segments(bend_line_segments, bends_logical):
         last_item = current["items"][-1]
         overlap = max(0.0, min(last_item["span_max"], item["span_max"]) - max(last_item["span_min"], item["span_min"]))
         gap = max(0.0, item["span_min"] - last_item["span_max"])
-        extension_ok = overlap <= 5.0 and gap <= 120.0
+        extension_ok = overlap <= 5.0 and gap <= _effective_gap_tol(last_item, item)
 
         if same_line and angle_ok and radius_ok and extension_ok:
             current["items"].append(item)
@@ -384,7 +402,7 @@ for solid_idx, solid in enumerate(sorted_solids[:3]):  # Try top 3 by volume
             obj.Shape = solid
             doc.recompute()
 
-            unfold_tree = SheetMetalUnfolder.SheetTree(solid, base_idx, kFactorLookup, obj)
+            unfold_tree = build_sheet_tree(solid, base_idx, kFactorLookup, obj)
             if unfold_tree.error_code:
                 print(f"DEBUG: SheetTree error={{unfold_tree.error_code}} on face {{base_idx}}")
                 _record_error(
@@ -781,4 +799,3 @@ print("THEORETICAL_RESULT:" + json.dumps(result))
     except Exception as e:
         print(f"  [!] Theoretische berekening gefaald: {e}")
         return None
-
