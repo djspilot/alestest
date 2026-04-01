@@ -7,6 +7,7 @@ import json
 import subprocess
 
 from manufacturing_pipeline.core.config import SystemConfig
+from manufacturing_pipeline.core.thresholds import get_unfold_thresholds
 
 from manufacturing_pipeline.core.paths import PIPELINE_DIR, SCRIPTS_DIR
 
@@ -39,6 +40,37 @@ if PIPELINE_DIR not in sys.path:
     sys.path.insert(0, PIPELINE_DIR)
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
+
+
+def _get_unfold_runtime_settings(config_path=None):
+    """Return unfold thresholds normalized for runtime use."""
+    unfold_thresholds = get_unfold_thresholds(config_path)
+    return {
+        "runtime_timeout_sec": int(unfold_thresholds["runtime"]["timeout_sec"]),
+        "candidate_limits": {
+            "max_solids": int(unfold_thresholds["candidate_limits"]["max_solids"]),
+            "max_base_faces_per_solid": int(
+                unfold_thresholds["candidate_limits"]["max_base_faces_per_solid"]
+            ),
+        },
+        "thickness": {
+            "opposite_face_dot_max": float(unfold_thresholds["thickness"]["opposite_face_dot_max"]),
+            "max_override_mm": float(unfold_thresholds["thickness"]["max_override_mm"]),
+            "min_override_delta_mm": float(unfold_thresholds["thickness"]["min_override_delta_mm"]),
+        },
+        "fold_merge": {
+            "offset_tol_mm": float(unfold_thresholds["fold_merge"]["offset_tol_mm"]),
+            "angle_tol_deg": float(unfold_thresholds["fold_merge"]["angle_tol_deg"]),
+            "radius_tol_mm": float(unfold_thresholds["fold_merge"]["radius_tol_mm"]),
+            "overlap_tol_mm": float(unfold_thresholds["fold_merge"]["overlap_tol_mm"]),
+            "gap_tol_mm": float(unfold_thresholds["fold_merge"]["gap_tol_mm"]),
+        },
+        "k_factor_default": float(unfold_thresholds["k_factor"]["default"]),
+        "k_factor_lookup": {
+            float(bucket): float(value)
+            for bucket, value in unfold_thresholds["k_factor"]["thickness_buckets_mm"].items()
+        },
+    }
 
 
 def _summarize_unfold_failure(result):
@@ -93,6 +125,7 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     sys_config = SystemConfig.from_env()
     fc_lib = sys_config.freecad_lib
     fc_mod = sys_config.freecad_mod
+    unfold_settings = _get_unfold_runtime_settings()
 
     # Build unfold script that exports STEP
     unfold_script = f'''
@@ -148,7 +181,7 @@ shape = Part.Shape()
 shape.read(step_path)
 
 # K-factor lookup
-kFactorLookup = {{t: 0.44 for t in [0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 15.0, 20.0]}}
+kFactorLookup = {repr(unfold_settings["k_factor_lookup"])}
 
 def build_sheet_tree(shape, face_idx, k_factor_lookup, obj):
     try:
@@ -174,7 +207,7 @@ def get_thickness_from_solid(solid):
         # We check the top 5 largest faces to find the matching back face
         for f in faces[1:10]:
             # Check if normals are opposite
-            if f.Surface.Axis.dot(main_normal) < -0.9:
+            if f.Surface.Axis.dot(main_normal) < {unfold_settings["thickness"]["opposite_face_dot_max"]}:
                 # Measure distance
                 dist = main_face.distToShape(f)[0]
                 if dist > 0:
@@ -219,16 +252,6 @@ def _merge_fold_segments(bend_line_segments, bends_logical):
 
     usable.sort(key=lambda item: (item["axis"], round(item["line_offset"], 3), item["span_min"]))
 
-    def _effective_gap_tol(prev_item, next_item):
-        prev_len = max(0.0, float(prev_item["span_max"]) - float(prev_item["span_min"]))
-        next_len = max(0.0, float(next_item["span_max"]) - float(next_item["span_min"]))
-        dynamic_tol = max(
-            120.0,
-            2.0 * max(prev_len, next_len),
-            5.0 * min(prev_len, next_len),
-        )
-        return min(dynamic_tol, 500.0)
-
     clusters = []
     current = None
     for item in usable:
@@ -242,14 +265,14 @@ def _merge_fold_segments(bend_line_segments, bends_logical):
             }}
             continue
 
-        same_line = current["axis"] == item["axis"] and abs(item["line_offset"] - current["line_offset"]) <= 2.0
-        angle_ok = current["angle"] is None or item["angle"] is None or abs(item["angle"] - current["angle"]) <= 1.0
-        radius_ok = current["radius"] is None or item["radius"] is None or abs(item["radius"] - current["radius"]) <= 0.5
+        same_line = current["axis"] == item["axis"] and abs(item["line_offset"] - current["line_offset"]) <= {unfold_settings["fold_merge"]["offset_tol_mm"]}
+        angle_ok = current["angle"] is None or item["angle"] is None or abs(item["angle"] - current["angle"]) <= {unfold_settings["fold_merge"]["angle_tol_deg"]}
+        radius_ok = current["radius"] is None or item["radius"] is None or abs(item["radius"] - current["radius"]) <= {unfold_settings["fold_merge"]["radius_tol_mm"]}
 
         last_item = current["items"][-1]
         overlap = max(0.0, min(last_item["span_max"], item["span_max"]) - max(last_item["span_min"], item["span_min"]))
         gap = max(0.0, item["span_min"] - last_item["span_max"])
-        extension_ok = overlap <= 5.0 and gap <= _effective_gap_tol(last_item, item)
+        extension_ok = overlap <= {unfold_settings["fold_merge"]["overlap_tol_mm"]} and gap <= {unfold_settings["fold_merge"]["gap_tol_mm"]}
 
         if same_line and angle_ok and radius_ok and extension_ok:
             current["items"].append(item)
@@ -374,7 +397,7 @@ print(f"DEBUG: shape has {{len(shape.Solids)}} solids, {{len(shape.Faces)}} face
 solids = shape.Solids if shape.Solids else [shape]
 sorted_solids = sorted(solids, key=lambda s: s.Volume, reverse=True)
 
-for solid_idx, solid in enumerate(sorted_solids[:3]):  # Try top 3 by volume
+for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_limits"]["max_solids"]}]):
     print(f"DEBUG: trying solid {{solid_idx}}, volume={{solid.Volume:.1f}}")
     # Calculate thickness first
     detected_thickness = get_thickness_from_solid(solid)
@@ -391,8 +414,8 @@ for solid_idx, solid in enumerate(sorted_solids[:3]):  # Try top 3 by volume
     planar_faces.sort(key=lambda x: x["area"], reverse=True)
     print(f"DEBUG: {{len(planar_faces)}} planar faces")
 
-    # Try top 10 largest faces to find the best base for unfolding
-    for base_info in planar_faces[:10]:
+    # Try the configured number of largest faces to find the best base for unfolding
+    for base_info in planar_faces[:{unfold_settings["candidate_limits"]["max_base_faces_per_solid"]}]:
         base_idx = base_info["index"]
         result["attempts"] += 1
         print(f"DEBUG: trying base face {{base_idx}}, area={{base_info['area']:.1f}}")
@@ -631,7 +654,7 @@ print("UNFOLD_RESULT:" + json.dumps(result))
             [FREECAD_PYTHON, "-c", unfold_script],
             capture_output=True,
             text=True,
-            timeout=180
+            timeout=unfold_settings["runtime_timeout_sec"]
         )
 
         if proc.returncode != 0:
@@ -675,7 +698,7 @@ print("UNFOLD_RESULT:" + json.dumps(result))
         return {"success": False, "error": "No result returned"}
 
     except subprocess.TimeoutExpired:
-        return {"success": False, "error": "Timeout (>180s)"}
+        return {"success": False, "error": f"Timeout (>{unfold_settings['runtime_timeout_sec']}s)"}
     except FileNotFoundError:
         msg = (
             f"FreeCAD executable not found: \"{FREECAD_PYTHON}\".\n"
@@ -693,6 +716,7 @@ def run_unfold(step_file, output_dir, part_name, analysis):
     unfold_script = os.path.join(PIPELINE_DIR, "analysis", "freecad_unfold.py")
     dxf_output = os.path.join(output_dir, f"{part_name}_flat.dxf")
     unfold_result = {'success': False, 'error_details': []}
+    unfold_settings = _get_unfold_runtime_settings()
 
     if not os.path.exists(unfold_script):
         print(f"  [!] Unfold script not found: {unfold_script}")
@@ -703,7 +727,7 @@ def run_unfold(step_file, output_dir, part_name, analysis):
             [HOST_PYTHON, unfold_script, step_file, "-o", dxf_output],
             capture_output=True,
             text=True,
-            timeout=180  # Increased timeout for multiple attempts
+            timeout=unfold_settings["runtime_timeout_sec"]
         )
 
         if result.returncode == 0:
@@ -751,7 +775,7 @@ def run_unfold(step_file, output_dir, part_name, analysis):
                 unfold_result['theoretical'] = theoretical
 
     except subprocess.TimeoutExpired:
-        print("  ✗ Unfold timeout (>180s)")
+        print(f"  ✗ Unfold timeout (>{unfold_settings['runtime_timeout_sec']}s)")
     except Exception as e:
         print(f"  ✗ Unfold error: {e}")
 

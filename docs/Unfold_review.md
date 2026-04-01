@@ -1,102 +1,133 @@
 # Unfold Review (Current Pipeline)
 
-Dit document vat de huidige unfold-logica samen, met exacte criteria en thresholds zoals nu in code gebruikt.
+Dit document beschrijft de actuele unfold-logica zoals die nu door de manufacturing pipeline wordt gebruikt.
 
 ## 1) Actieve route in run_analysis
 
-run_unfold_to_step (core/utils.py) is een dunne wrapper om unfold_sheet_metal (analysis/freecad_unfold.py) heen.
-Er is één implementatie. De wrapper map alleen veldnamen naar het formaat dat run_analysis verwacht.
+De actieve pipeline-route is:
+- `runtime_analysis.run_analysis(...)`
+- `runtime_unfold.run_unfold_to_step(...)`
 
-## 2) Criteria en thresholds in run_unfold_to_step
+Belangrijk:
+- De actieve route zit niet in `core/utils.py`.
+- De actieve route roept niet `analysis/freecad_unfold.unfold_sheet_metal(...)` aan.
+- `run_unfold_to_step` bevat zelf een embedded FreeCAD-script en voert de unfold direct uit via subprocess.
+
+## 2) Criteria en thresholds in run_unfold_to_step (actief)
+
+### Trigger in de pipeline
+- Unfold wordt alleen geprobeerd als onderdeel als `GEBOGEN PLAATWERK` is geclassificeerd.
+- Unfold wordt overgeslagen bij `--no-unfold` of wanneer de stage `unfold` disabled is.
+
+### Subprocess en timeout
+- De actieve route start FreeCAD via:
+  - `subprocess.run([FREECAD_PYTHON, "-c", unfold_script], timeout=180)`
+- Timeout in de actieve route: **180 seconden**.
 
 ### Selectie van solids en base faces
-- run_unfold_to_step zelf doet geen solid/base-face selectie; het is een wrapper.
-- De selectie gebeurt in unfold_sheet_metal:
-  - Bij meerdere solids wordt 1 solid gekozen (`shape.Solids[0]`).
-  - Base faces zijn alle vlakke faces, gesorteerd op oppervlakte.
-  - Aantal pogingen is `min(max_attempts, len(base_candidates))` met standaard `max_attempts=5`.
+In het embedded script:
+- Solids worden op volume gesorteerd (aflopend).
+- Maximaal top-3 solids worden geprobeerd.
+- Voor elke solid:
+  - Planar faces worden op oppervlakte gesorteerd (aflopend).
+  - Maximaal top-10 base faces worden geprobeerd.
 
 ### K-factor
-- Vaste k-factor lookup: alle plaatdiktes mappen naar 0.44.
-- Gebruikte dikte buckets: 0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 15.0, 20.0.
+**Toleranties en criteria** (code-volgorde, runtime_unfold.py/thresholds.py):
 
-### Unfold score (beste resultaat)
-- Er wordt geen aparte scoreformule gebruikt in de actieve route.
-- De eerste geslaagde unfold-poging wordt geaccepteerd en teruggegeven.
+| Criterium | Threshold | Gevolg |
+|---|---|---|
+| `k_factor_baseline` | `k = 0.44` | Huidige effectieve baseline voor unfold-berekening |
+| `k_factor_thickness_buckets` | `0.5..20.0 mm` buckets | Bucket-lookup actief, maar huidige mapping geeft nog overal `0.44` |
+| `k_factor_future_direction` | per dikte + materiaalsoort | Voorbereid op variabele K-factor met expliciete validatie van unfold-uitkomsten |
+
+### Resultaatselectie (beste unfold)
+- Geslaagde pogingen krijgen een score:
+  - `score = (num_folds * 1000000) + area`
+- De poging met hoogste score wint.
+- Dit betekent: eerst maximaliseren op aantal fold lines, daarna op vlakke oppervlakte.
 
 ### Dikte-detectie
-- In run_unfold_to_step wordt geen dikte uit unfold afgeleid.
-- De wrapper retourneert `thickness = 0` (dikte uit analysepad blijft leidend).
+- Dikte wordt per solid berekend door grootste planar face te nemen en afstand te meten naar tegenliggende parallelle face (dot < -0.9).
+- Deze gemeten dikte wordt als `thickness` in het unfold-resultaat gezet.
+- In `run_analysis` kan deze waarde `analysis.thickness` overschrijven als:
+  - `thickness > 0`
+  - `thickness < 25.0`
+  - en huidige dikte 0 is of > 0.1 afwijkt.
+
+**Toleranties en criteria** (code-volgorde, runtime_analysis.py/runtime_unfold.py):
+
+| Criterium | Threshold | Gevolg |
+|---|---|---|
+| `opposite_face_match` | `dot < -0.9` | Face telt als geldige tegenliggende parallelle face voor diktebepaling |
+| `thickness_positive` | `thickness > 0` | Alleen positieve unfold-dikte mag gebruikt worden |
+| `thickness_upper_bound` | `thickness < 25.0 mm` | Uitsluiten van onrealistische overschrijvingen |
+| `thickness_delta_or_empty` | `current == 0` of `abs(new-current) > 0.1 mm` | Override alleen bij ontbrekende of materieel afwijkende huidige dikte |
+
+### Fold-merge thresholds
+`run_unfold_to_step` clustert fold-segmenten met:
+- `offset_tol = 2.0 mm`
+- `angle_tol = 1.0 deg`
+- `radius_tol = 0.5 mm`
+- `overlap_tol = 5.0 mm`
+- `gap_tol = 120.0 mm`
+
+Belangrijk:
+- Deze criteria en merge-voorwaarde blijven ongewijzigd geldig.
+- De waardes zijn nu centraal beheerbaar via `manufacturing_pipeline/core/thresholds.py` (defaults) en `data/config/thresholds.json` (overrides).
+
+Merge-voorwaarde:
+- same axis + offset binnen tol
+- hoek en radius compatibel binnen tol
+- segmenten zijn extension-compatible (`overlap <= 5.0` en `gap <= 120.0`)
+
+Uitleg criteria:
+- Same line: segmenten worden als dezelfde lijn gezien wanneer ze dezelfde hoofdas (X of Y) hebben en het offsetverschil `<= 2.0 mm` is.
+- Hoekcompatibiliteit: segmenten zijn hoek-compatibel als het hoekverschil `<= 1.0 deg` blijft.
+- Radiuscompatibiliteit: segmenten zijn radius-compatibel als het radiusverschil `<= 0.5 mm` blijft.
+- Extension-compatibility: segmenten worden samengevoegd wanneer de aansluiting voldoet aan `overlap <= 5.0 mm` en `gap <= 120.0 mm`.
 
 ### Resultaatvelden
-- fold_lines: aantal fold lines.
-- fold_details: per fold lijn lengte en centrum.
-- bends_logical: uit SheetTree nodes (bend_dir, bend_angle, innerRadius).
-- flat_length, flat_width: uit bbox van flat_compound.
+Bij succes bevat output onder andere:
+- `flat_step_path`
+- `flat_length`, `flat_width`
+- `fold_lines` (na merge, indien merge gelukt)
+- `raw_fold_lines` (ongewijzigd)
+- `thickness`
+- `fold_details`
+- `bend_line_segments`
+- `bend_line_groups`
+- `bends_logical`
+- `attempts`
+- `error_details`
 
-### Timeout
-- In de actieve route via `run_unfold_to_step` is er geen 180s subprocess-timeout.
-- Als FreeCADCmd fallback wordt gebruikt, geldt in `freecad_unfold.py` een timeout van 300 seconden.
+## 3) Rol van freecad_unfold.py
 
-## 3) Criteria en thresholds in freecad_unfold.py (alternatieve route)
+`analysis/freecad_unfold.py` bevat een aparte unfold-implementatie met eigen defaults en fallback-logica.
+Deze route is waardevol voor losse tooling/legacy en tests, maar is **niet** de primaire route vanuit `run_analysis`.
 
-### Standaard parameters
-- k_factor default: 0.44
-- max_attempts default: 5
-- max_bends default: None
-
-### FreeCADCmd fallback
-- _unfold_via_freecadcmd(...) gebruikt timeout van 300 seconden.
-
-### Bend fallback op cilindrische faces
-- Alleen cylinders met:
-  - angle_rad > 0.3 (ongeveer > 17 graden)
-  - length > 5 mm
-- Deduplicatie op key: (round(angle_deg, 1), round(length, 1)).
-- Bij dubbel: kleinste radius wint (inner radius).
-- Optioneel limiteren op max_bends.
-
-### Merge van gesplitste bends
-**Logica**: Segmenten worden samengevoegd in clusters als ze dezelfde fysieke zetlijn vertegenwoordigen. Een gat of slot (gat ≤ `gap_tol`) onderbreekt een zetlijn niet; slechts grote gaten leiden tot aparte groepen.
-
-**Toleranties en criteria** (in code-volgorde, freecad_unfold.py:878):
-
-| Criterium | Tolerantie | Gevolg |
-|-----------|-----------|--------|
-| **same_line** | `offset_tol = 2.0 mm` | Segmenten met zelfde axis (X of Y) én offset-verschil ≤ 2.0 mm (loodrechte as) → mogelijke merge |
-| **angle_ok** | `angle_tol = 1.0 °` | Als hoekverschilijnen ≤ 1.0° → mag mergen |
-| **radius_ok** | `radius_tol = 0.5 mm` | Als radius-verschil ≤ 0.5 mm → mag mergen |
-| **extension_ok** | `gap_tol = 120.0 mm` | Als gat tussen segmenten ≤ 120 mm → mag mergen (grote gaten blokkeren merge) |
-| **extension_ok** | `overlap_tol = 5.0 mm` | Als overlap ≤ 5.0 mm (niet te veel stacking) → mag mergen |
-
-**Merge-voorwaarde**: Same_line EN angle_ok EN radius_ok EN extension_ok (gap ≤ 120 mm EN overlap ≤ 5 mm)
-
-**Praktisch**:
-- 2 zetlijnstukken met zelfde hoek, 50 mm gat → merged (50 < 120)
-- 2 zetlijnstukken met zelfde hoek, 150 mm gat → apart (150 > 120)
-- Overlappingen > 5.0 mm → apart (stapeling voorkomen)
-- Hoeken > 1.0° verschil → apart
-
-- Resultaat is een lijst `bend_line_groups` met per fysieke zetlijn o.a.:
-  - `id`, `segment_count`, `segment_indices`, `pos_along_length`
-
-### Routeverschillen (belangrijk)
-- **Direct FreeCAD route**: heeft toegang tot `foldLines` geometrie en gebruikt collineaire merge.
-- **FreeCADCmd subprocess route**: gebruikt hetzelfde `bend_angles/bend_radii` pad; als geen segmentgeometrie beschikbaar is, wordt niet agressief op sequence gemerged (om foutieve 5 -> 1 merges te voorkomen).
+Wat wel relevant blijft:
+- Drempels voor cylindrische bend-detectie in die module:
+  - `angle_rad > 0.3`
+  - `length > 5`
+- Daar bestaat ook een FreeCADCmd-fallbackpad met andere control-flow.
 
 ## 4) Error handling
 
-UNFOLD_ERROR_MESSAGES vertaalt foutcodes uit SheetMetalUnfolder, o.a.:
-- 1: volume onbruikbaar
-- 3: ongeldige of inconsistente dikte
-- 5: onnodige edges (refine shape nodig)
-- 11/12: niet-ondersteunde bend-child structuur
-- 17: niet-ondersteund oppervlaktype
-- 21: section wire niet gesloten
-- 26: niet-ondersteund curve type in unbendFace
+Actieve route gebruikt `UNFOLD_ERROR_MESSAGES` voor vertaling van SheetMetalUnfolder-codes, inclusief o.a.:
+- 1, 3, 5, 11, 12, 17, 21, 26
 
-## 5) Korte conclusie voor debugging
+Bij mislukking:
+- `error_details` bewaart face/stage/code/message.
+- `error` wordt samengevat met prioriteit voor exception-details.
 
-Voor de huidige pipeline is run_unfold_to_step in core/utils.py leidend. Diagnose van "Unfold failed" in de viewer moet daarom eerst op die route gebeuren (wrapper -> unfold_sheet_metal, met stages SheetTree/Bend_analysis/unfold_tree2 en error_details per poging).
+## 5) Praktische debugging-afspraak
 
-Pipeline-prioriteit: viewer is alleen een visualisatie van pipeline-data; we passen geen viewer-specifieke correctie toe die afwijkt van manufacturing-pipeline output.
+Voor pipeline-validatie is leidend:
+- `runtime_analysis` -> `runtime_unfold.run_unfold_to_step`
+
+Niet leidend voor pipelinegedrag:
+- aannames die uit oude `core/utils.py`-teksten komen
+- aannames dat de actieve route direct `unfold_sheet_metal(...)` gebruikt
+
+Viewer/debug-uitvoer moet altijd worden geïnterpreteerd als visualisatie van deze pipeline-uitkomst, niet andersom.
