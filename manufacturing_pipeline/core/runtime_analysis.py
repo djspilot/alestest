@@ -22,6 +22,7 @@ from manufacturing_pipeline.core.paths import (
 
 # FreeCAD Python path
 from manufacturing_pipeline.core.config import SystemConfig
+from manufacturing_pipeline.core.thresholds import get_unfold_thresholds
 FREECAD_PYTHON = SystemConfig.from_env().freecad_python
 HOST_PYTHON = sys.executable
 
@@ -759,10 +760,13 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
 
                 unfold_thickness = unfold_result.get('thickness', 0)
                 if unfold_thickness > 0:
+                    unfold_thickness_cfg = get_unfold_thresholds()["thickness"]
+                    max_override_mm = float(unfold_thickness_cfg["max_override_mm"])
+                    min_override_delta_mm = float(unfold_thickness_cfg["min_override_delta_mm"])
                     print(f"  [OK] Detected thickness (unfold): {unfold_thickness:.2f} mm")
 
-                    if unfold_thickness < 25.0:
-                        if analysis.thickness == 0 or abs(analysis.thickness - unfold_thickness) > 0.1:
+                    if unfold_thickness < max_override_mm:
+                        if analysis.thickness == 0 or abs(analysis.thickness - unfold_thickness) > min_override_delta_mm:
                             print(f"  -> Updating thickness to {unfold_thickness:.2f} mm (Unfold is authoritative)")
                             analysis.thickness = unfold_thickness
                     else:

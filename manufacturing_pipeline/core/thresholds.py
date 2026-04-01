@@ -1,0 +1,181 @@
+"""Central threshold loading with JSON overrides and validation."""
+
+from __future__ import annotations
+
+from copy import deepcopy
+from functools import lru_cache
+import json
+import os
+from typing import Any, Dict
+
+from manufacturing_pipeline.core.paths import CONFIG_DIR
+
+
+DEFAULT_THRESHOLDS: Dict[str, Any] = {
+    "unfold": {
+        "runtime": {
+            "timeout_sec": 180,
+        },
+        "candidate_limits": {
+            "max_solids": 3,
+            "max_base_faces_per_solid": 10,
+        },
+        "thickness": {
+            "opposite_face_dot_max": -0.9,
+            "max_override_mm": 25.0,
+            "min_override_delta_mm": 0.1,
+        },
+        "fold_merge": {
+            "offset_tol_mm": 2.0,
+            "angle_tol_deg": 1.0,
+            "radius_tol_mm": 0.5,
+            "overlap_tol_mm": 5.0,
+            "gap_tol_mm": 120.0,
+        },
+        "k_factor": {
+            "default": 0.44,
+            "thickness_buckets_mm": {
+                "0.5": 0.44,
+                "0.75": 0.44,
+                "1.0": 0.44,
+                "1.5": 0.44,
+                "2.0": 0.44,
+                "2.5": 0.44,
+                "3.0": 0.44,
+                "4.0": 0.44,
+                "5.0": 0.44,
+                "6.0": 0.44,
+                "8.0": 0.44,
+                "10.0": 0.44,
+                "12.0": 0.44,
+                "15.0": 0.44,
+                "20.0": 0.44,
+            },
+        },
+    },
+}
+
+
+def _default_thresholds_path() -> str:
+    return os.path.join(CONFIG_DIR, "thresholds.json")
+
+
+def _filter_comment_keys(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _filter_comment_keys(item)
+            for key, item in value.items()
+            if not str(key).startswith("_")
+        }
+    if isinstance(value, list):
+        return [_filter_comment_keys(item) for item in value]
+    return value
+
+
+def _deep_merge(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _deep_merge(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
+def _require_number(name: str, value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"Threshold '{name}' must be numeric, got {type(value).__name__}")
+    return float(value)
+
+
+def validate_thresholds(thresholds: Dict[str, Any]) -> None:
+    unfold = thresholds["unfold"]
+    runtime = unfold["runtime"]
+    limits = unfold["candidate_limits"]
+    thickness = unfold["thickness"]
+    fold_merge = unfold["fold_merge"]
+    k_factor = unfold["k_factor"]
+
+    timeout_sec = _require_number("unfold.runtime.timeout_sec", runtime["timeout_sec"])
+    if timeout_sec < 1:
+        raise ValueError("Threshold 'unfold.runtime.timeout_sec' must be >= 1")
+
+    for key in ("max_solids", "max_base_faces_per_solid"):
+        value = limits[key]
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"Threshold 'unfold.candidate_limits.{key}' must be an integer")
+        if value < 1:
+            raise ValueError(f"Threshold 'unfold.candidate_limits.{key}' must be >= 1")
+
+    opposite_face_dot_max = _require_number(
+        "unfold.thickness.opposite_face_dot_max",
+        thickness["opposite_face_dot_max"],
+    )
+    if opposite_face_dot_max >= 0:
+        raise ValueError("Threshold 'unfold.thickness.opposite_face_dot_max' must be < 0")
+
+    max_override_mm = _require_number("unfold.thickness.max_override_mm", thickness["max_override_mm"])
+    min_override_delta_mm = _require_number(
+        "unfold.thickness.min_override_delta_mm",
+        thickness["min_override_delta_mm"],
+    )
+    if max_override_mm <= 0:
+        raise ValueError("Threshold 'unfold.thickness.max_override_mm' must be > 0")
+    if min_override_delta_mm < 0:
+        raise ValueError("Threshold 'unfold.thickness.min_override_delta_mm' must be >= 0")
+
+    for key in ("offset_tol_mm", "angle_tol_deg", "radius_tol_mm", "overlap_tol_mm", "gap_tol_mm"):
+        value = _require_number(f"unfold.fold_merge.{key}", fold_merge[key])
+        if value < 0:
+            raise ValueError(f"Threshold 'unfold.fold_merge.{key}' must be >= 0")
+    if _require_number("unfold.fold_merge.angle_tol_deg", fold_merge["angle_tol_deg"]) > 180:
+        raise ValueError("Threshold 'unfold.fold_merge.angle_tol_deg' must be <= 180")
+
+    default_k = _require_number("unfold.k_factor.default", k_factor["default"])
+    if not 0 < default_k <= 1:
+        raise ValueError("Threshold 'unfold.k_factor.default' must be in the range (0, 1]")
+
+    buckets = k_factor["thickness_buckets_mm"]
+    if not isinstance(buckets, dict) or not buckets:
+        raise ValueError("Threshold 'unfold.k_factor.thickness_buckets_mm' must be a non-empty object")
+    for key, value in buckets.items():
+        try:
+            numeric_key = float(key)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Threshold 'unfold.k_factor.thickness_buckets_mm' key '{key}' must be numeric"
+            ) from exc
+        if numeric_key <= 0:
+            raise ValueError("K-factor thickness bucket keys must be > 0")
+        numeric_value = _require_number(
+            f"unfold.k_factor.thickness_buckets_mm.{key}",
+            value,
+        )
+        if not 0 < numeric_value <= 1:
+            raise ValueError(
+                f"Threshold 'unfold.k_factor.thickness_buckets_mm.{key}' must be in the range (0, 1]"
+            )
+
+
+@lru_cache(maxsize=None)
+def _load_thresholds_cached(config_path: str) -> Dict[str, Any]:
+    thresholds = deepcopy(DEFAULT_THRESHOLDS)
+    if os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as handle:
+            overrides = _filter_comment_keys(json.load(handle))
+        if overrides:
+            _deep_merge(thresholds, overrides)
+    validate_thresholds(thresholds)
+    return thresholds
+
+
+def clear_threshold_cache() -> None:
+    _load_thresholds_cached.cache_clear()
+
+
+def get_thresholds(config_path: str | None = None) -> Dict[str, Any]:
+    resolved_path = os.path.abspath(config_path or _default_thresholds_path())
+    return deepcopy(_load_thresholds_cached(resolved_path))
+
+
+def get_unfold_thresholds(config_path: str | None = None) -> Dict[str, Any]:
+    return get_thresholds(config_path)["unfold"]
