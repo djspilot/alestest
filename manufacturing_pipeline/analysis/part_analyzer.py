@@ -341,6 +341,39 @@ def analyze_part_geometry(shape, name: str = "Part") -> PartAnalysis:
                     details={"planar_pct": planar_pct, "cyl_pct": cyl_pct}
                 ))
 
+        # Fallback 3: volume / top_area voor gebogen onderdelen
+        # Wanneer de planaire-face-methode een onjuiste dikte oplevert (bijv. 1mm i.p.v. 5mm)
+        # door cilindrische buitenvlakken die niet als planair worden herkend.
+        # Heuristiek: volume ≈ dikte × lengte × breedte → dikte ≈ volume / grootste_face_area
+        if is_sheet_metal and cylindrical_area > 0 and detected_thickness < 1.5:
+            try:
+                from OCC.Core.BRep import BRep_Builder
+                from OCC.Core.GProp import GProp_GProps
+                from OCC.Core.BRepGProp import brepgprop_VolumeProperties
+                props = GProp_GProps()
+                brepgprop_VolumeProperties(shape, props)
+                vol = props.Mass()
+                all_face_areas = sorted([area for _, area in planar_faces] +
+                                        [area for _, area, _ in cylindrical_faces], reverse=True)
+                if all_face_areas and vol > 0:
+                    top_area = all_face_areas[0]
+                    if top_area > 0:
+                        estimated = vol / top_area
+                        if 0.5 <= estimated <= 20.0:
+                            estimated_rounded = round(estimated * 2) / 2  # rond af op 0.5 mm
+                            if estimated_rounded > detected_thickness * 1.5:
+                                reasoning.append(AnalysisReason(
+                                    step="Plaatwerk Dikte (Volume/Area fallback)",
+                                    observation=f"volume/top_area={estimated:.2f}mm → afgerond {estimated_rounded}mm "
+                                                f"(was {detected_thickness}mm via planaire faces)",
+                                    conclusion=f"Dikte gecorrigeerd naar {estimated_rounded}mm",
+                                    details={"volume": vol, "top_area": top_area,
+                                             "estimated": estimated, "previous": detected_thickness}
+                                ))
+                                detected_thickness = estimated_rounded
+            except Exception:
+                pass
+
     # === STAP 6: Zettingen analyse ===
     bends = []
     bend_count_total = 0

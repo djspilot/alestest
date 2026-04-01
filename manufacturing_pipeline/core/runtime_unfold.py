@@ -193,25 +193,32 @@ def build_sheet_tree(shape, face_idx, k_factor_lookup, obj):
 
 def get_thickness_from_solid(solid):
     try:
-        # Strategy: Find largest planar face, then find opposite face
+        # Strategy 1: Find largest planar face, then find opposite face
         faces = [f for f in solid.Faces if "Plane" in f.Surface.TypeId]
-        if not faces:
-            return 0.0
-            
-        # Sort by area
-        faces.sort(key=lambda f: f.Area, reverse=True)
-        main_face = faces[0]
-        main_normal = main_face.Surface.Axis
-        
-        # Find opposite face (parallel, normal dot product approx -1)
-        # We check the top 5 largest faces to find the matching back face
-        for f in faces[1:10]:
-            # Check if normals are opposite
-            if f.Surface.Axis.dot(main_normal) < {unfold_settings["thickness"]["opposite_face_dot_max"]}:
-                # Measure distance
-                dist = main_face.distToShape(f)[0]
-                if dist > 0:
-                    return dist
+        if faces:
+            # Sort by area
+            faces.sort(key=lambda f: f.Area, reverse=True)
+            main_face = faces[0]
+            main_normal = main_face.Surface.Axis
+
+            # Find opposite face (parallel, normal dot product approx -1)
+            # We check the top 10 largest faces to find the matching back face
+            for f in faces[1:10]:
+                if f.Surface.Axis.dot(main_normal) < {unfold_settings["thickness"]["opposite_face_dot_max"]}:
+                    dist = main_face.distToShape(f)[0]
+                    if dist > 0:
+                        return dist
+
+        # Strategy 2: volume / largest_any_face (fallback for curved sheet metal)
+        # For a bent plate: volume ≈ thickness × length × width
+        # largest face area ≈ length × width → thickness ≈ volume / area
+        all_faces = sorted(solid.Faces, key=lambda f: f.Area, reverse=True)
+        if all_faces and solid.Volume > 0:
+            top_area = all_faces[0].Area
+            if top_area > 0:
+                estimated = solid.Volume / top_area
+                if 0.3 < estimated < 20.0:
+                    return round(estimated * 2) / 2  # round to nearest 0.5 mm
         return 0.0
     except:
         return 0.0

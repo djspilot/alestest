@@ -48,12 +48,44 @@ In het embedded script:
 - Dit betekent: eerst maximaliseren op aantal fold lines, daarna op vlakke oppervlakte.
 
 ### Dikte-detectie
-- Dikte wordt per solid berekend door grootste planar face te nemen en afstand te meten naar tegenliggende parallelle face (dot < -0.9).
-- Deze gemeten dikte wordt als `thickness` in het unfold-resultaat gezet.
-- In `run_analysis` kan deze waarde `analysis.thickness` overschrijven als:
-  - `thickness > 0`
-  - `thickness < 25.0`
-  - en huidige dikte 0 is of > 0.1 afwijkt.
+
+#### Methode A: antiparallelle planaire faces (primair, part_analyzer.py)
+Tijdens classificatie worden alle planaire faces gegroepeerd op normaalrichting.
+Voor elk antiparallel paar (`dot ≈ -1.0`) wordt de afstand d = |d1 + d2| gemeten.
+Het gewicht per kandidaat is `min(area1, area2)` (kleinste face voor dat paar).
+De diktewaarde met het **hoogste totale gewicht wint**.
+
+Probleem: voor gebogen plaatwerk zijn de grote buiten/binnenvlakken **cilindrisch**, niet planair.
+Die tellen niet mee. Kleine planaire randvlakken (bijv. op 1 mm) kunnen dan onterecht winnen.
+
+#### Methode B: volume / top_area (fallback voor gebogen onderdelen)
+Wanneer methode A geen betrouwbare dikte oplevert (`detected_thickness` onjuist of 0), wordt de volgende heuristiek toegepast:
+
+```
+dikte ≈ solid.Volume / largest_face.Area
+```
+
+**Waarom werkt dit?**
+Een gebogen plaat is geometrisch een dunne "schil" met:
+- volume ≈ dikte × lengte × breedte
+- `largest_face.Area` ≈ lengte × breedte (het grootste enkelvoudige vlak, meestal een buitenvlak)
+
+Door te delen valt de lengte × breedte weg en blijft de dikte over.
+
+**Beperkingen:**
+- Werkt het beste voor enkelvoudige gebogen platen zonder grote holtes of complexe uitsteeksels.
+- Bij meerdere solids: per solid berekenen, niet over het geheel.
+- Afronden op 0.5 mm voor stabiele k-factor bucket lookup.
+
+**Toepassingsplekken in de code:**
+- `manufacturing_pipeline/core/runtime_unfold.py` → `get_thickness_from_solid()`: fallback als planaire-face-methode 0 retourneert.
+- `manufacturing_pipeline/analysis/part_analyzer.py` → na fallback-2: als volume/top_area een dikte in [0.5, 20.0] geeft en `nr_bends > 0`.
+
+#### Dikte-override in run_analysis
+Wanneer unfold slaagt, kan de gemeten dikte `analysis.thickness` overschrijven:
+- `thickness > 0`
+- `thickness < 25.0 mm`
+- huidige dikte == 0 of `abs(nieuw - huidig) > 0.1 mm`
 
 **Toleranties en criteria** (code-volgorde, runtime_analysis.py/runtime_unfold.py):
 
