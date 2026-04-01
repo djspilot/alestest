@@ -451,44 +451,27 @@ export default function StageDetailsPanel({
                 <div className="timeline-title">Hole Overlay</div>
                 <div className="hole-summary-grid">
                   <div className="hole-summary-card">
-                    <div className="hole-summary-label">Kandidaten</div>
-                    <div className="hole-summary-value">{holeVisuals.total_candidates || 0}</div>
-                  </div>
-                  <div className="hole-summary-card">
-                    <div className="hole-summary-label">Gevonden</div>
+                    <div className="hole-summary-label">Gaten</div>
                     <div className="hole-summary-value">{holeVisuals.accepted_total || 0}</div>
                   </div>
                   <div className="hole-summary-card">
-                    <div className="hole-summary-label">Afgewezen</div>
-                    <div className="hole-summary-value">{holeVisuals.rejected_total || 0}</div>
+                    <div className="hole-summary-label">Normaal</div>
+                    <div className="hole-summary-value">{normalHoleItems.length}</div>
+                  </div>
+                  <div className="hole-summary-card">
+                    <div className="hole-summary-label">Irregulair</div>
+                    <div className="hole-summary-value">
+                      {holeItems.filter((hole) => hole.status === 'accepted' && isIrregularHole(hole)).length}
+                    </div>
                   </div>
                   <div className="hole-summary-card">
                     <div className="hole-summary-label">Zichtbaar</div>
                     <div className="hole-summary-value">{baseVisibleHoleItems.length}</div>
                   </div>
-                  <div className="hole-summary-card">
-                    <div className="hole-summary-label">Overlap eruit</div>
-                    <div className="hole-summary-value">{overlapReductionSummary.overlapRejected}</div>
-                  </div>
-                  <div className="hole-summary-card">
-                    <div className="hole-summary-label">Netto uniek</div>
-                    <div className="hole-summary-value">{overlapReductionSummary.netUnique}</div>
-                  </div>
-                  <div className="hole-summary-card">
-                    <div className="hole-summary-label">Boundary onderdrukt</div>
-                    <div className="hole-summary-value">{boundarySuppressedItems.length}</div>
-                  </div>
                 </div>
                 <div className="timeline-text">
-                  Bron: {holeVisuals.source || '-'} | Viewer totaal {holeItems.length}
-                  {hiddenHoleItems.length > 0 ? ` | Verborgen ${hiddenHoleItems.length}` : ''}
-                </div>
-                <div className="timeline-text">
-                  Reductie: raw {overlapReductionSummary.rawCandidates}, overlap eruit {overlapReductionSummary.overlapRejected}, netto{' '}
-                  {overlapReductionSummary.netUnique}
-                  {overlapReductionSummary.otherRejected > 0
-                    ? ` | overige afwijzingen ${overlapReductionSummary.otherRejected}`
-                    : ''}
+                  Bron: {holeVisuals.source || '-'} | Netto eindresultaat {holeVisuals.accepted_total || 0}
+                  {hiddenHoleItems.length > 0 ? ` | Debug verborgen ${hiddenHoleItems.length}` : ''}
                 </div>
                 <div className="hole-filter-row" style={{ marginTop: 8 }}>
                   <button
@@ -514,6 +497,9 @@ export default function StageDetailsPanel({
                 {showHoleExtraOptions && overlapSummary.length > 0 && (
                   <div className="reasoning-list" style={{ marginTop: 8 }}>
                     <div className="reasoning-card">
+                      <div className="timeline-text" style={{ marginBottom: 8 }}>
+                        Alleen debug: deze aantallen horen niet bij het netto gatentotaal hierboven.
+                      </div>
                       <div className="timeline-title">Overlap Tussen Tools</div>
                       <div className="timeline-payload-grid">
                         {overlapSummary.map((entry) => (
@@ -538,6 +524,9 @@ export default function StageDetailsPanel({
                 {showHoleExtraOptions && boundarySuppressedItems.length > 0 && (
                   <div className="reasoning-list" style={{ marginTop: 8 }}>
                     <div className="reasoning-card">
+                      <div className="timeline-text" style={{ marginBottom: 8 }}>
+                        Alleen debug: onderdrukte boundary-kandidaten tellen niet mee in het netto gatentotaal.
+                      </div>
                       <div className="timeline-title">Boundary Onderdrukt Door Cilindrisch</div>
                       <div className="timeline-payload-grid">
                         {boundarySuppressedItems.slice(0, 8).map((item) => (
@@ -563,7 +552,8 @@ export default function StageDetailsPanel({
                   </div>
                 )}
                 <div className="timeline-text" style={{ marginTop: 8 }}>
-                  Snel overzicht: normale gaten {normalHoleItems.length} | irregulair/afgewezen {irregularHoleItems.length}
+                  Snel overzicht: normale gaten {normalHoleItems.length} | irregulaire gaten{' '}
+                  {holeItems.filter((hole) => hole.status === 'accepted' && isIrregularHole(hole)).length}
                 </div>
 
                 <div className="timeline-text" style={{ marginTop: 4 }}>

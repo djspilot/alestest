@@ -73,17 +73,16 @@ export default function HoleInspectionPanel({
     <div className="visual-stage-card" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none' }}>
       <div className="timeline-title">Hole Overlay</div>
       <div className="timeline-text">
-        Bron: {holeVisuals.source || '-'} | Geaccepteerd: {holeVisuals.accepted_total || 0} | Afgewezen:{' '}
-        {holeVisuals.rejected_total || 0} | Kandidaten: {holeVisuals.total_candidates || 0}
+        Bron: {holeVisuals.source || '-'} | Netto gaten: {holeVisuals.accepted_total || 0}
       </div>
       <div className="timeline-text">
-        Viewer: zichtbaar {baseVisibleHoleItems.length} | incl. verborgen {holeItems.length}
-        {hiddenHoleItems.length > 0 ? ` (verborgen: ${hiddenHoleItems.length})` : ''}
+        Viewer: zichtbaar {baseVisibleHoleItems.length}
+        {hiddenHoleItems.length > 0 ? ` | debug verborgen ${hiddenHoleItems.length}` : ''}
       </div>
       {holeVisuals.criteria_note && <div className="timeline-text">{holeVisuals.criteria_note}</div>}
       <div className="timeline-text" style={{ marginTop: 8 }}>
-        Snel overzicht: normale gaten {normalHoleItems.length} | irregulair/afgewezen{' '}
-        {irregularHoleItems.length}
+        Snel overzicht: normale gaten {normalHoleItems.length} | irregulaire gaten{' '}
+        {holeItems.filter((hole) => hole.status === 'accepted' && isIrregularHole(hole)).length}
       </div>
       <div className="hole-filter-row" style={{ marginTop: 8 }}>
         <button
@@ -165,6 +164,9 @@ export default function HoleInspectionPanel({
           {Array.isArray(holeVisuals.method_order) && holeVisuals.method_order.length > 0 && (
             <div className="timeline-text">Methodiekvolgorde: {holeVisuals.method_order.join(' -> ')}</div>
           )}
+          <div className="timeline-text">
+            Debugtellingen: kandidaten {holeVisuals.total_candidates || 0} | afgewezen {holeVisuals.rejected_total || 0}
+          </div>
           <div className="hole-filter-row" style={{ marginTop: 8 }}>
             <button className="hole-filter-btn" onClick={downloadPreUnfoldDebug}>Download debug JSON</button>
             <button className="hole-filter-btn" onClick={copyPreUnfoldDebug}>Kopieer debug</button>
