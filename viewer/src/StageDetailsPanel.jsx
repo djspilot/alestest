@@ -322,6 +322,27 @@ export default function StageDetailsPanel({
       }
     )
   }, [activeHoleMethod, holeMethods])
+  const acceptedHoleCount = holeVisuals?.accepted_total || 0
+  const acceptedIrregularHoleCount = useMemo(
+    () => holeItems.filter((hole) => hole.status === 'accepted' && isIrregularHole(hole)).length,
+    [holeItems],
+  )
+  const cylindricalMethodSummary = useMemo(
+    () =>
+      holeMethods.find(
+        (method) => method.key === 'detect_holes_cylindrical' || method.key === 'cylindrical_detector',
+      ) || null,
+    [holeMethods],
+  )
+  const cylindricalAcceptedCount = cylindricalMethodSummary?.accepted || 0
+  const supplementalAcceptedCount = Math.max(0, acceptedHoleCount - cylindricalAcceptedCount)
+  const supplementalMethodSummaries = useMemo(
+    () =>
+      holeMethods
+        .filter((method) => method.accepted > 0)
+        .filter((method) => method.key !== 'detect_holes_cylindrical' && method.key !== 'cylindrical_detector'),
+    [holeMethods],
+  )
 
   useEffect(() => {
     setShowAdvancedHoleDebug(false)
@@ -452,7 +473,7 @@ export default function StageDetailsPanel({
                 <div className="hole-summary-grid">
                   <div className="hole-summary-card">
                     <div className="hole-summary-label">Gaten</div>
-                    <div className="hole-summary-value">{holeVisuals.accepted_total || 0}</div>
+                    <div className="hole-summary-value">{acceptedHoleCount}</div>
                   </div>
                   <div className="hole-summary-card">
                     <div className="hole-summary-label">Normaal</div>
@@ -460,9 +481,7 @@ export default function StageDetailsPanel({
                   </div>
                   <div className="hole-summary-card">
                     <div className="hole-summary-label">Irregulair</div>
-                    <div className="hole-summary-value">
-                      {holeItems.filter((hole) => hole.status === 'accepted' && isIrregularHole(hole)).length}
-                    </div>
+                    <div className="hole-summary-value">{acceptedIrregularHoleCount}</div>
                   </div>
                   <div className="hole-summary-card">
                     <div className="hole-summary-label">Zichtbaar</div>
@@ -470,27 +489,56 @@ export default function StageDetailsPanel({
                   </div>
                 </div>
                 <div className="timeline-text">
-                  Bron: {holeVisuals.source || '-'} | Netto eindresultaat {holeVisuals.accepted_total || 0}
-                  {hiddenHoleItems.length > 0 ? ` | Debug verborgen ${hiddenHoleItems.length}` : ''}
+                  Bron: {holeVisuals.source || '-'} | Eindresultaat {acceptedHoleCount} gaten
                 </div>
+                <div className="timeline-text" style={{ marginTop: 6 }}>
+                  {cylindricalAcceptedCount} cilindrisch + {supplementalAcceptedCount} aanvullingen = {acceptedHoleCount} totaal
+                </div>
+                {supplementalMethodSummaries.length > 0 && (
+                  <div className="timeline-text" style={{ marginTop: 4 }}>
+                    Aanvullingen via andere methodiek:{' '}
+                    {supplementalMethodSummaries
+                      .map((method) => `${method.label} ${method.accepted}`)
+                      .join(' | ')}
+                  </div>
+                )}
                 <div className="hole-filter-row" style={{ marginTop: 8 }}>
+                  <label className="timeline-text" htmlFor="hole-method-select" style={{ marginRight: 8 }}>
+                    Methode
+                  </label>
+                  <select
+                    id="hole-method-select"
+                    value={activeHoleMethod}
+                    onChange={(event) => {
+                      setActiveHoleMethod(event.target.value)
+                      setShowHoleInspector(true)
+                    }}
+                    style={{ minWidth: 220 }}
+                  >
+                    <option value="all">Alle methodes</option>
+                    {holeMethods.map((method) => (
+                      <option key={`method-${method.key}`} value={method.key}>
+                        {method.label} ({method.accepted})
+                      </option>
+                    ))}
+                  </select>
                   <button
                     className={`hole-filter-btn ${showHoleInspector ? 'is-active' : ''}`}
                     onClick={() => setShowHoleInspector((value) => !value)}
                   >
-                    {showHoleInspector ? 'Sluit detailweergave' : 'Open detailweergave'}
+                    {showHoleInspector ? 'Verberg lijst' : 'Toon lijst'}
                   </button>
                   <button
                     className={`hole-filter-btn ${showHoleExtraOptions ? 'is-active' : ''}`}
                     onClick={() => setShowHoleExtraOptions((value) => !value)}
                   >
-                    {showHoleExtraOptions ? 'Verberg hole extra opties' : 'Toon hole extra opties'}
+                    {showHoleExtraOptions ? 'Minder' : 'Meer over gaten'}
                   </button>
                   <button
                     className={`hole-filter-btn ${showAdvancedHoleDebug ? 'is-active' : ''}`}
                     onClick={() => setShowAdvancedHoleDebug((value) => !value)}
                   >
-                    {showAdvancedHoleDebug ? 'Verberg uitgebreide debug' : 'Toon uitgebreide debug'}
+                    {showAdvancedHoleDebug ? 'Verberg debug' : 'Toon debug'}
                   </button>
                 </div>
 
@@ -552,8 +600,7 @@ export default function StageDetailsPanel({
                   </div>
                 )}
                 <div className="timeline-text" style={{ marginTop: 8 }}>
-                  Snel overzicht: normale gaten {normalHoleItems.length} | irregulaire gaten{' '}
-                  {holeItems.filter((hole) => hole.status === 'accepted' && isIrregularHole(hole)).length}
+                  Kort: normale gaten {normalHoleItems.length} | irregulaire gaten {acceptedIrregularHoleCount}
                 </div>
 
                 <div className="timeline-text" style={{ marginTop: 4 }}>
@@ -579,40 +626,10 @@ export default function StageDetailsPanel({
                   </button>
                 </div>
 
-                {holeMethods.length > 0 && (
-                  <div className="hole-method-grid">
-                    {holeMethods.map((method) => (
-                      <button
-                        key={method.key}
-                        className={`hole-method-card ${activeHoleMethod === method.key ? 'is-active' : ''}`}
-                        onClick={() => {
-                          setActiveHoleMethod(method.key)
-                          setShowHoleInspector(true)
-                        }}
-                        type="button"
-                      >
-                        <div className="timeline-item-head">
-                          <span className="timeline-stage">{method.label}</span>
-                          <span className="hole-status-pill is-neutral">{method.total}</span>
-                        </div>
-                        <div className="timeline-text">{method.description}</div>
-                        <div className="hole-method-stats">
-                          <span>Raw {method.total}</span>
-                          <span>Gevonden {method.accepted}</span>
-                          <span>Afgewezen {method.rejected}</span>
-                          <span>Overlap eruit {method.overlapRejected}</span>
-                          <span>Netto {method.netUnique}</span>
-                          <span>Zichtbaar {method.visible}</span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
                 {!showAdvancedHoleDebug && !showHoleInspector && (
                   <>
                     <div className="timeline-text" style={{ marginTop: 8 }}>
-                      Kies een toolkaart om de kandidaten van alleen die methode te zien. Zo blijft de rechterkant compact.
+                      Kies hierboven een methode als je wilt zien waar gaten vandaan komen.
                     </div>
                     {selectedInspection && (
                       <div className="reasoning-list">
@@ -649,23 +666,6 @@ export default function StageDetailsPanel({
                       <button className="hole-filter-btn" onClick={() => setShowHoleInspector(false)}>
                         Sluiten
                       </button>
-                    </div>
-                    <div className="hole-filter-row">
-                      <button
-                        className={`hole-filter-btn ${activeHoleMethod === 'all' ? 'is-active' : ''}`}
-                        onClick={() => setActiveHoleMethod('all')}
-                      >
-                        Alle tools
-                      </button>
-                      {holeMethods.map((method) => (
-                        <button
-                          key={`filter-${method.key}`}
-                          className={`hole-filter-btn ${activeHoleMethod === method.key ? 'is-active' : ''}`}
-                          onClick={() => setActiveHoleMethod(method.key)}
-                        >
-                          {method.label}
-                        </button>
-                      ))}
                     </div>
                     <div className="hole-filter-row">
                       <button
@@ -1138,7 +1138,7 @@ export default function StageDetailsPanel({
                     className={`hole-filter-btn ${showUnfoldExtraOptions ? 'is-active' : ''}`}
                     onClick={() => setShowUnfoldExtraOptions((value) => !value)}
                   >
-                    {showUnfoldExtraOptions ? 'Verberg unfold extra opties' : 'Toon unfold extra opties'}
+                    {showUnfoldExtraOptions ? 'Minder' : 'Meer over unfold'}
                   </button>
                 </div>
 
@@ -1187,7 +1187,7 @@ export default function StageDetailsPanel({
                       </tbody>
                     </table>
                     <div className="timeline-text" style={{ marginTop: 8 }}>
-                      Klik op een zetlijn in de tabel of in de viewer om die lijn te markeren.
+                      Samengevat: {unfoldVisuals.fold_lines ?? 0} zetlijnen na samenvoegen van losse segmenten.
                     </div>
                   </div>
                 )}

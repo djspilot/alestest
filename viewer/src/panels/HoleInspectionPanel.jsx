@@ -38,6 +38,26 @@ export default function HoleInspectionPanel({
   }, [baseVisibleHoleItems, holeFilter])
 
   const selectedInspection = (holeItems.find((h) => h.id === selectedHoleId) || null) || selectedProbe
+  const acceptedHoleCount = holeVisuals?.accepted_total || 0
+  const acceptedIrregularHoleCount = useMemo(
+    () => holeItems.filter((hole) => hole.status === 'accepted' && isIrregularHole(hole)).length,
+    [holeItems],
+  )
+  const methodAcceptedSummary = useMemo(() => {
+    const buckets = new Map()
+    holeItems.forEach((hole) => {
+      if (hole.status !== 'accepted') return
+      const method = hole.method || 'unknown'
+      buckets.set(method, (buckets.get(method) || 0) + 1)
+    })
+    return Array.from(buckets.entries()).map(([method, count]) => ({ method, count }))
+  }, [holeItems])
+  const cylindricalAcceptedCount =
+    methodAcceptedSummary.find((entry) => entry.method === 'detect_holes_cylindrical' || entry.method === 'cylindrical_detector')
+      ?.count || 0
+  const supplementalMethodSummary = methodAcceptedSummary.filter(
+    (entry) => entry.method !== 'detect_holes_cylindrical' && entry.method !== 'cylindrical_detector',
+  )
 
   const downloadPreUnfoldDebug = () => {
     const payload = { holes: holeItems, generated_at: new Date().toISOString() }
@@ -73,23 +93,31 @@ export default function HoleInspectionPanel({
     <div className="visual-stage-card" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none' }}>
       <div className="timeline-title">Hole Overlay</div>
       <div className="timeline-text">
-        Bron: {holeVisuals.source || '-'} | Netto gaten: {holeVisuals.accepted_total || 0}
+        Bron: {holeVisuals.source || '-'} | Netto gaten: {acceptedHoleCount}
       </div>
+      <div className="timeline-text">
+        {cylindricalAcceptedCount} cilindrisch + {Math.max(0, acceptedHoleCount - cylindricalAcceptedCount)} aanvullingen = {acceptedHoleCount} totaal
+      </div>
+      {supplementalMethodSummary.length > 0 && (
+        <div className="timeline-text">
+          Aanvullingen via andere methodiek:{' '}
+          {supplementalMethodSummary.map((entry) => `${getHoleMethodLabel(entry.method)} ${entry.count}`).join(' | ')}
+        </div>
+      )}
       <div className="timeline-text">
         Viewer: zichtbaar {baseVisibleHoleItems.length}
         {hiddenHoleItems.length > 0 ? ` | debug verborgen ${hiddenHoleItems.length}` : ''}
       </div>
       {holeVisuals.criteria_note && <div className="timeline-text">{holeVisuals.criteria_note}</div>}
       <div className="timeline-text" style={{ marginTop: 8 }}>
-        Snel overzicht: normale gaten {normalHoleItems.length} | irregulaire gaten{' '}
-        {holeItems.filter((hole) => hole.status === 'accepted' && isIrregularHole(hole)).length}
+        Kort: normale gaten {normalHoleItems.length} | irregulaire gaten {acceptedIrregularHoleCount}
       </div>
       <div className="hole-filter-row" style={{ marginTop: 8 }}>
         <button
           className={`hole-filter-btn ${showAdvancedHoleDebug ? 'is-active' : ''}`}
           onClick={() => setShowAdvancedHoleDebug((v) => !v)}
         >
-          {showAdvancedHoleDebug ? 'Verberg uitgebreide debug' : 'Toon uitgebreide debug'}
+          {showAdvancedHoleDebug ? 'Verberg debug' : 'Toon debug'}
         </button>
       </div>
 
