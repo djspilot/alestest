@@ -336,6 +336,15 @@ export default function StageDetailsPanel({
   )
   const cylindricalAcceptedCount = cylindricalMethodSummary?.accepted || 0
   const supplementalAcceptedCount = Math.max(0, acceptedHoleCount - cylindricalAcceptedCount)
+  const cylindricalAcceptedItems = useMemo(
+    () =>
+      holeItems.filter((hole) => {
+        const method = hole.method || 'unknown'
+        return hole.status === 'accepted' && (method === 'detect_holes_cylindrical' || method === 'cylindrical_detector')
+      }),
+    [holeItems],
+  )
+  const defaultHoleMethod = cylindricalMethodSummary?.key || 'all'
   const supplementalMethodSummaries = useMemo(
     () =>
       holeMethods
@@ -347,12 +356,12 @@ export default function StageDetailsPanel({
   useEffect(() => {
     setShowAdvancedHoleDebug(false)
     setExportFeedback('')
-    setActiveHoleMethod('all')
+    setActiveHoleMethod(defaultHoleMethod)
     setShowHoleInspector(false)
     setShowStageExtraOptions(false)
     setShowHoleExtraOptions(false)
     setShowUnfoldExtraOptions(false)
-  }, [selectedStage?.stage])
+  }, [defaultHoleMethod, selectedStage?.stage])
 
   const downloadPreUnfoldDebug = () => {
     if (!preUnfoldDebugPayload) return
@@ -472,56 +481,29 @@ export default function StageDetailsPanel({
                 <div className="timeline-title">Hole Overlay</div>
                 <div className="hole-summary-grid">
                   <div className="hole-summary-card">
-                    <div className="hole-summary-label">Gaten</div>
+                    <div className="hole-summary-label">Cilindrisch</div>
+                    <div className="hole-summary-value">{cylindricalAcceptedCount}</div>
+                  </div>
+                  <div className="hole-summary-card">
+                    <div className="hole-summary-label">Aanvullingen</div>
+                    <div className="hole-summary-value">{supplementalAcceptedCount}</div>
+                  </div>
+                  <div className="hole-summary-card">
+                    <div className="hole-summary-label">Totaal</div>
                     <div className="hole-summary-value">{acceptedHoleCount}</div>
                   </div>
                   <div className="hole-summary-card">
-                    <div className="hole-summary-label">Normaal</div>
-                    <div className="hole-summary-value">{normalHoleItems.length}</div>
-                  </div>
-                  <div className="hole-summary-card">
-                    <div className="hole-summary-label">Irregulair</div>
-                    <div className="hole-summary-value">{acceptedIrregularHoleCount}</div>
-                  </div>
-                  <div className="hole-summary-card">
                     <div className="hole-summary-label">Zichtbaar</div>
-                    <div className="hole-summary-value">{baseVisibleHoleItems.length}</div>
+                    <div className="hole-summary-value">{cylindricalAcceptedItems.length}</div>
                   </div>
                 </div>
                 <div className="timeline-text">
-                  Bron: {holeVisuals.source || '-'} | Eindresultaat {acceptedHoleCount} gaten
+                  Bron: {holeVisuals.source || '-'} | Standaard tonen we alleen cilindrische detectie
                 </div>
                 <div className="timeline-text" style={{ marginTop: 6 }}>
                   {cylindricalAcceptedCount} cilindrisch + {supplementalAcceptedCount} aanvullingen = {acceptedHoleCount} totaal
                 </div>
-                {supplementalMethodSummaries.length > 0 && (
-                  <div className="timeline-text" style={{ marginTop: 4 }}>
-                    Aanvullingen via andere methodiek:{' '}
-                    {supplementalMethodSummaries
-                      .map((method) => `${method.label} ${method.accepted}`)
-                      .join(' | ')}
-                  </div>
-                )}
                 <div className="hole-filter-row" style={{ marginTop: 8 }}>
-                  <label className="timeline-text" htmlFor="hole-method-select" style={{ marginRight: 8 }}>
-                    Methode
-                  </label>
-                  <select
-                    id="hole-method-select"
-                    value={activeHoleMethod}
-                    onChange={(event) => {
-                      setActiveHoleMethod(event.target.value)
-                      setShowHoleInspector(true)
-                    }}
-                    style={{ minWidth: 220 }}
-                  >
-                    <option value="all">Alle methodes</option>
-                    {holeMethods.map((method) => (
-                      <option key={`method-${method.key}`} value={method.key}>
-                        {method.label} ({method.accepted})
-                      </option>
-                    ))}
-                  </select>
                   <button
                     className={`hole-filter-btn ${showHoleInspector ? 'is-active' : ''}`}
                     onClick={() => setShowHoleInspector((value) => !value)}
@@ -545,6 +527,35 @@ export default function StageDetailsPanel({
                 {showHoleExtraOptions && overlapSummary.length > 0 && (
                   <div className="reasoning-list" style={{ marginTop: 8 }}>
                     <div className="reasoning-card">
+                      {supplementalMethodSummaries.length > 0 && (
+                        <div className="timeline-text" style={{ marginBottom: 8 }}>
+                          Aanvullingen via andere methodiek:{' '}
+                          {supplementalMethodSummaries
+                            .map((method) => `${method.label} ${method.accepted}`)
+                            .join(' | ')}
+                        </div>
+                      )}
+                      <div className="hole-filter-row" style={{ marginBottom: 8 }}>
+                        <label className="timeline-text" htmlFor="hole-method-select-advanced" style={{ marginRight: 8 }}>
+                          Methode
+                        </label>
+                        <select
+                          id="hole-method-select-advanced"
+                          value={activeHoleMethod}
+                          onChange={(event) => {
+                            setActiveHoleMethod(event.target.value)
+                            setShowHoleInspector(true)
+                          }}
+                          style={{ minWidth: 220 }}
+                        >
+                          <option value="all">Alle methodes</option>
+                          {holeMethods.map((method) => (
+                            <option key={`method-advanced-${method.key}`} value={method.key}>
+                              {method.label} ({method.accepted})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                       <div className="timeline-text" style={{ marginBottom: 8 }}>
                         Alleen debug: deze aantallen horen niet bij het netto gatentotaal hierboven.
                       </div>
@@ -600,7 +611,7 @@ export default function StageDetailsPanel({
                   </div>
                 )}
                 <div className="timeline-text" style={{ marginTop: 8 }}>
-                  Kort: normale gaten {normalHoleItems.length} | irregulaire gaten {acceptedIrregularHoleCount}
+                  Kort: je ziet nu de 29 cilindrische gaten. Aanvullingen staan onder `Meer over gaten`.
                 </div>
 
                 <div className="timeline-text" style={{ marginTop: 4 }}>

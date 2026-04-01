@@ -93,7 +93,7 @@ export default function HoleInspectionPanel({
     <div className="visual-stage-card" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none' }}>
       <div className="timeline-title">Hole Overlay</div>
       <div className="timeline-text">
-        Bron: {holeVisuals.source || '-'} | Netto gaten: {acceptedHoleCount}
+        Bron: {holeVisuals.source || '-'} | Standaard tonen we alleen cilindrische detectie
       </div>
       <div className="timeline-text">
         {cylindricalAcceptedCount} cilindrisch + {Math.max(0, acceptedHoleCount - cylindricalAcceptedCount)} aanvullingen = {acceptedHoleCount} totaal
@@ -110,7 +110,7 @@ export default function HoleInspectionPanel({
       </div>
       {holeVisuals.criteria_note && <div className="timeline-text">{holeVisuals.criteria_note}</div>}
       <div className="timeline-text" style={{ marginTop: 8 }}>
-        Kort: normale gaten {normalHoleItems.length} | irregulaire gaten {acceptedIrregularHoleCount}
+        Kort: je ziet nu de {cylindricalAcceptedCount} cilindrische gaten. Aanvullingen staan onder debug.
       </div>
       <div className="hole-filter-row" style={{ marginTop: 8 }}>
         <button
