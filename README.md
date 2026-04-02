@@ -123,6 +123,15 @@ python run.py -f part.step --no-unfold     # Sla ontvouwen over
 python run.py --list                       # Beschikbare STEP-bestanden
 ```
 
+Direct unfold wrapper:
+
+```bash
+python unfold.py /pad/naar/part.step
+python unfold.py /pad/naar/part.step --variant auto
+python unfold.py /pad/naar/part.step --variant old
+python unfold.py /pad/naar/part.step --variant new
+```
+
 ### Batchverwerking
 
 ```bash

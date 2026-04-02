@@ -353,3 +353,15 @@ def test_run_unfold_to_step_can_skip_host_direct_mode(monkeypatch, tmp_path) -> 
     assert result["runtime_source"] == "direct-freecad-python"
     assert calls["host_direct"] == 0
     assert calls["python_runtime"] == 1
+
+
+def test_unfolder_variant_mode_defaults_to_auto(monkeypatch) -> None:
+    monkeypatch.delenv("FREECAD_UNFOLDER_VARIANT", raising=False)
+    assert runtime_unfold._unfolder_variant_mode() == "auto"
+
+
+def test_unfolder_variant_mode_accepts_new_and_old(monkeypatch) -> None:
+    monkeypatch.setenv("FREECAD_UNFOLDER_VARIANT", "new")
+    assert runtime_unfold._unfolder_variant_mode() == "new"
+    monkeypatch.setenv("FREECAD_UNFOLDER_VARIANT", "old")
+    assert runtime_unfold._unfolder_variant_mode() == "old"

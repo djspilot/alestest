@@ -225,6 +225,7 @@ def _run_unfold_subprocess_attempt(step_file, output_dir, part_name, sys_config,
     freecad_env = _build_freecad_subprocess_env(sys_config)
     debug_snapshot = _runtime_debug_snapshot(sys_config, freecad_env)
     vendor_root = ensure_vendor_sheetmetal_on_sys_path()
+    freecad_env["FREECAD_UNFOLDER_VARIANT"] = _unfolder_variant_mode()
 
     unfold_script = f'''
 import sys
@@ -239,6 +240,7 @@ freecad_lib = {repr(fc_lib)}
 freecad_mod = {repr(fc_mod)}
 vendor_root = {repr(vendor_root)}
 UNFOLD_ERROR_MESSAGES = {repr(UNFOLD_ERROR_MESSAGES)}
+unfolder_variant_mode = os.environ.get("FREECAD_UNFOLDER_VARIANT", "auto").strip().lower()
 
 if platform.system() == "Darwin":
     freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
@@ -279,6 +281,16 @@ for mod_name in ("SheetMetalUnfolder", "SheetMetalTools", "lookup"):
     sys.modules.pop(mod_name, None)
 import SheetMetalUnfolder
 sheetmetal_source = getattr(SheetMetalUnfolder, "__file__", "")
+new_unfolder_available = False
+new_unfolder_import_error = ""
+try:
+    import SheetMetalNewUnfolder
+    from SheetMetalNewUnfolder import BendAllowanceCalculator
+    new_unfolder_available = True
+except Exception as exc:
+    SheetMetalNewUnfolder = None
+    BendAllowanceCalculator = None
+    new_unfolder_import_error = str(exc)
 
 # Load STEP
 step_path = {repr(step_file)}
@@ -490,6 +502,144 @@ def _record_error(target, face_idx, stage, error_code, message, tb=None):
         detail["traceback"] = tb
     target["error_details"].append(detail)
 
+def _extract_fold_segments_from_edges(fold_edges):
+    fold_details = []
+    bend_line_segments = []
+    for i, line in enumerate(fold_edges or []):
+        try:
+            bb = line.BoundBox
+            center = bb.Center
+            length = line.Length
+            start_pt = None
+            end_pt = None
+            try:
+                vertices = getattr(line, "Vertexes", None) or []
+                if len(vertices) >= 2:
+                    start_pt = vertices[0].Point
+                    end_pt = vertices[-1].Point
+            except:
+                start_pt = None
+                end_pt = None
+            x_len = bb.XLength
+            y_len = bb.YLength
+            seg_axis = "x" if x_len >= y_len else "y"
+            if start_pt is not None and end_pt is not None:
+                dx = abs(float(end_pt.x) - float(start_pt.x))
+                dy = abs(float(end_pt.y) - float(start_pt.y))
+                seg_axis = "y" if dy > dx else "x"
+            axis_span = (
+                (bb.XMin, bb.XMax)
+                if seg_axis == "x"
+                else (bb.YMin, bb.YMax)
+            )
+            fold_details.append({{
+                "id": i + 1,
+                "length": length,
+                "center": (center.x, center.y, center.z),
+                "axis": seg_axis,
+                "axis_span": axis_span,
+                "start": (start_pt.x, start_pt.y, start_pt.z) if start_pt is not None else None,
+                "end": (end_pt.x, end_pt.y, end_pt.z) if end_pt is not None else None
+            }})
+            bend_line_segments.append({{
+                "index": i,
+                "axis": seg_axis.upper(),
+                "center": (center.x, center.y, center.z),
+                "length": length,
+                "axis_span": axis_span,
+                "start": (start_pt.x, start_pt.y, start_pt.z) if start_pt is not None else None,
+                "end": (end_pt.x, end_pt.y, end_pt.z) if end_pt is not None else None
+            }})
+        except:
+            pass
+    return fold_details, bend_line_segments
+
+def _attempt_new_unfolder(obj, base_idx, detected_thickness):
+    if not new_unfolder_available:
+        raise RuntimeError(new_unfolder_import_error or "SheetMetalNewUnfolder niet beschikbaar")
+
+    bac = BendAllowanceCalculator.from_single_value(0.44, "ansi")
+    facename = f"Face{{base_idx + 1}}"
+    _sel_face, unfolded_shape, bend_lines_compound, _root_normal, bend_infodata = SheetMetalNewUnfolder.getUnfold(
+        bac,
+        obj,
+        facename,
+    )
+    if unfolded_shape is None:
+        raise RuntimeError("New unfolder returned no unfolded shape")
+
+    bbox = unfolded_shape.BoundBox
+    dims = sorted([bbox.XLength, bbox.YLength, bbox.ZLength], reverse=True)
+
+    flat_step_path = os.path.join({repr(output_dir)}, {repr(part_name)} + "_flat.step")
+    unfolded_shape.exportStep(flat_step_path)
+
+    dxf_path = os.path.join({repr(output_dir)}, {repr(part_name)} + "_flat.dxf")
+    import importDXF
+    importDXF.export([unfolded_shape], dxf_path)
+
+    fold_edges = bend_lines_compound.Edges if bend_lines_compound else []
+    fold_details, bend_line_segments = _extract_fold_segments_from_edges(fold_edges)
+
+    bend_angles = []
+    bend_radii = []
+    bend_lengths = []
+    bends_logical = []
+    for info in bend_infodata or []:
+        try:
+            angle = round(float(getattr(info, "angle", 0.0)), 2)
+            radius = round(float(getattr(info, "radius", 0.0)), 2)
+            line = getattr(info, "line", None)
+            length = round(float(line.Length), 2) if line is not None else None
+            bend_angles.append(angle)
+            bend_radii.append(radius)
+            if length is not None:
+                bend_lengths.append(length)
+            bends_logical.append({{
+                "type": "up" if angle >= 0 else "down",
+                "angle": abs(angle),
+                "radius": radius,
+            }})
+        except:
+            pass
+
+    merged_fold_details, merged_bends_logical, bend_line_groups = _merge_fold_segments(
+        bend_line_segments,
+        bends_logical,
+    )
+    if merged_fold_details:
+        display_fold_lines = len(merged_fold_details)
+        display_fold_details = merged_fold_details
+        display_bends_logical = merged_bends_logical
+    else:
+        display_fold_lines = len(fold_edges)
+        display_fold_details = fold_details
+        display_bends_logical = bends_logical
+
+    return {{
+        "success": True,
+        "flat_step_path": flat_step_path,
+        "flat_length": dims[0] if len(dims) > 0 else 0.0,
+        "flat_width": dims[1] if len(dims) > 1 else 0.0,
+        "fold_lines": display_fold_lines,
+        "raw_fold_lines": len(fold_edges),
+        "thickness": detected_thickness,
+        "fold_details": display_fold_details,
+        "bend_line_segments": bend_line_segments,
+        "bend_line_groups": bend_line_groups,
+        "bends_logical": display_bends_logical,
+        "bend_angles": bend_angles,
+        "bend_radii": bend_radii,
+        "bend_lengths": bend_lengths,
+        "bend_count": len(bend_angles),
+        "attempts": 0,
+        "error_details": [],
+        "first_traceback": None,
+        "sheetmetal_source": getattr(SheetMetalNewUnfolder, "__file__", ""),
+        "unfolder_variant": "new",
+        "used_face_idx": base_idx,
+    }}
+
 result = {{
     "success": False,
     "error": None,
@@ -539,6 +689,24 @@ for solid_idx, solid in enumerate(sorted_solids[:3]):  # Try top 3 by volume
             obj = doc.addObject("Part::Feature", "SheetPart")
             obj.Shape = solid
             doc.recompute()
+
+            should_try_new = unfolder_variant_mode in ("auto", "new")
+            if should_try_new:
+                try:
+                    new_result = _attempt_new_unfolder(obj, base_idx, detected_thickness)
+                    new_result["attempts"] = result.get("attempts", 0)
+                    new_result["error_details"] = result.get("error_details", [])
+                    new_result["first_traceback"] = result.get("first_traceback")
+                    result = new_result
+                    best_score = max(best_score, len(new_result.get("bend_line_segments") or []))
+                    FreeCAD.closeDocument("UnfoldDoc")
+                    continue
+                except Exception as new_exc:
+                    print(f"DEBUG: new unfolder failed on face {{base_idx}}: {{new_exc}}")
+                    _record_error(result, base_idx, "new_unfolder", -3, str(new_exc))
+                    if unfolder_variant_mode == "new":
+                        FreeCAD.closeDocument("UnfoldDoc")
+                        continue
 
             unfold_tree = build_sheet_tree(solid, base_idx, kFactorLookup, obj)
             if unfold_tree.error_code:
@@ -699,6 +867,8 @@ for solid_idx, solid in enumerate(sorted_solids[:3]):  # Try top 3 by volume
                                 "error_details": result.get("error_details", []),
                                 "first_traceback": result.get("first_traceback"),
                                 "sheetmetal_source": sheetmetal_source,
+                                "unfolder_variant": "old",
+                                "used_face_idx": base_idx,
                             }}
                 elif unfold_tree.error_code:
                     _record_error(
@@ -840,6 +1010,13 @@ def _export_flat_step(flat_shape, flat_step_path):
         exporter(flat_step_path)
         return flat_step_path
     raise RuntimeError("Flat shape cannot be exported to STEP")
+
+
+def _unfolder_variant_mode() -> str:
+    value = os.getenv("FREECAD_UNFOLDER_VARIANT", "auto").strip().lower()
+    if value in {"new", "old"}:
+        return value
+    return "auto"
 
 
 def _run_direct_unfold_attempt(step_file, output_dir, part_name):
