@@ -325,3 +325,31 @@ def test_run_unfold_to_step_prefers_direct_vendored_unfold(monkeypatch, tmp_path
     assert state["fallback_calls"] == 0
     assert result["flat_step_path"].endswith("part_flat.step")
     assert state["exports"]
+
+
+def test_run_unfold_to_step_can_skip_host_direct_mode(monkeypatch, tmp_path) -> None:
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    step_file = tmp_path / "part.step"
+    step_file.write_text("ISO-10303-21;")
+
+    calls = {"host_direct": 0, "python_runtime": 0}
+
+    def fake_host_direct(*args, **kwargs):  # type: ignore[no-untyped-def]
+        calls["host_direct"] += 1
+        return {"success": True}
+
+    def fake_python_runtime(*args, **kwargs):  # type: ignore[no-untyped-def]
+        calls["python_runtime"] += 1
+        return {"success": True, "runtime_source": "direct-freecad-python"}
+
+    monkeypatch.setenv("FREECAD_UNFOLD_MODE", "direct-python")
+    monkeypatch.setattr(runtime_unfold, "_run_direct_unfold_attempt", fake_host_direct)
+    monkeypatch.setattr(runtime_unfold, "_run_unfold_subprocess_attempt", fake_python_runtime)
+
+    result = runtime_unfold.run_unfold_to_step(str(step_file), str(output_dir), "part", object())
+
+    assert result["success"] is True
+    assert result["runtime_source"] == "direct-freecad-python"
+    assert calls["host_direct"] == 0
+    assert calls["python_runtime"] == 1

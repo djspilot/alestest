@@ -975,9 +975,13 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     - flat_length, flat_width: dimensions
     - fold_lines: number of bends
     """
-    direct_result = _run_direct_unfold_attempt(step_file, output_dir, part_name)
-    if direct_result.get("success"):
-        return direct_result
+    mode = os.getenv("FREECAD_UNFOLD_MODE", "auto").strip().lower()
+
+    direct_result = {"success": False, "error": "Host direct mode skipped"}
+    if mode not in {"direct-python", "python"}:
+        direct_result = _run_direct_unfold_attempt(step_file, output_dir, part_name)
+        if direct_result.get("success"):
+            return direct_result
 
     sys_config = SystemConfig.from_env()
     python_runtime_result = _run_unfold_subprocess_attempt(
@@ -1022,7 +1026,7 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
         return fallback_result
 
     fallback_result.setdefault("runtime_source", "desktop-freecad")
-    fallback_result.setdefault("managed_runtime_error", result.get("error"))
+    fallback_result.setdefault("managed_runtime_error", python_runtime_result.get("error"))
     fallback_result.setdefault("direct_runtime_error", direct_result.get("error"))
     fallback_result.setdefault("python_runtime_error", python_runtime_result.get("error"))
     return fallback_result
