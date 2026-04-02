@@ -5,6 +5,10 @@ import sys
 import math
 import json
 import subprocess
+import threading
+import queue
+import uuid
+import atexit
 from types import SimpleNamespace
 
 from manufacturing_pipeline.analysis import freecad_unfold
@@ -42,6 +46,145 @@ if PIPELINE_DIR not in sys.path:
     sys.path.insert(0, PIPELINE_DIR)
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
+
+
+_PERSISTENT_FREECAD_WORKERS = {}
+_PERSISTENT_FREECAD_WORKERS_LOCK = threading.Lock()
+
+
+class _PersistentFreeCADWorkerClient:
+    def __init__(self, sys_config: SystemConfig) -> None:
+        self._sys_config = sys_config
+        self._process = None
+        self._reader_thread = None
+        self._responses = {}
+        self._responses_lock = threading.Lock()
+        self._start()
+
+    def _start(self) -> None:
+        freecad_python = self._sys_config.freecad_python
+        if not freecad_python or not os.path.exists(freecad_python):
+            raise RuntimeError(f"FreeCAD Python runtime niet gevonden: {freecad_python or '(empty)'}")
+
+        env = _build_freecad_subprocess_env(self._sys_config)
+        env["FREECAD_UNFOLD_MODE"] = "direct"
+        env["FREECAD_UNFOLDER_VARIANT"] = _unfolder_variant_mode()
+        self._process = subprocess.Popen(
+            [freecad_python, "-m", "manufacturing_pipeline.tools.freecad_unfold_worker"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+            bufsize=1,
+        )
+        ready_line = self._process.stdout.readline().strip() if self._process.stdout else ""
+        if not ready_line:
+            raise RuntimeError("FreeCAD worker gaf geen startup handshake terug")
+        try:
+            ready = json.loads(ready_line)
+        except Exception as exc:
+            raise RuntimeError(f"Ongeldige worker handshake: {ready_line}") from exc
+        if ready.get("type") != "ready":
+            raise RuntimeError(f"Onverwachte worker handshake: {ready_line}")
+        self._reader_thread = threading.Thread(target=self._read_stdout_loop, daemon=True)
+        self._reader_thread.start()
+
+    def _read_stdout_loop(self) -> None:
+        if self._process is None or self._process.stdout is None:
+            return
+        for raw_line in self._process.stdout:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                message = json.loads(line)
+            except Exception:
+                continue
+            request_id = message.get("id")
+            if not request_id:
+                continue
+            with self._responses_lock:
+                response_queue = self._responses.get(request_id)
+            if response_queue is not None:
+                response_queue.put(message.get("payload"))
+
+    def request(self, *, step_file: str, output_dir: str, part_name: str, timeout_seconds: int, variant: str) -> dict:
+        if self._process is None or self._process.stdin is None:
+            raise RuntimeError("FreeCAD worker is niet gestart")
+        if self._process.poll() is not None:
+            raise RuntimeError(f"FreeCAD worker stopte onverwacht met code {self._process.returncode}")
+
+        request_id = str(uuid.uuid4())
+        response_queue = queue.Queue(maxsize=1)
+        with self._responses_lock:
+            self._responses[request_id] = response_queue
+
+        try:
+            payload = {
+                "id": request_id,
+                "step_file": step_file,
+                "output_dir": output_dir,
+                "part_name": part_name,
+                "variant": variant,
+                "k_factor": 0.44,
+            }
+            self._process.stdin.write(json.dumps(payload) + "\n")
+            self._process.stdin.flush()
+            return response_queue.get(timeout=timeout_seconds)
+        except queue.Empty as exc:
+            raise RuntimeError(f"FreeCAD worker timeout na {timeout_seconds}s") from exc
+        finally:
+            with self._responses_lock:
+                self._responses.pop(request_id, None)
+
+    def close(self) -> None:
+        process = self._process
+        self._process = None
+        if process is None:
+            return
+        try:
+            if process.stdin:
+                process.stdin.close()
+        except Exception:
+            pass
+        try:
+            process.terminate()
+        except Exception:
+            pass
+
+
+def _close_persistent_freecad_workers() -> None:
+    with _PERSISTENT_FREECAD_WORKERS_LOCK:
+        workers = list(_PERSISTENT_FREECAD_WORKERS.values())
+        _PERSISTENT_FREECAD_WORKERS.clear()
+    for worker in workers:
+        try:
+            worker.close()
+        except Exception:
+            pass
+
+
+atexit.register(_close_persistent_freecad_workers)
+
+
+def _persistent_freecad_worker_enabled() -> bool:
+    value = os.getenv("FREECAD_PERSISTENT_WORKER", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _worker_cache_key(sys_config: SystemConfig) -> str:
+    return os.path.abspath(sys_config.freecad_python or "")
+
+
+def _get_persistent_freecad_worker(sys_config: SystemConfig) -> _PersistentFreeCADWorkerClient:
+    key = _worker_cache_key(sys_config)
+    with _PERSISTENT_FREECAD_WORKERS_LOCK:
+        worker = _PERSISTENT_FREECAD_WORKERS.get(key)
+        if worker is None:
+            worker = _PersistentFreeCADWorkerClient(sys_config)
+            _PERSISTENT_FREECAD_WORKERS[key] = worker
+        return worker
 
 
 def _build_freecad_subprocess_env(sys_config: SystemConfig) -> dict:
@@ -1143,6 +1286,37 @@ print("DIRECT_UNFOLD_RESULT:" + json.dumps(payload))
     return {"success": False, "error": stderr or "No result returned from FreeCAD Python runtime"}
 
 
+def _run_direct_python_worker_attempt(step_file, output_dir, part_name, sys_config):
+    debug_snapshot = _runtime_debug_snapshot(sys_config, _build_freecad_subprocess_env(sys_config))
+    try:
+        worker = _get_persistent_freecad_worker(sys_config)
+        payload = worker.request(
+            step_file=step_file,
+            output_dir=output_dir,
+            part_name=part_name,
+            timeout_seconds=300,
+            variant=_unfolder_variant_mode(),
+        )
+    except Exception as exc:
+        _print_runtime_debug_snapshot("    [direct-python-worker-failure]", debug_snapshot)
+        return {
+            "success": False,
+            "error": str(exc),
+            "worker_transport_error": True,
+        }
+
+    if not isinstance(payload, dict):
+        return {
+            "success": False,
+            "error": "Ongeldig antwoord van FreeCAD worker",
+            "worker_transport_error": True,
+        }
+
+    payload.setdefault("runtime_source", "direct-freecad-python")
+    payload["worker_mode"] = "persistent"
+    return payload
+
+
 def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     """Run FreeCAD unfold and export both DXF and STEP of flat pattern.
 
@@ -1161,13 +1335,29 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
             return direct_result
 
     sys_config = SystemConfig.from_env()
-    python_runtime_result = _run_unfold_subprocess_attempt(
-        step_file,
-        output_dir,
-        part_name,
-        sys_config,
-        runtime_label="direct-freecad-python",
-    )
+    if _persistent_freecad_worker_enabled():
+        python_runtime_result = _run_direct_python_worker_attempt(
+            step_file,
+            output_dir,
+            part_name,
+            sys_config,
+        )
+        if python_runtime_result.get("worker_transport_error"):
+            python_runtime_result = _run_unfold_subprocess_attempt(
+                step_file,
+                output_dir,
+                part_name,
+                sys_config,
+                runtime_label="direct-freecad-python",
+            )
+    else:
+        python_runtime_result = _run_unfold_subprocess_attempt(
+            step_file,
+            output_dir,
+            part_name,
+            sys_config,
+            runtime_label="direct-freecad-python",
+        )
     if python_runtime_result.get("success"):
         python_runtime_result.setdefault("runtime_source", "direct-freecad-python")
         python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
