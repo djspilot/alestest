@@ -61,6 +61,14 @@ If FreeCAD unfold still fails on Windows after bootstrap, run:
 
 That script prints the managed runtime paths, import checks for `FreeCAD`, `Part`, and `SheetMetalUnfolder`, and enough diagnostics to debug DLL/path issues.
 
+For a single repo-root entrypoint on Windows you can also run:
+
+```powershell
+python .\fix.py
+```
+
+That runs the FreeCAD bootstrap repair flow and then the Windows doctor script.
+
 ## Headless FreeCAD unfold runtime
 
 If you need sheet-metal unfolding, do not rely on the desktop FreeCAD app path. Use the managed headless runtime instead:
