@@ -2,6 +2,11 @@ from manufacturing_pipeline.core import freecad_runtime
 from manufacturing_pipeline.core.config import SystemConfig
 
 
+def test_managed_runtime_root_prefers_env(monkeypatch):
+    monkeypatch.setenv("FREECAD_RUNTIME_ROOT", "/tmp/custom-freecad-runtime")
+    assert freecad_runtime.managed_runtime_root() == "/tmp/custom-freecad-runtime"
+
+
 def test_configured_runtime_uses_managed_metadata(tmp_path):
     runtime_root = tmp_path / "freecad"
     (runtime_root / "bin").mkdir(parents=True)
@@ -234,6 +239,75 @@ def test_ensure_managed_runtime_does_not_precreate_prefix(monkeypatch, tmp_path)
 
     assert result["success"] is True
     assert observed["exists_before_create"] is False
+
+
+def test_ensure_managed_runtime_force_reinstall_falls_back_when_remove_fails(monkeypatch, tmp_path):
+    runtime_root = tmp_path / "freecad"
+    runtime_root.mkdir(parents=True)
+    metadata_path = tmp_path / "freecad_runtime.json"
+    metadata_path.write_text("{}")
+    commands = []
+
+    monkeypatch.setattr(freecad_runtime, "managed_runtime_metadata_path", lambda project_root=None: str(metadata_path))
+    monkeypatch.setattr(freecad_runtime, "choose_package_manager", lambda: "/tmp/micromamba")
+    monkeypatch.setattr(freecad_runtime, "_remove_tree_if_exists", lambda path: "WinError 5")
+    monkeypatch.setattr(
+        freecad_runtime,
+        "_run_command",
+        lambda command, capture_output=False, text=True: commands.append(command),
+    )
+    monkeypatch.setattr(
+        freecad_runtime,
+        "_install_sheetmetal_source",
+        lambda runtime_info, sheetmetal_repo, update_sheetmetal: {"success": True},
+    )
+    monkeypatch.setattr(freecad_runtime, "_verify_runtime", lambda info: {"success": True, "stage": "verified"})
+    monkeypatch.setattr(freecad_runtime, "save_runtime_metadata", lambda data, metadata_path=None: str(tmp_path / "meta.json"))
+
+    result = freecad_runtime.ensure_managed_runtime(
+        install_if_missing=True,
+        runtime_root=str(runtime_root),
+        force_reinstall=True,
+    )
+
+    assert result["success"] is True
+    assert "failed_to_remove_existing_runtime" in result["actions"]
+    assert any(action.startswith("fallback_runtime_root=") for action in result["actions"])
+    assert commands
+    assert commands[0][4].endswith("freecad_alt")
+
+
+def test_ensure_managed_runtime_retries_create_with_fallback_prefix(monkeypatch, tmp_path):
+    runtime_root = tmp_path / "freecad"
+    calls = {"count": 0, "commands": []}
+
+    def fake_run_command(command, capture_output=False, text=True):
+        calls["count"] += 1
+        calls["commands"].append(command)
+        if calls["count"] == 1:
+            raise RuntimeError("critical libmamba Non-conda folder exists at prefix - aborting.")
+        return None
+
+    monkeypatch.setattr(freecad_runtime, "choose_package_manager", lambda: "/tmp/micromamba")
+    monkeypatch.setattr(freecad_runtime, "_run_command", fake_run_command)
+    monkeypatch.setattr(
+        freecad_runtime,
+        "_install_sheetmetal_source",
+        lambda runtime_info, sheetmetal_repo, update_sheetmetal: {"success": True},
+    )
+    monkeypatch.setattr(freecad_runtime, "_verify_runtime", lambda info: {"success": True, "stage": "verified"})
+    monkeypatch.setattr(freecad_runtime, "save_runtime_metadata", lambda data, metadata_path=None: str(tmp_path / "meta.json"))
+
+    result = freecad_runtime.ensure_managed_runtime(
+        install_if_missing=True,
+        runtime_root=str(runtime_root),
+    )
+
+    assert result["success"] is True
+    assert calls["count"] == 2
+    assert calls["commands"][0][4].endswith("freecad")
+    assert calls["commands"][1][4].endswith("freecad_alt")
+    assert "create_runtime_failed_for_primary_prefix" in result["actions"]
 
 
 def test_doctor_runtime_reports_verify_failure(monkeypatch, tmp_path):
