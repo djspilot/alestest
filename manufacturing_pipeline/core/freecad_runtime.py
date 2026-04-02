@@ -175,6 +175,18 @@ def _run_command(command: List[str], capture_output: bool = False, text: bool = 
     return subprocess.run(command, check=True, capture_output=capture_output, text=text)
 
 
+def _remove_tree_if_exists(path: str) -> Optional[str]:
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        shutil.rmtree(path, ignore_errors=False)
+    except Exception as exc:
+        return str(exc)
+    if os.path.exists(path):
+        return f"Pad bestaat nog na verwijderen: {path}"
+    return None
+
+
 def diagnose_package_manager() -> Dict[str, Any]:
     discovered = []
     for candidate in ("micromamba", "conda"):
@@ -431,7 +443,14 @@ def ensure_managed_runtime(
 
     if force_reinstall:
         if os.path.isdir(runtime_root):
-            shutil.rmtree(runtime_root, ignore_errors=True)
+            remove_error = _remove_tree_if_exists(runtime_root)
+            if remove_error:
+                return {
+                    "success": False,
+                    "installed": False,
+                    "error": f"Bestaande runtime kon niet verwijderd worden: {remove_error}",
+                    "actions": actions,
+                }
             actions.append("removed_existing_runtime")
         if os.path.exists(metadata_path):
             try:
@@ -505,7 +524,6 @@ def ensure_managed_runtime(
                 "bootstrap": bootstrap_result,
             }
 
-    os.makedirs(runtime_root, exist_ok=True)
     create_cmd = [
         manager,
         "create",

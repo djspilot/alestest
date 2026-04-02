@@ -209,6 +209,33 @@ def test_ensure_managed_runtime_force_reinstall_removes_existing_runtime(monkeyp
     assert stale_file.exists() is False
 
 
+def test_ensure_managed_runtime_does_not_precreate_prefix(monkeypatch, tmp_path):
+    runtime_root = tmp_path / "freecad"
+    observed = {"exists_before_create": None}
+
+    def fake_run_command(command, capture_output=False, text=True):
+        observed["exists_before_create"] = runtime_root.exists()
+        return None
+
+    monkeypatch.setattr(freecad_runtime, "choose_package_manager", lambda: "/tmp/micromamba")
+    monkeypatch.setattr(freecad_runtime, "_run_command", fake_run_command)
+    monkeypatch.setattr(
+        freecad_runtime,
+        "_install_sheetmetal_source",
+        lambda runtime_info, sheetmetal_repo, update_sheetmetal: {"success": True},
+    )
+    monkeypatch.setattr(freecad_runtime, "_verify_runtime", lambda info: {"success": True, "stage": "verified"})
+    monkeypatch.setattr(freecad_runtime, "save_runtime_metadata", lambda data, metadata_path=None: str(tmp_path / "meta.json"))
+
+    result = freecad_runtime.ensure_managed_runtime(
+        install_if_missing=True,
+        runtime_root=str(runtime_root),
+    )
+
+    assert result["success"] is True
+    assert observed["exists_before_create"] is False
+
+
 def test_doctor_runtime_reports_verify_failure(monkeypatch, tmp_path):
     runtime_root = tmp_path / "freecad"
     monkeypatch.setattr(freecad_runtime, "managed_runtime_root", lambda project_root=None: str(runtime_root))
