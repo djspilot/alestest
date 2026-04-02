@@ -182,6 +182,47 @@ def _label_contours_from_holes(
     return results
 
 
+def _filter_contours_for_excluded_holes(
+    closed_contours: List[Dict[str, Any]],
+    cylindrical_holes,
+    excluded_hole_indices: set,
+    *,
+    as_point_tuple,
+) -> List[Dict[str, Any]]:
+    if not closed_contours or not cylindrical_holes or not excluded_hole_indices:
+        return closed_contours
+
+    filtered: List[Dict[str, Any]] = []
+    match_tol = 10.0
+
+    for contour in closed_contours:
+        center_cc = contour.get("center")
+        best_idx: Optional[int] = None
+        best_dist = float("inf")
+
+        if center_cc is not None:
+            for idx, hole in enumerate(cylindrical_holes):
+                pos = as_point_tuple(getattr(hole, "position", None))
+                if pos is None:
+                    pos = as_point_tuple(getattr(hole, "axis_origin", None))
+                if pos is None:
+                    continue
+                dx = center_cc[0] - pos[0]
+                dy = center_cc[1] - pos[1]
+                dz = center_cc[2] - pos[2]
+                dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_idx = idx
+
+        if best_idx is not None and best_dist <= match_tol and best_idx in excluded_hole_indices:
+            continue
+
+        filtered.append(contour)
+
+    return filtered
+
+
 def _detect_closed_inner_contours(
     shape: TopoDS_Shape,
     *,

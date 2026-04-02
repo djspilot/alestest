@@ -89,6 +89,13 @@ Vaste afspraak (niet opnieuw ter discussie zonder expliciete wijzigingsvraag):
 Kernpunten:
 - Primair: cone-face detectie.
 - Fallback: coaxiale cilindrische paren (voor STEP-exporten zonder expliciete cone surface).
+- Een countersink is semantisch exclusief: zodra een gat als `countersunk` is bevestigd,
+  mogen de onderliggende subgaten niet nogmaals als `thread` of generiek `hole` worden geteld.
+- Bevestiging van een countersink vereist:
+  - ofwel cone-face detectie,
+  - ofwel een geldige coaxiale stepped pair / minimaal 2 verschillende diameters volgens de fallback-logica.
+- Bij profielonderdelen moeten onderliggende subgaten van een bevestigd countersink uit de gesloten contourtelling
+  en uit threadlabeling worden verwijderd om dubbeltelling te voorkomen.
 
 ## Niet-gesloten contouren: verplichte opmerking in procedure
 In deze baseline geldt expliciet:

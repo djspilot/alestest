@@ -13,6 +13,8 @@ from manufacturing_pipeline.analysis.cut_features import (
     _detect_closed_inner_contours,
     _detect_countersunk_holes,
     _filter_profile_end_opening_shaped_holes,
+    _filter_contours_for_excluded_holes,
+    _infer_profile_countersink_pairs,
     _detect_standalone_countersunk_holes,
     _label_contours_from_holes,
     deduplicate_holes,
@@ -258,11 +260,26 @@ def analyze_step_holes(step_path: Path, part_mode: str) -> Dict[str, Any]:
 
         countersink_matches = _detect_countersunk_holes(wp, cylindrical_holes)
         standalone_cs = _detect_standalone_countersunk_holes(wp, cylindrical_holes)
+        inferred_countersunk = set()
+        suppressed_subholes = set()
+
+        if part_mode == "profile":
+            inferred_countersunk, suppressed_subholes = _infer_profile_countersink_pairs(
+                cylindrical_holes,
+                countersink_matches,
+            )
+            if suppressed_subholes and closed_contours:
+                closed_contours = _filter_contours_for_excluded_holes(
+                    closed_contours,
+                    cylindrical_holes,
+                    suppressed_subholes,
+                )
 
         contour_labels = _label_contours_from_holes(
             closed_contours,
             cylindrical_holes,
             countersink_matches,
+            inferred_countersunk=inferred_countersunk,
             is_profile=(part_mode == "profile"),
         )
 
@@ -283,7 +300,7 @@ def analyze_step_holes(step_path: Path, part_mode: str) -> Dict[str, Any]:
                         HoleRow(
                             index=len(all_rows) + 1,
                             source="standalone_countersink",
-                            hole_type="thread",
+                            hole_type="countersunk",
                             cut_length_mm=2.0 * math.pi * radius,
                             diameter_mm=2.0 * radius,
                             note=f"solid_{solid_index}",

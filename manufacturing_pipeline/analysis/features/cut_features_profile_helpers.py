@@ -113,8 +113,10 @@ def _infer_profile_countersink_pairs(
         return inferred, suppressed
 
     for i, large in enumerate(cylindrical_holes):
-        if i in countersink_matches:
+        if i in suppressed:
             continue
+
+        is_confirmed_countersink = i in countersink_matches
 
         best_j = None
         best_score = None
@@ -160,7 +162,8 @@ def _infer_profile_countersink_pairs(
                 best_j = j
 
         if best_j is not None:
-            inferred.add(i)
+            if not is_confirmed_countersink:
+                inferred.add(i)
             suppressed.add(best_j)
 
     return inferred, suppressed

@@ -194,6 +194,7 @@ def extract_cut_features_for_profile(
     detect_countersunk_holes,
     detect_standalone_countersunk_holes,
     label_contours_from_holes,
+    filter_contours_for_excluded_holes,
     parse_dimensions_from_string,
     part_classification: str = "profiel",
 ):
@@ -256,6 +257,12 @@ def extract_cut_features_for_profile(
             cylindrical_holes,
             countersink_matches,
         )
+        if suppressed_subholes and closed_contours:
+            closed_contours = filter_contours_for_excluded_holes(
+                closed_contours,
+                cylindrical_holes,
+                suppressed_subholes,
+            )
 
         for idx, hole in enumerate(cylindrical_holes):
             if idx in suppressed_subholes:
@@ -317,8 +324,11 @@ def extract_cut_features_for_profile(
                 continue
             hole_contours.append(2.0 * math.pi * radius)
             hole_radii.append(radius)
-            hole_types.append("thread")
-            threaded_holes += 1
+            hole_types.append("countersunk")
+            countersunk_holes += 1
+            included_angle = float(cs.get("included_angle", 0.0) or 0.0)
+            if included_angle > 0.0:
+                countersunk_angles.append(included_angle)
 
         outer_contour = 0.0
         if closed_contours:

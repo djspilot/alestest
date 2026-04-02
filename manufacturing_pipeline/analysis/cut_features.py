@@ -112,6 +112,7 @@ def extract_cut_features_for_profile(
         detect_countersunk_holes=_detect_countersunk_holes,
         detect_standalone_countersunk_holes=_detect_standalone_countersunk_holes,
         label_contours_from_holes=_label_contours_from_holes,
+        filter_contours_for_excluded_holes=_filter_contours_for_excluded_holes,
         parse_dimensions_from_string=_parse_dimensions_from_string,
         part_classification=part_classification,
     )
@@ -145,6 +146,19 @@ def _label_contours_from_holes(
         as_point_tuple=_as_point_tuple,
         inferred_countersunk=inferred_countersunk,
         is_profile=is_profile,
+    )
+
+
+def _filter_contours_for_excluded_holes(
+    closed_contours,
+    cylindrical_holes,
+    excluded_hole_indices,
+):
+    return _geometry_helpers._filter_contours_for_excluded_holes(
+        closed_contours,
+        cylindrical_holes,
+        excluded_hole_indices,
+        as_point_tuple=_as_point_tuple,
     )
 
 
