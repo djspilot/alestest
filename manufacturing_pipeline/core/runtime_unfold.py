@@ -7,7 +7,9 @@ import json
 import subprocess
 from types import SimpleNamespace
 
+from manufacturing_pipeline.analysis import freecad_unfold
 from manufacturing_pipeline.core.config import SystemConfig
+from manufacturing_pipeline.core.freecad_vendor import ensure_vendor_sheetmetal_on_sys_path
 
 from manufacturing_pipeline.core.paths import PIPELINE_DIR, SCRIPTS_DIR
 
@@ -222,6 +224,7 @@ def _run_unfold_subprocess_attempt(step_file, output_dir, part_name, sys_config,
     freecad_python = sys_config.freecad_python
     freecad_env = _build_freecad_subprocess_env(sys_config)
     debug_snapshot = _runtime_debug_snapshot(sys_config, freecad_env)
+    vendor_root = ensure_vendor_sheetmetal_on_sys_path()
 
     unfold_script = f'''
 import sys
@@ -234,6 +237,7 @@ import traceback
 # FreeCAD paths
 freecad_lib = {repr(fc_lib)}
 freecad_mod = {repr(fc_mod)}
+vendor_root = {repr(vendor_root)}
 UNFOLD_ERROR_MESSAGES = {repr(UNFOLD_ERROR_MESSAGES)}
 
 if platform.system() == "Darwin":
@@ -245,6 +249,7 @@ sys.path.insert(0, freecad_lib)
 sys.path.insert(0, freecad_mod)
 sys.path.insert(0, freecad_user_mod)
 sys.path.insert(0, os.path.join(freecad_user_mod, "sheetmetal"))
+sys.path.insert(0, vendor_root)
 
 # Mock GUI with proper Selection that returns an object with Refine attribute
 class MockObject:
@@ -268,7 +273,12 @@ sys.modules["FreeCADGui"] = MockGui()
 
 import FreeCAD
 import Part
+if vendor_root and os.path.isdir(vendor_root):
+    sys.path.insert(0, vendor_root)
+for mod_name in ("SheetMetalUnfolder", "SheetMetalTools", "lookup"):
+    sys.modules.pop(mod_name, None)
 import SheetMetalUnfolder
+sheetmetal_source = getattr(SheetMetalUnfolder, "__file__", "")
 
 # Load STEP
 step_path = {repr(step_file)}
@@ -688,6 +698,7 @@ for solid_idx, solid in enumerate(sorted_solids[:3]):  # Try top 3 by volume
                                 "attempts": result.get("attempts", 0),
                                 "error_details": result.get("error_details", []),
                                 "first_traceback": result.get("first_traceback"),
+                                "sheetmetal_source": sheetmetal_source,
                             }}
                 elif unfold_tree.error_code:
                     _record_error(
@@ -820,6 +831,141 @@ print("UNFOLD_RESULT:" + json.dumps(result))
         return {"success": False, "error": str(e)}
 
 
+def _export_flat_step(flat_shape, flat_step_path):
+    if flat_shape is None:
+        return ""
+    os.makedirs(os.path.dirname(flat_step_path), exist_ok=True)
+    exporter = getattr(flat_shape, "exportStep", None)
+    if callable(exporter):
+        exporter(flat_step_path)
+        return flat_step_path
+    raise RuntimeError("Flat shape cannot be exported to STEP")
+
+
+def _run_direct_unfold_attempt(step_file, output_dir, part_name):
+    ensure_vendor_sheetmetal_on_sys_path()
+    previous_mode = os.environ.get("FREECAD_UNFOLD_MODE")
+    previous_auto_install = os.environ.get("FREECAD_AUTO_INSTALL")
+    os.environ["FREECAD_UNFOLD_MODE"] = "direct"
+    os.environ["FREECAD_AUTO_INSTALL"] = "0"
+    try:
+        if not freecad_unfold._ensure_freecad_imported():
+            return {
+                "success": False,
+                "error": f"FreeCAD niet direct importeerbaar in host Python: {freecad_unfold._FREECAD_IMPORT_ERROR or 'onbekende importfout'}",
+            }
+        dxf_path = os.path.join(output_dir, f"{part_name}_flat.dxf")
+        result = freecad_unfold.unfold_sheet_metal(
+            step_path=step_file,
+            output_dxf=dxf_path,
+        )
+    finally:
+        if previous_mode is None:
+            os.environ.pop("FREECAD_UNFOLD_MODE", None)
+        else:
+            os.environ["FREECAD_UNFOLD_MODE"] = previous_mode
+        if previous_auto_install is None:
+            os.environ.pop("FREECAD_AUTO_INSTALL", None)
+        else:
+            os.environ["FREECAD_AUTO_INSTALL"] = previous_auto_install
+
+    if result.get("success"):
+        flat_step_path = os.path.join(output_dir, f"{part_name}_flat.step")
+        flat_shape = result.get("flat_shape")
+        result["flat_step_path"] = _export_flat_step(flat_shape, flat_step_path)
+        result["runtime_source"] = "direct-vendored-sheetmetal"
+
+    return result
+
+
+def _run_direct_python_subprocess_attempt(step_file, output_dir, part_name, sys_config):
+    freecad_python = sys_config.freecad_python
+    if not freecad_python or not os.path.exists(freecad_python):
+        return {"success": False, "error": "FreeCAD Python runtime niet gevonden"}
+
+    freecad_env = _build_freecad_subprocess_env(sys_config)
+    freecad_env["FREECAD_UNFOLD_MODE"] = "direct"
+    vendor_root = ensure_vendor_sheetmetal_on_sys_path()
+    debug_snapshot = _runtime_debug_snapshot(sys_config, freecad_env)
+
+    script = f"""
+import json
+import os
+import sys
+
+sys.path.insert(0, {PIPELINE_DIR!r})
+sys.path.insert(0, {vendor_root!r})
+
+from manufacturing_pipeline.analysis import freecad_unfold
+
+result = freecad_unfold.unfold_sheet_metal(
+    step_path={step_file!r},
+    output_dxf={os.path.join(output_dir, f"{part_name}_flat.dxf")!r},
+)
+
+payload = {{
+    "success": bool(result.get("success")),
+    "error": result.get("error"),
+    "attempts": result.get("attempts"),
+    "error_details": result.get("error_details", []),
+    "flat_length": result.get("flat_length"),
+    "flat_width": result.get("flat_width"),
+    "bend_angles": result.get("bend_angles", []),
+    "bend_radii": result.get("bend_radii", []),
+    "bend_lengths": result.get("bend_lengths", []),
+    "bend_count": result.get("bend_count"),
+    "bend_line_segments": result.get("bend_line_segments", []),
+    "bend_line_groups": result.get("bend_line_groups", []),
+    "raw_fold_lines": result.get("raw_fold_lines"),
+    "used_face_idx": result.get("used_face_idx"),
+}}
+
+if result.get("success") and result.get("flat_shape") is not None:
+    flat_step_path = {os.path.join(output_dir, f"{part_name}_flat.step")!r}
+    result["flat_shape"].exportStep(flat_step_path)
+    payload["flat_step_path"] = flat_step_path
+else:
+    payload["flat_step_path"] = None
+
+print("DIRECT_UNFOLD_RESULT:" + json.dumps(payload))
+"""
+
+    try:
+        proc = subprocess.run(
+            [freecad_python, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            env=freecad_env,
+        )
+    except subprocess.TimeoutExpired:
+        _print_runtime_debug_snapshot("    [direct-python-timeout]", debug_snapshot)
+        return {"success": False, "error": "Timeout (>300s) in FreeCAD Python runtime"}
+    except FileNotFoundError:
+        _print_runtime_debug_snapshot("    [direct-python-missing]", debug_snapshot)
+        return {"success": False, "error": f"FreeCAD Python executable not found: {freecad_python}"}
+    except Exception as exc:
+        _print_runtime_debug_snapshot("    [direct-python-exception]", debug_snapshot)
+        return {"success": False, "error": str(exc)}
+
+    for line in reversed((proc.stdout or "").splitlines()):
+        if not line.startswith("DIRECT_UNFOLD_RESULT:"):
+            continue
+        try:
+            payload = json.loads(line.split("DIRECT_UNFOLD_RESULT:", 1)[1])
+        except Exception:
+            break
+        payload.setdefault("runtime_source", "direct-freecad-python")
+        return payload
+
+    stderr = (proc.stderr or "").strip()
+    if stderr:
+        for line in stderr.splitlines()[-8:]:
+            print(f"    [direct-python-stderr] {line}")
+    _print_runtime_debug_snapshot("    [direct-python-no-result]", debug_snapshot)
+    return {"success": False, "error": stderr or "No result returned from FreeCAD Python runtime"}
+
+
 def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     """Run FreeCAD unfold and export both DXF and STEP of flat pattern.
 
@@ -829,24 +975,39 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     - flat_length, flat_width: dimensions
     - fold_lines: number of bends
     """
+    direct_result = _run_direct_unfold_attempt(step_file, output_dir, part_name)
+    if direct_result.get("success"):
+        return direct_result
+
     sys_config = SystemConfig.from_env()
-    result = _run_unfold_subprocess_attempt(
+    python_runtime_result = _run_unfold_subprocess_attempt(
         step_file,
         output_dir,
         part_name,
         sys_config,
-        runtime_label="managed/runtime-configured",
+        runtime_label="direct-freecad-python",
     )
-    if result.get("success") or not sys.platform.startswith("win"):
-        return result
+    if python_runtime_result.get("success"):
+        python_runtime_result.setdefault("runtime_source", "direct-freecad-python")
+        python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
+        return python_runtime_result
+
+    if os.getenv("FREECAD_UNFOLD_DISABLE_FALLBACK", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return python_runtime_result if python_runtime_result.get("error") else direct_result
+
+    if not sys.platform.startswith("win"):
+        python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
+        return python_runtime_result
 
     desktop_config = _resolve_windows_desktop_freecad_config()
     if not desktop_config:
-        return result
+        python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
+        return python_runtime_result
     if os.path.abspath(str(desktop_config.freecad_cmd or "")) == os.path.abspath(str(sys_config.freecad_cmd or "")):
-        return result
+        python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
+        return python_runtime_result
 
-    print("    [runtime-fallback] Managed runtime failed; retrying with desktop FreeCAD installation.")
+    print("    [runtime-fallback] Direct FreeCAD Python runtime failed; retrying with desktop FreeCAD installation.")
     fallback_result = _run_unfold_subprocess_attempt(
         step_file,
         output_dir,
@@ -856,10 +1017,14 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     )
     if fallback_result.get("success"):
         fallback_result["runtime_source"] = "desktop-freecad"
+        fallback_result.setdefault("direct_runtime_error", direct_result.get("error"))
+        fallback_result.setdefault("python_runtime_error", python_runtime_result.get("error"))
         return fallback_result
 
     fallback_result.setdefault("runtime_source", "desktop-freecad")
     fallback_result.setdefault("managed_runtime_error", result.get("error"))
+    fallback_result.setdefault("direct_runtime_error", direct_result.get("error"))
+    fallback_result.setdefault("python_runtime_error", python_runtime_result.get("error"))
     return fallback_result
 
 

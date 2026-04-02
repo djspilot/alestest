@@ -8,6 +8,7 @@ import sys
 import tempfile
 from typing import Any, Dict, List, Optional
 
+from manufacturing_pipeline.core.freecad_vendor import ensure_vendor_sheetmetal_on_sys_path
 from manufacturing_pipeline.core.paths import PROJECT_ROOT
 
 MANAGED_RUNTIME_DIR = os.path.join(PROJECT_ROOT, ".runtime", "freecad")
@@ -130,8 +131,20 @@ def configured_runtime(project_root: Optional[str] = None) -> Dict[str, Any]:
     detected = detect_runtime_layout(runtime_root, platform=metadata.get("platform"))
     merged = {**detected, **metadata}
     merged["runtime_root"] = runtime_root
-    merged["available"] = bool(merged.get("freecad_cmd") and os.path.exists(merged["freecad_cmd"]))
+    merged["available"] = bool(
+        (merged.get("freecad_python") and os.path.exists(merged["freecad_python"]))
+        or (merged.get("freecad_cmd") and os.path.exists(merged["freecad_cmd"]))
+    )
     return merged
+
+
+def _runtime_executable_exists(runtime_info: Dict[str, Any]) -> bool:
+    freecad_python = str(runtime_info.get("freecad_python") or "")
+    freecad_cmd = str(runtime_info.get("freecad_cmd") or "")
+    return bool(
+        (freecad_python and os.path.exists(freecad_python))
+        or (freecad_cmd and os.path.exists(freecad_cmd))
+    )
 
 
 def runtime_root_candidates(project_root: Optional[str] = None) -> List[str]:
@@ -287,35 +300,11 @@ def _install_sheetmetal_source(
     sheetmetal_repo: str,
     update_sheetmetal: bool,
 ) -> Dict[str, Any]:
-    git_executable = shutil.which("git")
-    if not git_executable:
-        return {
-            "success": False,
-            "error": "Git niet gevonden. Installeer git om de SheetMetal broncode op te halen.",
-        }
-
-    mod_root = str(runtime_info.get("freecad_mod") or "")
-    if not mod_root:
-        mod_root = os.path.join(str(runtime_info.get("runtime_root") or ""), "Mod")
-        runtime_info["freecad_mod"] = mod_root
-    os.makedirs(mod_root, exist_ok=True)
-    sheetmetal_dest = _sheetmetal_destination(runtime_info)
-
-    try:
-        if os.path.isdir(sheetmetal_dest):
-            if update_sheetmetal:
-                _run_command([git_executable, "-C", sheetmetal_dest, "pull", "--ff-only"])
-        else:
-            _run_command([git_executable, "clone", "--depth", "1", sheetmetal_repo, sheetmetal_dest])
-    except Exception as exc:
-        return {
-            "success": False,
-            "error": f"SheetMetal broncode installatie gefaald: {exc}",
-        }
-
     return {
         "success": True,
-        "sheetmetal_dest": sheetmetal_dest,
+        "sheetmetal_dest": ensure_vendor_sheetmetal_on_sys_path(),
+        "sheetmetal_repo": sheetmetal_repo,
+        "update_sheetmetal": bool(update_sheetmetal),
     }
 
 
@@ -335,6 +324,7 @@ def _verify_runtime(runtime_info: Dict[str, Any]) -> Dict[str, Any]:
     freecad_python = str(runtime_info.get("freecad_python") or "")
     freecad_lib = str(runtime_info.get("freecad_lib") or "")
     freecad_mod = str(runtime_info.get("freecad_mod") or "")
+    vendor_sheetmetal = ensure_vendor_sheetmetal_on_sys_path()
 
     # On Windows conda, FreeCAD.pyd lives in Library/bin which is not on sys.path
     freecad_lib_bin = os.path.join(str(runtime_info.get("runtime_root") or ""), "Library", "bin")
@@ -364,9 +354,16 @@ def _verify_runtime(runtime_info: Dict[str, Any]) -> Dict[str, Any]:
         f"mod_path = {json.dumps(freecad_mod)}\n"
         "if mod_path and os.path.isdir(mod_path) and mod_path not in sys.path:\n"
         "    sys.path.insert(0, mod_path)\n"
+        f"vendor_sheetmetal = {json.dumps(vendor_sheetmetal)}\n"
+        "if vendor_sheetmetal and os.path.isdir(vendor_sheetmetal) and vendor_sheetmetal not in sys.path:\n"
+        "    sys.path.insert(0, vendor_sheetmetal)\n"
+        "for mod_name in ('SheetMetalUnfolder', 'SheetMetalTools', 'lookup'):\n"
+        "    sys.modules.pop(mod_name, None)\n"
         "\n"
         "import FreeCAD\n"
         "import Part\n"
+        "if vendor_sheetmetal and os.path.isdir(vendor_sheetmetal):\n"
+        "    sys.path.insert(0, vendor_sheetmetal)\n"
         "import SheetMetalUnfolder\n"
         "print(json.dumps({'success': True}))\n"
     )
@@ -484,7 +481,7 @@ def ensure_managed_runtime(
                 pass
         runtime_info = detect_runtime_layout(runtime_root)
 
-    if os.path.exists(runtime_info["freecad_cmd"]):
+    if _runtime_executable_exists(runtime_info):
         actions.append("found_existing_runtime")
         verify_result = _verify_runtime(runtime_info)
         if verify_result.get("success"):
@@ -637,10 +634,10 @@ def doctor_runtime(
     runtime_root = runtime_root or managed_runtime_root()
     runtime_info = detect_runtime_layout(runtime_root)
     configured = configured_runtime()
-    verify = _verify_runtime(runtime_info) if os.path.exists(runtime_info.get("freecad_cmd") or "") else {
+    verify = _verify_runtime(runtime_info) if _runtime_executable_exists(runtime_info) else {
         "success": False,
-        "stage": "resolve_freecadcmd",
-        "error": "FreeCADCmd niet gevonden",
+        "stage": "resolve_freecad-runtime",
+        "error": "FreeCAD runtime niet gevonden",
     }
 
     return {
@@ -652,8 +649,8 @@ def doctor_runtime(
         "configured_runtime": configured,
         "detected_runtime": {
             **runtime_info,
-            "sheetmetal_dest": _sheetmetal_destination(runtime_info),
-            "sheetmetal_repo": sheetmetal_repo,
+        "sheetmetal_dest": ensure_vendor_sheetmetal_on_sys_path(),
+        "sheetmetal_repo": sheetmetal_repo,
         },
         "verify": verify,
         "bootstrap_command": _package_manager_bootstrap_command(),

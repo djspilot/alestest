@@ -69,9 +69,9 @@ python .\fix.py
 
 That runs the FreeCAD bootstrap repair flow and then the Windows doctor script.
 
-## Headless FreeCAD unfold runtime
+## FreeCAD unfold runtime
 
-If you need sheet-metal unfolding, do not rely on the desktop FreeCAD app path. Use the managed headless runtime instead:
+If you need sheet-metal unfolding, use a compatible FreeCAD Python/runtime. The pipeline now prefers direct in-process imports and uses the vendored SheetMetal unfolder from this repo:
 
 ```bash
 python -m manufacturing_pipeline.tools.ensure_unfold_runtime
@@ -79,8 +79,7 @@ python -m manufacturing_pipeline.tools.ensure_unfold_runtime
 
 This command:
 - installs a local FreeCAD runtime under `.runtime/freecad`
-- clones the `SheetMetal` source workbench into that runtime
-- verifies `FreeCADCmd`, `Part`, and `SheetMetalUnfolder`
+- verifies `FreeCAD`, `Part`, and the vendored `SheetMetalUnfolder`
 - persists the runtime metadata for normal pipeline runs
 
 Useful variants:
@@ -91,7 +90,7 @@ python -m manufacturing_pipeline.tools.ensure_unfold_runtime --update-sheetmetal
 python -m manufacturing_pipeline.tools.ensure_unfold_runtime --json
 ```
 
-On both macOS and Windows the pipeline prefers the headless `FreeCADCmd` subprocess route by default.
+On both macOS and Windows the pipeline prefers direct in-process unfold by default. The old `FreeCADCmd` route remains only as a temporary fallback.
 
 ## Option 2: Conda (Recommended for stability)
 

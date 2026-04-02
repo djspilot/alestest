@@ -27,16 +27,16 @@ def test_windows_config_prefers_freecadcmd_when_python_missing() -> None:
         assert config.freecad_cmd.replace("/", "\\") == cmd_path
 
 
-def test_windows_unfold_prefers_subprocess_mode_by_default() -> None:
-    """Windows auto mode should prefer the external FreeCADCmd route."""
+def test_windows_unfold_prefers_direct_mode_by_default() -> None:
+    """Windows auto mode should prefer the in-proc direct route."""
     with patch("manufacturing_pipeline.analysis.freecad_unfold.sys.platform", "win32"):
-        assert freecad_unfold._should_prefer_freecadcmd() is True
+        assert freecad_unfold._should_prefer_freecadcmd() is False
 
 
-def test_macos_unfold_prefers_subprocess_mode_by_default() -> None:
-    """macOS should also prefer the external FreeCADCmd route in auto mode."""
+def test_macos_unfold_prefers_direct_mode_by_default() -> None:
+    """macOS should also prefer the in-proc direct route in auto mode."""
     with patch("manufacturing_pipeline.analysis.freecad_unfold.sys.platform", "darwin"):
-        assert freecad_unfold._should_prefer_freecadcmd() is True
+        assert freecad_unfold._should_prefer_freecadcmd() is False
 
 
 def test_find_freecadcmd_auto_installs_runtime_when_missing(monkeypatch) -> None:
@@ -203,6 +203,16 @@ def test_run_unfold_to_step_retries_with_windows_desktop_freecad(monkeypatch, tm
     monkeypatch.setattr(runtime_unfold.sys, "platform", "win32")
     monkeypatch.setattr(runtime_unfold.SystemConfig, "from_env", staticmethod(lambda: primary))
     monkeypatch.setattr(runtime_unfold, "_resolve_windows_desktop_freecad_config", lambda: desktop)
+    monkeypatch.setattr(
+        runtime_unfold,
+        "_run_direct_unfold_attempt",
+        lambda *args, **kwargs: {"success": False, "error": "direct failed"},
+    )
+    monkeypatch.setattr(
+        runtime_unfold,
+        "_run_direct_python_subprocess_attempt",
+        lambda *args, **kwargs: {"success": False, "error": "direct python failed"},
+    )
     monkeypatch.setattr(runtime_unfold, "_run_unfold_subprocess_attempt", fake_attempt)
 
     result = runtime_unfold.run_unfold_to_step(str(step_file), str(output_dir), "part", object())
@@ -210,7 +220,7 @@ def test_run_unfold_to_step_retries_with_windows_desktop_freecad(monkeypatch, tm
     assert result["success"] is True
     assert result["runtime_source"] == "desktop-freecad"
     assert len(attempts) == 2
-    assert attempts[0][1] == "managed/runtime-configured"
+    assert attempts[0][1] == "direct-freecad-python"
     assert attempts[1][1] == "desktop-freecad"
 
 
@@ -270,3 +280,48 @@ def test_summarize_unfold_failure_lists_readable_causes() -> None:
     assert "Geen geldige unfold-route gevonden na 3 pogingen" in summary
     assert "Type oppervlak niet ondersteund voor sheet metal" in summary
     assert "Ongeldige dikte - plaatdikte niet consistent of te complex" in summary
+
+
+def test_run_unfold_to_step_prefers_direct_vendored_unfold(monkeypatch, tmp_path) -> None:
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    step_file = tmp_path / "part.step"
+    step_file.write_text("ISO-10303-21;")
+
+    state = {"direct_calls": 0, "fallback_calls": 0, "exports": []}
+
+    class FlatShape:
+        def exportStep(self, path):  # type: ignore[no-untyped-def]
+            state["exports"].append(path)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("flat-step")
+
+    def fake_direct(**kwargs):  # type: ignore[no-untyped-def]
+        state["direct_calls"] += 1
+        return {
+            "success": True,
+            "flat_shape": FlatShape(),
+            "flat_length": 10.0,
+            "flat_width": 5.0,
+            "bend_angles": [90.0],
+            "bend_radii": [1.0],
+            "bend_lengths": [20.0],
+            "bend_count": 1,
+        }
+
+    def fake_subprocess(*args, **kwargs):  # type: ignore[no-untyped-def]
+        state["fallback_calls"] += 1
+        return {"success": False, "error": "should not be used"}
+
+    monkeypatch.setattr(runtime_unfold.freecad_unfold, "_ensure_freecad_imported", lambda: True)
+    monkeypatch.setattr(runtime_unfold.freecad_unfold, "unfold_sheet_metal", fake_direct)
+    monkeypatch.setattr(runtime_unfold, "_run_unfold_subprocess_attempt", fake_subprocess)
+
+    result = runtime_unfold.run_unfold_to_step(str(step_file), str(output_dir), "part", object())
+
+    assert result["success"] is True
+    assert result["runtime_source"] == "direct-vendored-sheetmetal"
+    assert state["direct_calls"] == 1
+    assert state["fallback_calls"] == 0
+    assert result["flat_step_path"].endswith("part_flat.step")
+    assert state["exports"]

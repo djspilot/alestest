@@ -1,5 +1,6 @@
 from manufacturing_pipeline.core import freecad_runtime
 from manufacturing_pipeline.core.config import SystemConfig
+from manufacturing_pipeline.core.freecad_vendor import vendor_sheetmetal_root
 
 
 def test_managed_runtime_root_prefers_env(monkeypatch):
@@ -63,6 +64,13 @@ def test_system_config_prefers_managed_runtime_values(monkeypatch, tmp_path):
     assert cfg.freecad_python == str(freecad_python)
     assert cfg.freecad_lib == str(freecad_lib)
     assert cfg.freecad_mod == str(freecad_mod)
+
+
+def test_install_sheetmetal_source_uses_vendored_copy():
+    result = freecad_runtime._install_sheetmetal_source({}, freecad_runtime.DEFAULT_SHEETMETAL_REPO, False)
+
+    assert result["success"] is True
+    assert result["sheetmetal_dest"] == vendor_sheetmetal_root()
 
 
 def test_ensure_managed_runtime_reuses_existing_runtime(monkeypatch, tmp_path):
@@ -324,4 +332,4 @@ def test_doctor_runtime_reports_verify_failure(monkeypatch, tmp_path):
     assert result["platform"]
     assert result["runtime_root"] == str(runtime_root)
     assert result["verify"]["success"] is False
-    assert result["verify"]["stage"] == "resolve_freecadcmd"
+    assert result["verify"]["stage"] == "resolve_freecad-runtime"
