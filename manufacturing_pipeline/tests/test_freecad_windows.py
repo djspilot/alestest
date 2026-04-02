@@ -1,6 +1,7 @@
 """Platform-focused tests for robust Windows FreeCAD/unfold behavior."""
 
 from pathlib import PureWindowsPath
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from manufacturing_pipeline.analysis import freecad_unfold
@@ -142,6 +143,75 @@ def test_build_freecad_subprocess_env_includes_managed_runtime_paths(monkeypatch
     assert env["FREECAD_MOD"] == str(mod_dir)
     assert str(lib_dir) in env["PATH"]
     assert str(mingw_dir) in env["PATH"]
+
+
+def test_resolve_windows_desktop_freecad_config_finds_program_files_install(monkeypatch) -> None:
+    freecad_root = r"C:\Program Files\FreeCAD 1.0"
+
+    def fake_exists(path: str) -> bool:
+        normalized = path.replace("/", "\\")
+        return normalized in {
+            rf"{freecad_root}\bin\FreeCADCmd.exe",
+            rf"{freecad_root}\bin\python.exe",
+            rf"{freecad_root}\Library\bin",
+            rf"{freecad_root}\Mod",
+        }
+
+    monkeypatch.setattr(runtime_unfold.sys, "platform", "win32")
+    monkeypatch.setenv("ProgramFiles", r"C:\Program Files")
+    monkeypatch.setenv("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    monkeypatch.setattr(runtime_unfold.os.path, "exists", fake_exists)
+
+    config = runtime_unfold._resolve_windows_desktop_freecad_config()
+
+    assert config is not None
+    assert config.freecad_path.replace("/", "\\") == freecad_root
+    assert config.freecad_cmd.replace("/", "\\").endswith(r"FreeCAD 1.0\bin\FreeCADCmd.exe")
+
+
+def test_run_unfold_to_step_retries_with_windows_desktop_freecad(monkeypatch, tmp_path) -> None:
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    step_file = tmp_path / "part.step"
+    step_file.write_text("ISO-10303-21;")
+
+    primary = SimpleNamespace(
+        freecad_path=r"C:\repo\.runtime\freecad",
+        freecad_python=r"C:\repo\.runtime\freecad\python.exe",
+        freecad_cmd=r"C:\repo\.runtime\freecad\Library\bin\FreeCADCmd.exe",
+        freecad_lib=r"C:\repo\.runtime\freecad\Library\bin",
+        freecad_mod=r"C:\repo\.runtime\freecad\Mod",
+        _managed_runtime_value=lambda key: r"C:\repo\.runtime\freecad" if key == "runtime_root" else "",
+    )
+    desktop = SimpleNamespace(
+        freecad_path=r"C:\Program Files\FreeCAD 1.0",
+        freecad_python=r"C:\Program Files\FreeCAD 1.0\bin\python.exe",
+        freecad_cmd=r"C:\Program Files\FreeCAD 1.0\bin\FreeCADCmd.exe",
+        freecad_lib=r"C:\Program Files\FreeCAD 1.0\Library\bin",
+        freecad_mod=r"C:\Program Files\FreeCAD 1.0\Mod",
+        _managed_runtime_value=lambda key: "",
+    )
+
+    attempts = []
+
+    def fake_attempt(step, out, part, cfg, runtime_label="managed"):  # type: ignore[no-untyped-def]
+        attempts.append((cfg.freecad_cmd, runtime_label))
+        if "runtime" in cfg.freecad_path:
+            return {"success": False, "error": "managed failed"}
+        return {"success": True, "flat_length": 10.0, "flat_width": 5.0}
+
+    monkeypatch.setattr(runtime_unfold.sys, "platform", "win32")
+    monkeypatch.setattr(runtime_unfold.SystemConfig, "from_env", staticmethod(lambda: primary))
+    monkeypatch.setattr(runtime_unfold, "_resolve_windows_desktop_freecad_config", lambda: desktop)
+    monkeypatch.setattr(runtime_unfold, "_run_unfold_subprocess_attempt", fake_attempt)
+
+    result = runtime_unfold.run_unfold_to_step(str(step_file), str(output_dir), "part", object())
+
+    assert result["success"] is True
+    assert result["runtime_source"] == "desktop-freecad"
+    assert len(attempts) == 2
+    assert attempts[0][1] == "managed/runtime-configured"
+    assert attempts[1][1] == "desktop-freecad"
 
 
 def test_summarize_unfold_failure_prefers_exception_details() -> None:
