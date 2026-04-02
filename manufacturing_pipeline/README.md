@@ -53,6 +53,14 @@ Useful flags:
 .\scripts\bootstrap-windows.ps1 -SkipFreeCAD
 ```
 
+If FreeCAD unfold still fails on Windows after bootstrap, run:
+
+```powershell
+.\scripts\freecad-windows-doctor.ps1
+```
+
+That script prints the managed runtime paths, import checks for `FreeCAD`, `Part`, and `SheetMetalUnfolder`, and enough diagnostics to debug DLL/path issues.
+
 ## Headless FreeCAD unfold runtime
 
 If you need sheet-metal unfolding, do not rely on the desktop FreeCAD app path. Use the managed headless runtime instead:

@@ -71,8 +71,6 @@ def _get_unfold_runtime_settings(config_path=None):
             for bucket, value in unfold_thresholds["k_factor"]["thickness_buckets_mm"].items()
         },
     }
-
-
 def _summarize_unfold_failure(result):
     """Build a readable error from structured unfold failure details."""
     if not result:
@@ -122,7 +120,15 @@ def _build_freecad_subprocess_env(sys_config):
     workstation-local add-ons. We force a local profile root under the managed
     runtime and prepend the runtime DLL paths so imports stay deterministic.
     """
-    runtime_root = str(sys_config.freecad_path or "")
+    runtime_root = ""
+    try:
+        runtime_root = str(sys_config._managed_runtime_value("runtime_root") or "")
+    except Exception:
+        runtime_root = ""
+    if not runtime_root:
+        runtime_root = str(sys_config.freecad_path or "")
+    if not runtime_root or runtime_root.endswith(".app"):
+        runtime_root = os.path.join("/tmp", "alestest-freecad-runtime")
     env = os.environ.copy()
 
     extra_path_parts = []
@@ -155,8 +161,42 @@ def _build_freecad_subprocess_env(sys_config):
     env["HOME"] = isolated_profile_root
     env["USERPROFILE"] = isolated_profile_root
     env["FREECAD_RUNTIME_ROOT"] = runtime_root
+    env["FREECAD_PATH"] = str(sys_config.freecad_path or "")
+    env["FREECAD_PYTHON"] = str(sys_config.freecad_python or "")
+    env["FREECAD_CMD"] = str(sys_config.freecad_cmd or "")
+    env["FREECAD_LIB"] = str(sys_config.freecad_lib or "")
+    env["FREECAD_MOD"] = str(sys_config.freecad_mod or "")
 
     return env
+
+
+def _runtime_debug_snapshot(sys_config: SystemConfig, env: dict) -> dict:
+    """Collect a compact runtime snapshot for diagnostics."""
+    path_sep = ";" if sys.platform.startswith("win") else ":"
+    path_value = env.get("PATH", "")
+    path_entries = [entry for entry in path_value.split(path_sep) if entry]
+    return {
+        "platform": sys.platform,
+        "freecad_path": sys_config.freecad_path,
+        "freecad_python": sys_config.freecad_python,
+        "freecad_cmd": sys_config.freecad_cmd,
+        "freecad_lib": sys_config.freecad_lib,
+        "freecad_mod": sys_config.freecad_mod,
+        "freecad_runtime_root": env.get("FREECAD_RUNTIME_ROOT", ""),
+        "path_entries": path_entries[:12],
+    }
+
+
+def _print_runtime_debug_snapshot(prefix: str, snapshot: dict) -> None:
+    print(f"{prefix} platform: {snapshot.get('platform') or '(empty)'}")
+    print(f"{prefix} FREECAD_PATH: {snapshot.get('freecad_path') or '(empty)'}")
+    print(f"{prefix} FREECAD_PYTHON: {snapshot.get('freecad_python') or '(empty)'}")
+    print(f"{prefix} FREECAD_CMD: {snapshot.get('freecad_cmd') or '(empty)'}")
+    print(f"{prefix} FREECAD_LIB: {snapshot.get('freecad_lib') or '(empty)'}")
+    print(f"{prefix} FREECAD_MOD: {snapshot.get('freecad_mod') or '(empty)'}")
+    print(f"{prefix} FREECAD_RUNTIME_ROOT: {snapshot.get('freecad_runtime_root') or '(empty)'}")
+    for entry in snapshot.get("path_entries", []):
+        print(f"{prefix} PATH+: {entry}")
 
 def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     """Run FreeCAD unfold and export both DXF and STEP of flat pattern.
@@ -172,6 +212,9 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     fc_lib = sys_config.freecad_lib
     fc_mod = sys_config.freecad_mod
     unfold_settings = _get_unfold_runtime_settings()
+    freecad_python = sys_config.freecad_python
+    freecad_env = _build_freecad_subprocess_env(sys_config)
+    debug_snapshot = _runtime_debug_snapshot(sys_config, freecad_env)
 
     # Build unfold script that exports STEP
     unfold_script = f'''
@@ -697,26 +740,26 @@ print("UNFOLD_RESULT:" + json.dumps(result))
 
     # Pre-flight diagnostics
     sys_config = SystemConfig.from_env()
-    print(f"    FreeCAD Python: {FREECAD_PYTHON or '(empty)'}")
+    print(f"    FreeCAD Python: {freecad_python or '(empty)'}")
     print(f"    FreeCAD root:   {sys_config.freecad_path or '(empty)'}")
     print(f"    FreeCAD cmd:    {sys_config.freecad_cmd or '(empty)'}")
+    _print_runtime_debug_snapshot("    [runtime]", debug_snapshot)
 
-    if not FREECAD_PYTHON or not os.path.exists(FREECAD_PYTHON):
+    if not freecad_python or not os.path.exists(freecad_python):
         msg = (
-            f"FreeCAD Python not found at \"{FREECAD_PYTHON or '(empty)'}\".\n"
+            f"FreeCAD Python not found at \"{freecad_python or '(empty)'}\".\n"
             f"    Install FreeCAD or set FREECAD_PYTHON=C:\\path\\to\\python.exe"
         )
         print(f"    [!] {msg}")
         return {"success": False, "error": msg}
 
     try:
-        proc_env = _build_freecad_subprocess_env(sys_config)
         proc = subprocess.run(
-            [FREECAD_PYTHON, "-c", unfold_script],
+            [freecad_python, "-c", unfold_script],
             capture_output=True,
             text=True,
             timeout=unfold_settings["runtime_timeout_sec"],
-            env=proc_env,
+            env=freecad_env,
         )
 
         if proc.returncode != 0:
@@ -724,6 +767,7 @@ print("UNFOLD_RESULT:" + json.dumps(result))
             if stderr:
                 for line in stderr.split('\n')[:10]:
                     print(f"    [FreeCAD stderr] {line}")
+            _print_runtime_debug_snapshot("    [runtime-failure]", debug_snapshot)
             return {"success": False, "error": f"FreeCAD exited {proc.returncode}: {stderr[:300]}"}
 
         # Parse result
@@ -756,19 +800,23 @@ print("UNFOLD_RESULT:" + json.dumps(result))
             print(f"    [FreeCAD stderr (last 5 lines)]:")
             for line in stderr.split('\n')[-5:]:
                 print(f"      {line}")
+        _print_runtime_debug_snapshot("    [runtime-no-result]", debug_snapshot)
 
         return {"success": False, "error": "No result returned"}
 
     except subprocess.TimeoutExpired:
+        _print_runtime_debug_snapshot("    [runtime-timeout]", debug_snapshot)
         return {"success": False, "error": f"Timeout (>{unfold_settings['runtime_timeout_sec']}s)"}
     except FileNotFoundError:
         msg = (
-            f"FreeCAD executable not found: \"{FREECAD_PYTHON}\".\n"
+            f"FreeCAD executable not found: \"{freecad_python}\".\n"
             f"    Install FreeCAD or set FREECAD_PYTHON=C:\\path\\to\\python.exe"
         )
         print(f"    [!] {msg}")
+        _print_runtime_debug_snapshot("    [runtime-missing]", debug_snapshot)
         return {"success": False, "error": msg}
     except Exception as e:
+        _print_runtime_debug_snapshot("    [runtime-exception]", debug_snapshot)
         return {"success": False, "error": str(e)}
 
 
@@ -784,12 +832,16 @@ def run_unfold(step_file, output_dir, part_name, analysis):
         print(f"  [!] Unfold script not found: {unfold_script}")
         return unfold_result
 
+    sys_config = SystemConfig.from_env()
+    freecad_env = _build_freecad_subprocess_env(sys_config)
+
     try:
         result = subprocess.run(
             [HOST_PYTHON, unfold_script, step_file, "-o", dxf_output],
             capture_output=True,
             text=True,
-            timeout=unfold_settings["runtime_timeout_sec"]
+            env=freecad_env,
+            timeout=unfold_settings["runtime_timeout_sec"],
         )
 
         if result.returncode == 0:
@@ -848,6 +900,10 @@ def run_unfold(step_file, output_dir, part_name, analysis):
 def run_theoretical_unfold(step_file, analysis):
     """Calculate theoretical unfold dimensions when automatic unfold fails."""
     try:
+        sys_config = SystemConfig.from_env()
+        freecad_python = sys_config.freecad_python
+        freecad_env = _build_freecad_subprocess_env(sys_config)
+
         # Run theoretical calculation via FreeCAD Python
         calc_code = f'''
 import sys
@@ -859,10 +915,11 @@ result = calculate_theoretical_unfold({repr(step_file)})
 print("THEORETICAL_RESULT:" + json.dumps(result))
 '''
         result = subprocess.run(
-            [FREECAD_PYTHON, "-c", calc_code],
+            [freecad_python, "-c", calc_code],
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=60,
+            env=freecad_env,
         )
 
         # Parse result
