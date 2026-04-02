@@ -5,9 +5,19 @@ import sys
 import math
 import json
 import subprocess
+import threading
+import queue
+import uuid
+import atexit
+from types import SimpleNamespace
 
+from manufacturing_pipeline.analysis import freecad_unfold
 from manufacturing_pipeline.core.config import SystemConfig
+<<<<<<< HEAD
 from manufacturing_pipeline.core.thresholds import get_unfold_thresholds
+=======
+from manufacturing_pipeline.core.freecad_vendor import ensure_vendor_sheetmetal_on_sys_path
+>>>>>>> directunfold
 
 from manufacturing_pipeline.core.paths import PIPELINE_DIR, SCRIPTS_DIR
 
@@ -42,6 +52,7 @@ if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
 
+<<<<<<< HEAD
 def _get_unfold_runtime_settings(config_path=None):
     """Return unfold thresholds normalized for runtime use."""
     unfold_thresholds = get_unfold_thresholds(config_path)
@@ -73,6 +84,219 @@ def _get_unfold_runtime_settings(config_path=None):
     }
 
 
+=======
+_PERSISTENT_FREECAD_WORKERS = {}
+_PERSISTENT_FREECAD_WORKERS_LOCK = threading.Lock()
+
+
+class _PersistentFreeCADWorkerClient:
+    def __init__(self, sys_config: SystemConfig) -> None:
+        self._sys_config = sys_config
+        self._process = None
+        self._reader_thread = None
+        self._responses = {}
+        self._responses_lock = threading.Lock()
+        self._start()
+
+    def _start(self) -> None:
+        freecad_python = self._sys_config.freecad_python
+        if not freecad_python or not os.path.exists(freecad_python):
+            raise RuntimeError(f"FreeCAD Python runtime niet gevonden: {freecad_python or '(empty)'}")
+
+        env = _build_freecad_subprocess_env(self._sys_config)
+        env["FREECAD_UNFOLD_MODE"] = "direct"
+        env["FREECAD_UNFOLDER_VARIANT"] = _unfolder_variant_mode()
+        self._process = subprocess.Popen(
+            [freecad_python, "-m", "manufacturing_pipeline.tools.freecad_unfold_worker"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+            bufsize=1,
+        )
+        ready_line = self._process.stdout.readline().strip() if self._process.stdout else ""
+        if not ready_line:
+            raise RuntimeError("FreeCAD worker gaf geen startup handshake terug")
+        try:
+            ready = json.loads(ready_line)
+        except Exception as exc:
+            raise RuntimeError(f"Ongeldige worker handshake: {ready_line}") from exc
+        if ready.get("type") != "ready":
+            raise RuntimeError(f"Onverwachte worker handshake: {ready_line}")
+        self._reader_thread = threading.Thread(target=self._read_stdout_loop, daemon=True)
+        self._reader_thread.start()
+
+    def _read_stdout_loop(self) -> None:
+        if self._process is None or self._process.stdout is None:
+            return
+        for raw_line in self._process.stdout:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                message = json.loads(line)
+            except Exception:
+                continue
+            request_id = message.get("id")
+            if not request_id:
+                continue
+            with self._responses_lock:
+                response_queue = self._responses.get(request_id)
+            if response_queue is not None:
+                response_queue.put(message.get("payload"))
+
+    def request(self, *, step_file: str, output_dir: str, part_name: str, timeout_seconds: int, variant: str) -> dict:
+        if self._process is None or self._process.stdin is None:
+            raise RuntimeError("FreeCAD worker is niet gestart")
+        if self._process.poll() is not None:
+            raise RuntimeError(f"FreeCAD worker stopte onverwacht met code {self._process.returncode}")
+
+        request_id = str(uuid.uuid4())
+        response_queue = queue.Queue(maxsize=1)
+        with self._responses_lock:
+            self._responses[request_id] = response_queue
+
+        try:
+            payload = {
+                "id": request_id,
+                "step_file": step_file,
+                "output_dir": output_dir,
+                "part_name": part_name,
+                "variant": variant,
+                "k_factor": 0.44,
+            }
+            self._process.stdin.write(json.dumps(payload) + "\n")
+            self._process.stdin.flush()
+            return response_queue.get(timeout=timeout_seconds)
+        except queue.Empty as exc:
+            raise RuntimeError(f"FreeCAD worker timeout na {timeout_seconds}s") from exc
+        finally:
+            with self._responses_lock:
+                self._responses.pop(request_id, None)
+
+    def close(self) -> None:
+        process = self._process
+        self._process = None
+        if process is None:
+            return
+        try:
+            if process.stdin:
+                process.stdin.close()
+        except Exception:
+            pass
+        try:
+            process.terminate()
+        except Exception:
+            pass
+
+
+def _close_persistent_freecad_workers() -> None:
+    with _PERSISTENT_FREECAD_WORKERS_LOCK:
+        workers = list(_PERSISTENT_FREECAD_WORKERS.values())
+        _PERSISTENT_FREECAD_WORKERS.clear()
+    for worker in workers:
+        try:
+            worker.close()
+        except Exception:
+            pass
+
+
+atexit.register(_close_persistent_freecad_workers)
+
+
+def _persistent_freecad_worker_enabled() -> bool:
+    value = os.getenv("FREECAD_PERSISTENT_WORKER", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _worker_cache_key(sys_config: SystemConfig) -> str:
+    return os.path.abspath(sys_config.freecad_python or "")
+
+
+def _get_persistent_freecad_worker(sys_config: SystemConfig) -> _PersistentFreeCADWorkerClient:
+    key = _worker_cache_key(sys_config)
+    with _PERSISTENT_FREECAD_WORKERS_LOCK:
+        worker = _PERSISTENT_FREECAD_WORKERS.get(key)
+        if worker is None:
+            worker = _PersistentFreeCADWorkerClient(sys_config)
+            _PERSISTENT_FREECAD_WORKERS[key] = worker
+        return worker
+
+
+def _build_freecad_subprocess_env(sys_config: SystemConfig) -> dict:
+    """Build an env that can resolve managed FreeCAD binaries and DLLs."""
+    env = os.environ.copy()
+
+    extra_path_parts = []
+    runtime_root = ""
+    try:
+        runtime_root = sys_config._managed_runtime_value("runtime_root")
+    except Exception:
+        runtime_root = ""
+
+    for candidate in (
+        os.path.join(runtime_root, "Library", "bin") if runtime_root else "",
+        os.path.join(runtime_root, "Library", "mingw-w64", "bin") if runtime_root else "",
+        os.path.join(runtime_root, "bin") if runtime_root else "",
+        sys_config.freecad_lib,
+        sys_config.freecad_mod,
+    ):
+        if candidate and os.path.isdir(candidate) and candidate not in extra_path_parts:
+            extra_path_parts.append(candidate)
+
+    if extra_path_parts:
+        path_sep = ";" if sys.platform.startswith("win") else ":"
+        existing = env.get("PATH", "")
+        env["PATH"] = path_sep.join(extra_path_parts + ([existing] if existing else []))
+
+    env_updates = {
+        "FREECAD_PATH": sys_config.freecad_path,
+        "FREECAD_PYTHON": sys_config.freecad_python,
+        "FREECAD_CMD": sys_config.freecad_cmd,
+        "FREECAD_LIB": sys_config.freecad_lib,
+        "FREECAD_MOD": sys_config.freecad_mod,
+    }
+    if runtime_root:
+        env_updates["FREECAD_RUNTIME_ROOT"] = runtime_root
+
+    for key, value in env_updates.items():
+        if value:
+            env[key] = value
+
+    return env
+
+
+def _runtime_debug_snapshot(sys_config: SystemConfig, env: dict) -> dict:
+    """Collect a compact runtime snapshot for diagnostics."""
+    path_sep = ";" if sys.platform.startswith("win") else ":"
+    path_value = env.get("PATH", "")
+    path_entries = [entry for entry in path_value.split(path_sep) if entry]
+    return {
+        "platform": sys.platform,
+        "freecad_path": sys_config.freecad_path,
+        "freecad_python": sys_config.freecad_python,
+        "freecad_cmd": sys_config.freecad_cmd,
+        "freecad_lib": sys_config.freecad_lib,
+        "freecad_mod": sys_config.freecad_mod,
+        "freecad_runtime_root": env.get("FREECAD_RUNTIME_ROOT", ""),
+        "path_entries": path_entries[:12],
+    }
+
+
+def _print_runtime_debug_snapshot(prefix: str, snapshot: dict) -> None:
+    print(f"{prefix} platform: {snapshot.get('platform') or '(empty)'}")
+    print(f"{prefix} FREECAD_PATH: {snapshot.get('freecad_path') or '(empty)'}")
+    print(f"{prefix} FREECAD_PYTHON: {snapshot.get('freecad_python') or '(empty)'}")
+    print(f"{prefix} FREECAD_CMD: {snapshot.get('freecad_cmd') or '(empty)'}")
+    print(f"{prefix} FREECAD_LIB: {snapshot.get('freecad_lib') or '(empty)'}")
+    print(f"{prefix} FREECAD_MOD: {snapshot.get('freecad_mod') or '(empty)'}")
+    print(f"{prefix} FREECAD_RUNTIME_ROOT: {snapshot.get('freecad_runtime_root') or '(empty)'}")
+    for entry in snapshot.get("path_entries", []):
+        print(f"{prefix} PATH+: {entry}")
+
+
+>>>>>>> directunfold
 def _summarize_unfold_failure(result):
     """Build a readable error from structured unfold failure details."""
     if not result:
@@ -112,22 +336,82 @@ def _summarize_unfold_failure(result):
 
     return f"Unfold gefaald na {attempts} pogingen zonder bruikbare foutmelding"
 
-def run_unfold_to_step(step_file, output_dir, part_name, analysis):
-    """Run FreeCAD unfold and export both DXF and STEP of flat pattern.
 
-    Returns dict with:
-    - success: bool
-    - flat_step_path: path to flat STEP file
-    - flat_length, flat_width: dimensions
-    - fold_lines: number of bends
-    """
-    # Get system config for paths
-    sys_config = SystemConfig.from_env()
+def _first_existing(candidates):
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return ""
+
+
+def _resolve_windows_desktop_freecad_config():
+    if not sys.platform.startswith("win"):
+        return None
+
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    install_roots = []
+    for base in (program_files, program_files_x86):
+        if not base:
+            continue
+        install_roots.extend([
+            os.path.join(base, "FreeCAD 1.0"),
+            os.path.join(base, "FreeCAD"),
+            os.path.join(base, "FreeCAD 0.21"),
+        ])
+
+    for root in install_roots:
+        cmd_path = _first_existing([
+            os.path.join(root, "bin", "FreeCADCmd.exe"),
+            os.path.join(root, "bin", "freecadcmd.exe"),
+            os.path.join(root, "Library", "bin", "FreeCADCmd.exe"),
+            os.path.join(root, "Library", "bin", "freecadcmd.exe"),
+        ])
+        if not cmd_path:
+            continue
+
+        python_path = _first_existing([
+            os.path.join(root, "python.exe"),
+            os.path.join(root, "Library", "bin", "python.exe"),
+            os.path.join(root, "bin", "python.exe"),
+            cmd_path,
+        ])
+        lib_path = _first_existing([
+            os.path.join(root, "Library", "bin"),
+            os.path.join(root, "Library", "lib"),
+            os.path.join(root, "Lib", "site-packages"),
+            os.path.join(root, "bin"),
+        ])
+        mod_path = _first_existing([
+            os.path.join(root, "Mod"),
+            os.path.join(root, "Library", "Mod"),
+        ])
+
+        return SimpleNamespace(
+            freecad_path=root,
+            freecad_python=python_path,
+            freecad_cmd=cmd_path,
+            freecad_lib=lib_path,
+            freecad_mod=mod_path,
+            _managed_runtime_value=lambda key: "",
+        )
+
+    return None
+
+
+def _run_unfold_subprocess_attempt(step_file, output_dir, part_name, sys_config, runtime_label="managed"):
     fc_lib = sys_config.freecad_lib
     fc_mod = sys_config.freecad_mod
+<<<<<<< HEAD
     unfold_settings = _get_unfold_runtime_settings()
+=======
+    freecad_python = sys_config.freecad_python
+    freecad_env = _build_freecad_subprocess_env(sys_config)
+    debug_snapshot = _runtime_debug_snapshot(sys_config, freecad_env)
+    vendor_root = ensure_vendor_sheetmetal_on_sys_path()
+    freecad_env["FREECAD_UNFOLDER_VARIANT"] = _unfolder_variant_mode()
+>>>>>>> directunfold
 
-    # Build unfold script that exports STEP
     unfold_script = f'''
 import sys
 import os
@@ -139,7 +423,9 @@ import traceback
 # FreeCAD paths
 freecad_lib = {repr(fc_lib)}
 freecad_mod = {repr(fc_mod)}
+vendor_root = {repr(vendor_root)}
 UNFOLD_ERROR_MESSAGES = {repr(UNFOLD_ERROR_MESSAGES)}
+unfolder_variant_mode = os.environ.get("FREECAD_UNFOLDER_VARIANT", "auto").strip().lower()
 
 if platform.system() == "Darwin":
     freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
@@ -150,6 +436,7 @@ sys.path.insert(0, freecad_lib)
 sys.path.insert(0, freecad_mod)
 sys.path.insert(0, freecad_user_mod)
 sys.path.insert(0, os.path.join(freecad_user_mod, "sheetmetal"))
+sys.path.insert(0, vendor_root)
 
 # Mock GUI with proper Selection that returns an object with Refine attribute
 class MockObject:
@@ -173,7 +460,22 @@ sys.modules["FreeCADGui"] = MockGui()
 
 import FreeCAD
 import Part
+if vendor_root and os.path.isdir(vendor_root):
+    sys.path.insert(0, vendor_root)
+for mod_name in ("SheetMetalLogger", "SheetMetalUnfolder", "SheetMetalTools", "lookup"):
+    sys.modules.pop(mod_name, None)
 import SheetMetalUnfolder
+sheetmetal_source = getattr(SheetMetalUnfolder, "__file__", "")
+new_unfolder_available = False
+new_unfolder_import_error = ""
+try:
+    import SheetMetalNewUnfolder
+    from SheetMetalNewUnfolder import BendAllowanceCalculator
+    new_unfolder_available = True
+except Exception as exc:
+    SheetMetalNewUnfolder = None
+    BendAllowanceCalculator = None
+    new_unfolder_import_error = str(exc)
 
 # Load STEP
 step_path = {repr(step_file)}
@@ -388,6 +690,144 @@ def _record_error(target, face_idx, stage, error_code, message, tb=None):
         detail["traceback"] = tb
     target["error_details"].append(detail)
 
+def _extract_fold_segments_from_edges(fold_edges):
+    fold_details = []
+    bend_line_segments = []
+    for i, line in enumerate(fold_edges or []):
+        try:
+            bb = line.BoundBox
+            center = bb.Center
+            length = line.Length
+            start_pt = None
+            end_pt = None
+            try:
+                vertices = getattr(line, "Vertexes", None) or []
+                if len(vertices) >= 2:
+                    start_pt = vertices[0].Point
+                    end_pt = vertices[-1].Point
+            except:
+                start_pt = None
+                end_pt = None
+            x_len = bb.XLength
+            y_len = bb.YLength
+            seg_axis = "x" if x_len >= y_len else "y"
+            if start_pt is not None and end_pt is not None:
+                dx = abs(float(end_pt.x) - float(start_pt.x))
+                dy = abs(float(end_pt.y) - float(start_pt.y))
+                seg_axis = "y" if dy > dx else "x"
+            axis_span = (
+                (bb.XMin, bb.XMax)
+                if seg_axis == "x"
+                else (bb.YMin, bb.YMax)
+            )
+            fold_details.append({{
+                "id": i + 1,
+                "length": length,
+                "center": (center.x, center.y, center.z),
+                "axis": seg_axis,
+                "axis_span": axis_span,
+                "start": (start_pt.x, start_pt.y, start_pt.z) if start_pt is not None else None,
+                "end": (end_pt.x, end_pt.y, end_pt.z) if end_pt is not None else None
+            }})
+            bend_line_segments.append({{
+                "index": i,
+                "axis": seg_axis.upper(),
+                "center": (center.x, center.y, center.z),
+                "length": length,
+                "axis_span": axis_span,
+                "start": (start_pt.x, start_pt.y, start_pt.z) if start_pt is not None else None,
+                "end": (end_pt.x, end_pt.y, end_pt.z) if end_pt is not None else None
+            }})
+        except:
+            pass
+    return fold_details, bend_line_segments
+
+def _attempt_new_unfolder(obj, base_idx, detected_thickness):
+    if not new_unfolder_available:
+        raise RuntimeError(new_unfolder_import_error or "SheetMetalNewUnfolder niet beschikbaar")
+
+    bac = BendAllowanceCalculator.from_single_value(0.44, "ansi")
+    facename = f"Face{{base_idx + 1}}"
+    _sel_face, unfolded_shape, bend_lines_compound, _root_normal, bend_infodata = SheetMetalNewUnfolder.getUnfold(
+        bac,
+        obj,
+        facename,
+    )
+    if unfolded_shape is None:
+        raise RuntimeError("New unfolder returned no unfolded shape")
+
+    bbox = unfolded_shape.BoundBox
+    dims = sorted([bbox.XLength, bbox.YLength, bbox.ZLength], reverse=True)
+
+    flat_step_path = os.path.join({repr(output_dir)}, {repr(part_name)} + "_flat.step")
+    unfolded_shape.exportStep(flat_step_path)
+
+    dxf_path = os.path.join({repr(output_dir)}, {repr(part_name)} + "_flat.dxf")
+    import importDXF
+    importDXF.export([unfolded_shape], dxf_path)
+
+    fold_edges = bend_lines_compound.Edges if bend_lines_compound else []
+    fold_details, bend_line_segments = _extract_fold_segments_from_edges(fold_edges)
+
+    bend_angles = []
+    bend_radii = []
+    bend_lengths = []
+    bends_logical = []
+    for info in bend_infodata or []:
+        try:
+            angle = round(float(getattr(info, "angle", 0.0)), 2)
+            radius = round(float(getattr(info, "radius", 0.0)), 2)
+            line = getattr(info, "line", None)
+            length = round(float(line.Length), 2) if line is not None else None
+            bend_angles.append(angle)
+            bend_radii.append(radius)
+            if length is not None:
+                bend_lengths.append(length)
+            bends_logical.append({{
+                "type": "up" if angle >= 0 else "down",
+                "angle": abs(angle),
+                "radius": radius,
+            }})
+        except:
+            pass
+
+    merged_fold_details, merged_bends_logical, bend_line_groups = _merge_fold_segments(
+        bend_line_segments,
+        bends_logical,
+    )
+    if merged_fold_details:
+        display_fold_lines = len(merged_fold_details)
+        display_fold_details = merged_fold_details
+        display_bends_logical = merged_bends_logical
+    else:
+        display_fold_lines = len(fold_edges)
+        display_fold_details = fold_details
+        display_bends_logical = bends_logical
+
+    return {{
+        "success": True,
+        "flat_step_path": flat_step_path,
+        "flat_length": dims[0] if len(dims) > 0 else 0.0,
+        "flat_width": dims[1] if len(dims) > 1 else 0.0,
+        "fold_lines": display_fold_lines,
+        "raw_fold_lines": len(fold_edges),
+        "thickness": detected_thickness,
+        "fold_details": display_fold_details,
+        "bend_line_segments": bend_line_segments,
+        "bend_line_groups": bend_line_groups,
+        "bends_logical": display_bends_logical,
+        "bend_angles": bend_angles,
+        "bend_radii": bend_radii,
+        "bend_lengths": bend_lengths,
+        "bend_count": len(bend_angles),
+        "attempts": 0,
+        "error_details": [],
+        "first_traceback": None,
+        "sheetmetal_source": getattr(SheetMetalNewUnfolder, "__file__", ""),
+        "unfolder_variant": "new",
+        "used_face_idx": base_idx,
+    }}
+
 result = {{
     "success": False,
     "error": None,
@@ -437,6 +877,24 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
             obj = doc.addObject("Part::Feature", "SheetPart")
             obj.Shape = solid
             doc.recompute()
+
+            should_try_new = unfolder_variant_mode in ("auto", "new")
+            if should_try_new:
+                try:
+                    new_result = _attempt_new_unfolder(obj, base_idx, detected_thickness)
+                    new_result["attempts"] = result.get("attempts", 0)
+                    new_result["error_details"] = result.get("error_details", [])
+                    new_result["first_traceback"] = result.get("first_traceback")
+                    result = new_result
+                    best_score = max(best_score, len(new_result.get("bend_line_segments") or []))
+                    FreeCAD.closeDocument("UnfoldDoc")
+                    continue
+                except Exception as new_exc:
+                    print(f"DEBUG: new unfolder failed on face {{base_idx}}: {{new_exc}}")
+                    _record_error(result, base_idx, "new_unfolder", -3, str(new_exc))
+                    if unfolder_variant_mode == "new":
+                        FreeCAD.closeDocument("UnfoldDoc")
+                        continue
 
             unfold_tree = build_sheet_tree(solid, base_idx, kFactorLookup, obj)
             if unfold_tree.error_code:
@@ -596,6 +1054,9 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
                                 "attempts": result.get("attempts", 0),
                                 "error_details": result.get("error_details", []),
                                 "first_traceback": result.get("first_traceback"),
+                                "sheetmetal_source": sheetmetal_source,
+                                "unfolder_variant": "old",
+                                "used_face_idx": base_idx,
                             }}
                 elif unfold_tree.error_code:
                     _record_error(
@@ -647,16 +1108,15 @@ if not result.get("success"):
 
 print("UNFOLD_RESULT:" + json.dumps(result))
 '''
-
-    # Pre-flight diagnostics
-    sys_config = SystemConfig.from_env()
-    print(f"    FreeCAD Python: {FREECAD_PYTHON or '(empty)'}")
+    print(f"    FreeCAD runtime source: {runtime_label}")
+    print(f"    FreeCAD Python: {freecad_python or '(empty)'}")
     print(f"    FreeCAD root:   {sys_config.freecad_path or '(empty)'}")
     print(f"    FreeCAD cmd:    {sys_config.freecad_cmd or '(empty)'}")
+    _print_runtime_debug_snapshot("    [runtime]", debug_snapshot)
 
-    if not FREECAD_PYTHON or not os.path.exists(FREECAD_PYTHON):
+    if not freecad_python or not os.path.exists(freecad_python):
         msg = (
-            f"FreeCAD Python not found at \"{FREECAD_PYTHON or '(empty)'}\".\n"
+            f"FreeCAD Python not found at \"{freecad_python or '(empty)'}\".\n"
             f"    Install FreeCAD or set FREECAD_PYTHON=C:\\path\\to\\python.exe"
         )
         print(f"    [!] {msg}")
@@ -664,10 +1124,11 @@ print("UNFOLD_RESULT:" + json.dumps(result))
 
     try:
         proc = subprocess.run(
-            [FREECAD_PYTHON, "-c", unfold_script],
+            [freecad_python, "-c", unfold_script],
             capture_output=True,
             text=True,
-            timeout=unfold_settings["runtime_timeout_sec"]
+            timeout=unfold_settings["runtime_timeout_sec"],
+            env=freecad_env,
         )
 
         if proc.returncode != 0:
@@ -675,6 +1136,7 @@ print("UNFOLD_RESULT:" + json.dumps(result))
             if stderr:
                 for line in stderr.split('\n')[:10]:
                     print(f"    [FreeCAD stderr] {line}")
+            _print_runtime_debug_snapshot("    [runtime-failure]", debug_snapshot)
             return {"success": False, "error": f"FreeCAD exited {proc.returncode}: {stderr[:300]}"}
 
         # Parse result
@@ -707,20 +1169,279 @@ print("UNFOLD_RESULT:" + json.dumps(result))
             print(f"    [FreeCAD stderr (last 5 lines)]:")
             for line in stderr.split('\n')[-5:]:
                 print(f"      {line}")
+        _print_runtime_debug_snapshot("    [runtime-no-result]", debug_snapshot)
 
         return {"success": False, "error": "No result returned"}
 
     except subprocess.TimeoutExpired:
+        _print_runtime_debug_snapshot("    [runtime-timeout]", debug_snapshot)
         return {"success": False, "error": f"Timeout (>{unfold_settings['runtime_timeout_sec']}s)"}
     except FileNotFoundError:
         msg = (
-            f"FreeCAD executable not found: \"{FREECAD_PYTHON}\".\n"
+            f"FreeCAD executable not found: \"{freecad_python}\".\n"
             f"    Install FreeCAD or set FREECAD_PYTHON=C:\\path\\to\\python.exe"
         )
         print(f"    [!] {msg}")
+        _print_runtime_debug_snapshot("    [runtime-missing]", debug_snapshot)
         return {"success": False, "error": msg}
     except Exception as e:
+        _print_runtime_debug_snapshot("    [runtime-exception]", debug_snapshot)
         return {"success": False, "error": str(e)}
+
+
+def _export_flat_step(flat_shape, flat_step_path):
+    if flat_shape is None:
+        return ""
+    os.makedirs(os.path.dirname(flat_step_path), exist_ok=True)
+    exporter = getattr(flat_shape, "exportStep", None)
+    if callable(exporter):
+        exporter(flat_step_path)
+        return flat_step_path
+    raise RuntimeError("Flat shape cannot be exported to STEP")
+
+
+def _unfolder_variant_mode() -> str:
+    value = os.getenv("FREECAD_UNFOLDER_VARIANT", "auto").strip().lower()
+    if value in {"new", "old"}:
+        return value
+    return "auto"
+
+
+def _run_direct_unfold_attempt(step_file, output_dir, part_name):
+    ensure_vendor_sheetmetal_on_sys_path()
+    previous_mode = os.environ.get("FREECAD_UNFOLD_MODE")
+    previous_auto_install = os.environ.get("FREECAD_AUTO_INSTALL")
+    os.environ["FREECAD_UNFOLD_MODE"] = "direct"
+    os.environ["FREECAD_AUTO_INSTALL"] = "0"
+    try:
+        if not freecad_unfold._ensure_freecad_imported():
+            return {
+                "success": False,
+                "error": f"FreeCAD niet direct importeerbaar in host Python: {freecad_unfold._FREECAD_IMPORT_ERROR or 'onbekende importfout'}",
+            }
+        dxf_path = os.path.join(output_dir, f"{part_name}_flat.dxf")
+        result = freecad_unfold.unfold_sheet_metal(
+            step_path=step_file,
+            output_dxf=dxf_path,
+        )
+    finally:
+        if previous_mode is None:
+            os.environ.pop("FREECAD_UNFOLD_MODE", None)
+        else:
+            os.environ["FREECAD_UNFOLD_MODE"] = previous_mode
+        if previous_auto_install is None:
+            os.environ.pop("FREECAD_AUTO_INSTALL", None)
+        else:
+            os.environ["FREECAD_AUTO_INSTALL"] = previous_auto_install
+
+    if result.get("success"):
+        flat_step_path = os.path.join(output_dir, f"{part_name}_flat.step")
+        flat_shape = result.get("flat_shape")
+        result["flat_step_path"] = _export_flat_step(flat_shape, flat_step_path)
+        result["runtime_source"] = "direct-vendored-sheetmetal"
+
+    return result
+
+
+def _run_direct_python_subprocess_attempt(step_file, output_dir, part_name, sys_config):
+    freecad_python = sys_config.freecad_python
+    if not freecad_python or not os.path.exists(freecad_python):
+        return {"success": False, "error": "FreeCAD Python runtime niet gevonden"}
+
+    freecad_env = _build_freecad_subprocess_env(sys_config)
+    freecad_env["FREECAD_UNFOLD_MODE"] = "direct"
+    vendor_root = ensure_vendor_sheetmetal_on_sys_path()
+    debug_snapshot = _runtime_debug_snapshot(sys_config, freecad_env)
+
+    script = f"""
+import json
+import os
+import sys
+
+sys.path.insert(0, {PIPELINE_DIR!r})
+sys.path.insert(0, {vendor_root!r})
+
+from manufacturing_pipeline.analysis import freecad_unfold
+
+result = freecad_unfold.unfold_sheet_metal(
+    step_path={step_file!r},
+    output_dxf={os.path.join(output_dir, f"{part_name}_flat.dxf")!r},
+)
+
+payload = {{
+    "success": bool(result.get("success")),
+    "error": result.get("error"),
+    "attempts": result.get("attempts"),
+    "error_details": result.get("error_details", []),
+    "flat_length": result.get("flat_length"),
+    "flat_width": result.get("flat_width"),
+    "bend_angles": result.get("bend_angles", []),
+    "bend_radii": result.get("bend_radii", []),
+    "bend_lengths": result.get("bend_lengths", []),
+    "bend_count": result.get("bend_count"),
+    "bend_line_segments": result.get("bend_line_segments", []),
+    "bend_line_groups": result.get("bend_line_groups", []),
+    "raw_fold_lines": result.get("raw_fold_lines"),
+    "used_face_idx": result.get("used_face_idx"),
+}}
+
+if result.get("success") and result.get("flat_shape") is not None:
+    flat_step_path = {os.path.join(output_dir, f"{part_name}_flat.step")!r}
+    result["flat_shape"].exportStep(flat_step_path)
+    payload["flat_step_path"] = flat_step_path
+else:
+    payload["flat_step_path"] = None
+
+print("DIRECT_UNFOLD_RESULT:" + json.dumps(payload))
+"""
+
+    try:
+        proc = subprocess.run(
+            [freecad_python, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            env=freecad_env,
+        )
+    except subprocess.TimeoutExpired:
+        _print_runtime_debug_snapshot("    [direct-python-timeout]", debug_snapshot)
+        return {"success": False, "error": "Timeout (>300s) in FreeCAD Python runtime"}
+    except FileNotFoundError:
+        _print_runtime_debug_snapshot("    [direct-python-missing]", debug_snapshot)
+        return {"success": False, "error": f"FreeCAD Python executable not found: {freecad_python}"}
+    except Exception as exc:
+        _print_runtime_debug_snapshot("    [direct-python-exception]", debug_snapshot)
+        return {"success": False, "error": str(exc)}
+
+    for line in reversed((proc.stdout or "").splitlines()):
+        if not line.startswith("DIRECT_UNFOLD_RESULT:"):
+            continue
+        try:
+            payload = json.loads(line.split("DIRECT_UNFOLD_RESULT:", 1)[1])
+        except Exception:
+            break
+        payload.setdefault("runtime_source", "direct-freecad-python")
+        return payload
+
+    stderr = (proc.stderr or "").strip()
+    if stderr:
+        for line in stderr.splitlines()[-8:]:
+            print(f"    [direct-python-stderr] {line}")
+    _print_runtime_debug_snapshot("    [direct-python-no-result]", debug_snapshot)
+    return {"success": False, "error": stderr or "No result returned from FreeCAD Python runtime"}
+
+
+def _run_direct_python_worker_attempt(step_file, output_dir, part_name, sys_config):
+    debug_snapshot = _runtime_debug_snapshot(sys_config, _build_freecad_subprocess_env(sys_config))
+    try:
+        worker = _get_persistent_freecad_worker(sys_config)
+        payload = worker.request(
+            step_file=step_file,
+            output_dir=output_dir,
+            part_name=part_name,
+            timeout_seconds=300,
+            variant=_unfolder_variant_mode(),
+        )
+    except Exception as exc:
+        _print_runtime_debug_snapshot("    [direct-python-worker-failure]", debug_snapshot)
+        return {
+            "success": False,
+            "error": str(exc),
+            "worker_transport_error": True,
+        }
+
+    if not isinstance(payload, dict):
+        return {
+            "success": False,
+            "error": "Ongeldig antwoord van FreeCAD worker",
+            "worker_transport_error": True,
+        }
+
+    payload.setdefault("runtime_source", "direct-freecad-python")
+    payload["worker_mode"] = "persistent"
+    return payload
+
+
+def run_unfold_to_step(step_file, output_dir, part_name, analysis):
+    """Run FreeCAD unfold and export both DXF and STEP of flat pattern.
+
+    Returns dict with:
+    - success: bool
+    - flat_step_path: path to flat STEP file
+    - flat_length, flat_width: dimensions
+    - fold_lines: number of bends
+    """
+    mode = os.getenv("FREECAD_UNFOLD_MODE", "auto").strip().lower()
+
+    direct_result = {"success": False, "error": "Host direct mode skipped"}
+    if mode not in {"direct-python", "python"}:
+        direct_result = _run_direct_unfold_attempt(step_file, output_dir, part_name)
+        if direct_result.get("success"):
+            return direct_result
+
+    sys_config = SystemConfig.from_env()
+    if _persistent_freecad_worker_enabled():
+        python_runtime_result = _run_direct_python_worker_attempt(
+            step_file,
+            output_dir,
+            part_name,
+            sys_config,
+        )
+        if python_runtime_result.get("worker_transport_error"):
+            python_runtime_result = _run_unfold_subprocess_attempt(
+                step_file,
+                output_dir,
+                part_name,
+                sys_config,
+                runtime_label="direct-freecad-python",
+            )
+    else:
+        python_runtime_result = _run_unfold_subprocess_attempt(
+            step_file,
+            output_dir,
+            part_name,
+            sys_config,
+            runtime_label="direct-freecad-python",
+        )
+    if python_runtime_result.get("success"):
+        python_runtime_result.setdefault("runtime_source", "direct-freecad-python")
+        python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
+        return python_runtime_result
+
+    if os.getenv("FREECAD_UNFOLD_DISABLE_FALLBACK", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return python_runtime_result if python_runtime_result.get("error") else direct_result
+
+    if not sys.platform.startswith("win"):
+        python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
+        return python_runtime_result
+
+    desktop_config = _resolve_windows_desktop_freecad_config()
+    if not desktop_config:
+        python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
+        return python_runtime_result
+    if os.path.abspath(str(desktop_config.freecad_cmd or "")) == os.path.abspath(str(sys_config.freecad_cmd or "")):
+        python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
+        return python_runtime_result
+
+    print("    [runtime-fallback] Direct FreeCAD Python runtime failed; retrying with desktop FreeCAD installation.")
+    fallback_result = _run_unfold_subprocess_attempt(
+        step_file,
+        output_dir,
+        part_name,
+        desktop_config,
+        runtime_label="desktop-freecad",
+    )
+    if fallback_result.get("success"):
+        fallback_result["runtime_source"] = "desktop-freecad"
+        fallback_result.setdefault("direct_runtime_error", direct_result.get("error"))
+        fallback_result.setdefault("python_runtime_error", python_runtime_result.get("error"))
+        return fallback_result
+
+    fallback_result.setdefault("runtime_source", "desktop-freecad")
+    fallback_result.setdefault("managed_runtime_error", python_runtime_result.get("error"))
+    fallback_result.setdefault("direct_runtime_error", direct_result.get("error"))
+    fallback_result.setdefault("python_runtime_error", python_runtime_result.get("error"))
+    return fallback_result
 
 
 
@@ -735,12 +1456,20 @@ def run_unfold(step_file, output_dir, part_name, analysis):
         print(f"  [!] Unfold script not found: {unfold_script}")
         return unfold_result
 
+    sys_config = SystemConfig.from_env()
+    freecad_env = _build_freecad_subprocess_env(sys_config)
+
     try:
         result = subprocess.run(
             [HOST_PYTHON, unfold_script, step_file, "-o", dxf_output],
             capture_output=True,
             text=True,
+<<<<<<< HEAD
             timeout=unfold_settings["runtime_timeout_sec"]
+=======
+            timeout=180,  # Increased timeout for multiple attempts
+            env=freecad_env,
+>>>>>>> directunfold
         )
 
         if result.returncode == 0:
@@ -799,6 +1528,10 @@ def run_unfold(step_file, output_dir, part_name, analysis):
 def run_theoretical_unfold(step_file, analysis):
     """Calculate theoretical unfold dimensions when automatic unfold fails."""
     try:
+        sys_config = SystemConfig.from_env()
+        freecad_python = sys_config.freecad_python
+        freecad_env = _build_freecad_subprocess_env(sys_config)
+
         # Run theoretical calculation via FreeCAD Python
         calc_code = f'''
 import sys
@@ -810,10 +1543,11 @@ result = calculate_theoretical_unfold({repr(step_file)})
 print("THEORETICAL_RESULT:" + json.dumps(result))
 '''
         result = subprocess.run(
-            [FREECAD_PYTHON, "-c", calc_code],
+            [freecad_python, "-c", calc_code],
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=60,
+            env=freecad_env,
         )
 
         # Parse result

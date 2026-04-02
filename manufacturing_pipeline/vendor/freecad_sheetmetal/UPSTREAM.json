@@ -1,0 +1,5 @@
+{
+  "repo": "https://github.com/shaise/FreeCAD_SheetMetal",
+  "commit": "local-working-snapshot",
+  "notes": "Vendored working SheetMetalUnfolder.py snapshot derived from a local FreeCAD SheetMetal installation because the shallow-cloned upstream snapshot did not reproduce the same unfold behavior on the reference STEP. SheetMetalTools.py remains a minimal pipeline compatibility shim."
+}

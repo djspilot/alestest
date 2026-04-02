@@ -22,7 +22,7 @@ Analyseert STEP CAD-bestanden: classificeert onderdelen, detecteert features (ga
 ### Vereisten
 
 - Python 3.10+
-- Voor plaatwerk ontvouwen: een headless FreeCAD runtime met SheetMetal broncode
+- Voor plaatwerk ontvouwen: een werkende FreeCAD Python/runtime; de unfoldercode is in deze repo gepind
 
 ### Installatie
 
@@ -86,9 +86,9 @@ Automatisch installeren tijdens pipeline-runs kan met:
 PIPELINE_AUTO_INSTALL_PY_DEPS=1 python run.py -f data/input/part.step
 ```
 
-### Headless unfold runtime
+### FreeCAD unfold runtime
 
-Voor ontvouwen is de desktop-app niet meer de aanbevolen route. Gebruik een beheerde headless runtime:
+Voor ontvouwen gebruikt de pipeline nu standaard directe in-process FreeCAD imports met een gepinde SheetMetal-unfolder uit deze repo. Gebruik voor provisioning een beheerde runtime:
 
 ```bash
 python -m manufacturing_pipeline.tools.ensure_unfold_runtime
@@ -96,8 +96,7 @@ python -m manufacturing_pipeline.tools.ensure_unfold_runtime
 
 Wat dit doet:
 - installeert een lokale FreeCAD runtime onder `.runtime/freecad` via `micromamba` of `conda`
-- haalt de `SheetMetal` workbench broncode op
-- verifieert `FreeCADCmd`, `Part` en `SheetMetalUnfolder`
+- verifieert `FreeCAD`, `Part` en de vendored `SheetMetalUnfolder`
 - slaat runtime-configuratie op zodat de pipeline die automatisch gebruikt
 
 Extra opties:
@@ -109,7 +108,7 @@ python -m manufacturing_pipeline.tools.ensure_unfold_runtime --force-reinstall
 python -m manufacturing_pipeline.tools.ensure_unfold_runtime --json
 ```
 
-Op macOS en Windows gebruikt de pipeline standaard de subprocess-route via `FreeCADCmd`.
+Op macOS en Windows gebruikt de pipeline standaard directe FreeCAD-imports. De oude `FreeCADCmd` subprocess-route blijft alleen tijdelijk als fallback bestaan.
 
 ### Analyse draaien
 
@@ -122,6 +121,15 @@ python run.py -f part.step --analyze       # Toon gedetailleerde redenering
 python run.py -f part.step --debug         # Debug gatdetectie
 python run.py -f part.step --no-unfold     # Sla ontvouwen over
 python run.py --list                       # Beschikbare STEP-bestanden
+```
+
+Direct unfold wrapper:
+
+```bash
+python unfold.py /pad/naar/part.step
+python unfold.py /pad/naar/part.step --variant auto
+python unfold.py /pad/naar/part.step --variant old
+python unfold.py /pad/naar/part.step --variant new
 ```
 
 ### Batchverwerking
@@ -139,12 +147,20 @@ python run.py --batch --json               # JSON output voor ERP
 python run_viewer.py
 ```
 
+### Server Deploy
+
+Zie [`HOSTINGER.md`](/Users/ds/AIdoel/alestest/deploy/HOSTINGER.md) voor:
+
+- Hostinger VPS deployment met `systemd + nginx`
+- losse viewer + API op aparte subdomeinen
+- Docker Compose templates voor API + viewer
+
 ## Belangrijkste features
 
 - **Classificatie (4 categorieën)** — Vlakke plaat, gezette plaat, profiel, anders
 - **Gatdetectie** — Cilindrische gaten + vormgaten (sleuven, rechthoeken), tapgaten (ISO 68-1), verzonken gaten
 - **Zetanalyse** — Productierelevante zettingen, profielherkenning, ERP-telling
-- **Plaatwerk ontvouwen** — Headless FreeCAD runtime + SheetMetal broncode, multi-poging strategie
+- **Plaatwerk ontvouwen** — Directe FreeCAD-integratie met gepinde SheetMetal-unfolder, multi-poging strategie
 - **ERP-integratie** — XML/Excel export in SpaceClaim-formaat
 
 ## Architectuur

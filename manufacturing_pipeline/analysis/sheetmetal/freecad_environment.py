@@ -4,6 +4,7 @@ import os
 import sys
 
 from manufacturing_pipeline.core import freecad_runtime
+from manufacturing_pipeline.core.freecad_vendor import ensure_vendor_sheetmetal_on_sys_path
 
 FreeCAD = None
 Part = None
@@ -89,7 +90,7 @@ def _should_prefer_freecadcmd() -> bool:
         return True
     if mode == "direct":
         return False
-    return sys.platform.startswith("win") or sys.platform == "darwin"
+    return False
 
 
 def _ensure_freecad_imported() -> bool:
@@ -98,13 +99,17 @@ def _ensure_freecad_imported() -> bool:
     if FreeCAD is not None and Part is not None:
         return True
 
+    ensure_vendor_sheetmetal_on_sys_path()
     for path in _candidate_freecad_paths():
         if path and os.path.isdir(path) and path not in sys.path:
             sys.path.insert(0, path)
+    for mod_name in ("SheetMetalLogger", "SheetMetalUnfolder", "SheetMetalTools", "lookup"):
+        sys.modules.pop(mod_name, None)
 
     try:
         import FreeCAD as _FreeCAD
         import Part as _Part
+        import SheetMetalUnfolder  # noqa: F401
 
         FreeCAD = _FreeCAD
         Part = _Part
@@ -120,12 +125,16 @@ def _ensure_freecad_imported() -> bool:
     except Exception as exc:
         _FREECAD_IMPORT_ERROR = str(exc)
         if _ensure_managed_runtime_available():
+            ensure_vendor_sheetmetal_on_sys_path()
             for path in _candidate_freecad_paths():
                 if path and os.path.isdir(path) and path not in sys.path:
                     sys.path.insert(0, path)
+            for mod_name in ("SheetMetalLogger", "SheetMetalUnfolder", "SheetMetalTools", "lookup"):
+                sys.modules.pop(mod_name, None)
             try:
                 import FreeCAD as _FreeCAD
                 import Part as _Part
+                import SheetMetalUnfolder  # noqa: F401
 
                 FreeCAD = _FreeCAD
                 Part = _Part
