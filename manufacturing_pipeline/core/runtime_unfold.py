@@ -112,6 +112,52 @@ def _summarize_unfold_failure(result):
 
     return f"Unfold gefaald na {attempts} pogingen zonder bruikbare foutmelding"
 
+
+def _build_freecad_subprocess_env(sys_config):
+    """Build an isolated environment for headless FreeCAD subprocesses.
+
+    The managed runtime ships its own SheetMetal workbench under the runtime
+    `Mod` folder. Without isolating the user profile, FreeCAD may still pick up
+    `%APPDATA%\\FreeCAD\\Mod\\SheetMetal`, which makes unfold behavior depend on
+    workstation-local add-ons. We force a local profile root under the managed
+    runtime and prepend the runtime DLL paths so imports stay deterministic.
+    """
+    runtime_root = str(sys_config.freecad_path or "")
+    env = os.environ.copy()
+
+    extra_path_parts = []
+    for candidate in (
+        os.path.join(runtime_root, "Library", "bin"),
+        os.path.join(runtime_root, "Library", "mingw-w64", "bin"),
+        os.path.join(runtime_root, "bin"),
+        str(sys_config.freecad_lib or ""),
+    ):
+        if candidate and os.path.isdir(candidate) and candidate not in extra_path_parts:
+            extra_path_parts.append(candidate)
+
+    if extra_path_parts:
+        path_sep = ";" if sys.platform.startswith("win") else ":"
+        existing = env.get("PATH", "")
+        env["PATH"] = path_sep.join(extra_path_parts) + path_sep + existing
+
+    isolated_profile_root = os.path.join(runtime_root, "_freecad_profile")
+    isolated_appdata = os.path.join(isolated_profile_root, "AppData", "Roaming")
+    isolated_localappdata = os.path.join(isolated_profile_root, "AppData", "Local")
+    isolated_freecad_home = os.path.join(isolated_appdata, "FreeCAD")
+    isolated_mod = os.path.join(isolated_freecad_home, "Mod")
+
+    os.makedirs(isolated_mod, exist_ok=True)
+    os.makedirs(isolated_localappdata, exist_ok=True)
+
+    env["FREECAD_USER_HOME"] = isolated_freecad_home
+    env["APPDATA"] = isolated_appdata
+    env["LOCALAPPDATA"] = isolated_localappdata
+    env["HOME"] = isolated_profile_root
+    env["USERPROFILE"] = isolated_profile_root
+    env["FREECAD_RUNTIME_ROOT"] = runtime_root
+
+    return env
+
 def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     """Run FreeCAD unfold and export both DXF and STEP of flat pattern.
 
@@ -139,6 +185,7 @@ import traceback
 # FreeCAD paths
 freecad_lib = {repr(fc_lib)}
 freecad_mod = {repr(fc_mod)}
+freecad_sheetmetal_mod = os.path.join(freecad_mod, "SheetMetal")
 UNFOLD_ERROR_MESSAGES = {repr(UNFOLD_ERROR_MESSAGES)}
 
 if platform.system() == "Darwin":
@@ -148,8 +195,8 @@ else:
 
 sys.path.insert(0, freecad_lib)
 sys.path.insert(0, freecad_mod)
-sys.path.insert(0, freecad_user_mod)
-sys.path.insert(0, os.path.join(freecad_user_mod, "sheetmetal"))
+if os.path.isdir(freecad_sheetmetal_mod):
+    sys.path.insert(0, freecad_sheetmetal_mod)
 
 # Mock GUI with proper Selection that returns an object with Refine attribute
 class MockObject:
@@ -663,11 +710,13 @@ print("UNFOLD_RESULT:" + json.dumps(result))
         return {"success": False, "error": msg}
 
     try:
+        proc_env = _build_freecad_subprocess_env(sys_config)
         proc = subprocess.run(
             [FREECAD_PYTHON, "-c", unfold_script],
             capture_output=True,
             text=True,
-            timeout=unfold_settings["runtime_timeout_sec"]
+            timeout=unfold_settings["runtime_timeout_sec"],
+            env=proc_env,
         )
 
         if proc.returncode != 0:

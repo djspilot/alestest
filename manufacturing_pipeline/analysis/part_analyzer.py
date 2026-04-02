@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple, Any
 from enum import Enum
 
+from manufacturing_pipeline.analysis.thickness_estimator import estimate_sheet_thickness
 from manufacturing_pipeline.analysis.part_analysis.rules import (
     classify_part_type,
     determine_unfold_reason,
@@ -341,47 +342,55 @@ def analyze_part_geometry(shape, name: str = "Part") -> PartAnalysis:
                     details={"planar_pct": planar_pct, "cyl_pct": cyl_pct}
                 ))
 
-        # Fallback 3: volume / top_area voor gebogen onderdelen
-        # Wanneer de planaire-face-methode een onjuiste dikte oplevert (bijv. 1mm i.p.v. 5mm)
-        # door cilindrische buitenvlakken die niet als planair worden herkend.
-        # Heuristiek: volume ≈ dikte × lengte × breedte → dikte ≈ volume / grootste_face_area
-        if not is_turned and cylindrical_area > 0 and detected_thickness < 1.5:
-            try:
-                from OCC.Core.BRep import BRep_Builder
-                from OCC.Core.GProp import GProp_GProps
-                from OCC.Core.BRepGProp import brepgprop_VolumeProperties
-                props = GProp_GProps()
-                brepgprop_VolumeProperties(shape, props)
-                vol = props.Mass()
-                planar_face_areas = [area for _, area in planar_faces if area > 0]
-                curved_face_areas = [area for _, area, _ in cylindrical_faces if area > 0]
-
-                # Prefer planar outer face area when available. For bent plates,
-                # largest cylindrical area can significantly overestimate area.
-                if planar_face_areas:
-                    top_area = max(planar_face_areas)
-                elif curved_face_areas:
-                    top_area = max(curved_face_areas)
-                else:
-                    top_area = 0.0
-
-                if top_area > 0 and vol > 0:
-                    if top_area > 0:
-                        estimated = vol / top_area
-                        if 0.5 <= estimated <= 20.0:
-                            estimated_rounded = round(estimated * 2) / 2  # rond af op 0.5 mm
-                            if estimated_rounded > detected_thickness * 1.5:
-                                reasoning.append(AnalysisReason(
-                                    step="Plaatwerk Dikte (Volume/Area fallback)",
-                                    observation=f"volume/top_area={estimated:.2f}mm → afgerond {estimated_rounded}mm "
-                                                f"(was {detected_thickness}mm via planaire faces)",
-                                    conclusion=f"Dikte gecorrigeerd naar {estimated_rounded}mm",
-                                    details={"volume": vol, "top_area": top_area,
-                                             "estimated": estimated, "previous": detected_thickness}
-                                ))
-                                detected_thickness = estimated_rounded
-            except Exception:
-                pass
+        thickness_estimate = estimate_sheet_thickness(
+            solid,
+            planar_faces=planar_faces,
+            cylindrical_faces=cylindrical_faces,
+            bbox_dims=(height, width, length),
+            total_area=total_area,
+        )
+        if thickness_estimate.thickness_mm > 0:
+            candidate_summary = [
+                {
+                    "method": candidate.method,
+                    "thickness_mm": candidate.thickness_mm,
+                    "confidence": round(candidate.confidence, 3),
+                    **candidate.details,
+                }
+                for candidate in thickness_estimate.candidates
+            ]
+            if thickness_estimate.should_override(detected_thickness):
+                reasoning.append(AnalysisReason(
+                    step="Plaatwerk Dikte (ThicknessEstimator)",
+                    observation=(
+                        f"Estimator koos {thickness_estimate.thickness_mm:.1f}mm via {thickness_estimate.method} "
+                        f"(was {detected_thickness:.1f}mm)"
+                    ),
+                    conclusion=f"Dikte gecorrigeerd naar {thickness_estimate.thickness_mm:.1f}mm",
+                    details={
+                        "previous": detected_thickness,
+                        "selected_method": thickness_estimate.method,
+                        "confidence": thickness_estimate.confidence,
+                        "bucket_votes": thickness_estimate.bucket_votes,
+                        "candidates": candidate_summary,
+                    },
+                ))
+                detected_thickness = thickness_estimate.thickness_mm
+            else:
+                reasoning.append(AnalysisReason(
+                    step="Plaatwerk Dikte (ThicknessEstimator)",
+                    observation=(
+                        f"Estimator bevestigt {thickness_estimate.thickness_mm:.1f}mm via {thickness_estimate.method}; "
+                        f"huidige waarde {detected_thickness:.1f}mm blijft staan"
+                    ),
+                    conclusion="Geen override nodig",
+                    details={
+                        "selected_method": thickness_estimate.method,
+                        "confidence": thickness_estimate.confidence,
+                        "bucket_votes": thickness_estimate.bucket_votes,
+                        "candidates": candidate_summary,
+                    },
+                ))
 
     # === STAP 6: Zettingen analyse ===
     bends = []

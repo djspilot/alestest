@@ -11,6 +11,8 @@ Technische documentatie voor de ALES Manufacturing Pipeline.
 | [pipeline_flow.md](pipeline_flow.md) | Mermaid diagrammen van de pipeline flow (quick mode, XML export, classificatie, full mode) |
 | [holedetection_review.md](holedetection_review.md) | Actieve hole-detection criteria, thresholds en beslislogica |
 | [unfold_review.md](unfold_review.md) | Huidige unfold-logica: criteria, thresholds, K-factor, FreeCAD integratie |
+| [thickness_estimator_validation_protocol.md](thickness_estimator_validation_protocol.md) | Validatieprotocol voor branch Thicknessestimator: dikte eerst, unfold daarna |
+| [thickness_estimator_validation_matrix.md](thickness_estimator_validation_matrix.md) | Bevroren Ronde 1-testset en invulmatrix voor main versus Thicknessestimator |
 | [naming_strategy.md](naming_strategy.md) | Naamgeving strategie voor onderdelen in XML-output |
 | [feature_detection_roadmap.md](feature_detection_roadmap.md) | Roadmap voor feature-detectie en XML uitrol per fase |
 | [xml_status_workflow.md](xml_status_workflow.md) | XML validatie workflow en snapshot-bewaring |
