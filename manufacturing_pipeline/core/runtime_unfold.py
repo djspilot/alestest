@@ -13,11 +13,8 @@ from types import SimpleNamespace
 
 from manufacturing_pipeline.analysis import freecad_unfold
 from manufacturing_pipeline.core.config import SystemConfig
-<<<<<<< HEAD
 from manufacturing_pipeline.core.thresholds import get_unfold_thresholds
-=======
 from manufacturing_pipeline.core.freecad_vendor import ensure_vendor_sheetmetal_on_sys_path
->>>>>>> directunfold
 
 from manufacturing_pipeline.core.paths import PIPELINE_DIR, SCRIPTS_DIR
 
@@ -52,7 +49,6 @@ if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
 
-<<<<<<< HEAD
 def _get_unfold_runtime_settings(config_path=None):
     """Return unfold thresholds normalized for runtime use."""
     unfold_thresholds = get_unfold_thresholds(config_path)
@@ -84,7 +80,6 @@ def _get_unfold_runtime_settings(config_path=None):
     }
 
 
-=======
 _PERSISTENT_FREECAD_WORKERS = {}
 _PERSISTENT_FREECAD_WORKERS_LOCK = threading.Lock()
 
@@ -294,9 +289,6 @@ def _print_runtime_debug_snapshot(prefix: str, snapshot: dict) -> None:
     print(f"{prefix} FREECAD_RUNTIME_ROOT: {snapshot.get('freecad_runtime_root') or '(empty)'}")
     for entry in snapshot.get("path_entries", []):
         print(f"{prefix} PATH+: {entry}")
-
-
->>>>>>> directunfold
 def _summarize_unfold_failure(result):
     """Build a readable error from structured unfold failure details."""
     if not result:
@@ -402,15 +394,12 @@ def _resolve_windows_desktop_freecad_config():
 def _run_unfold_subprocess_attempt(step_file, output_dir, part_name, sys_config, runtime_label="managed"):
     fc_lib = sys_config.freecad_lib
     fc_mod = sys_config.freecad_mod
-<<<<<<< HEAD
     unfold_settings = _get_unfold_runtime_settings()
-=======
     freecad_python = sys_config.freecad_python
     freecad_env = _build_freecad_subprocess_env(sys_config)
     debug_snapshot = _runtime_debug_snapshot(sys_config, freecad_env)
     vendor_root = ensure_vendor_sheetmetal_on_sys_path()
     freecad_env["FREECAD_UNFOLDER_VARIANT"] = _unfolder_variant_mode()
->>>>>>> directunfold
 
     unfold_script = f'''
 import sys
@@ -1464,12 +1453,8 @@ def run_unfold(step_file, output_dir, part_name, analysis):
             [HOST_PYTHON, unfold_script, step_file, "-o", dxf_output],
             capture_output=True,
             text=True,
-<<<<<<< HEAD
-            timeout=unfold_settings["runtime_timeout_sec"]
-=======
-            timeout=180,  # Increased timeout for multiple attempts
+            timeout=unfold_settings["runtime_timeout_sec"],
             env=freecad_env,
->>>>>>> directunfold
         )
 
         if result.returncode == 0:
