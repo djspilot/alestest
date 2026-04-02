@@ -17,6 +17,9 @@ DEFAULT_SHEETMETAL_REPO = "https://github.com/shaise/FreeCAD_SheetMetal.git"
 
 
 def managed_runtime_root(project_root: Optional[str] = None) -> str:
+    env_runtime_root = os.environ.get("FREECAD_RUNTIME_ROOT")
+    if env_runtime_root:
+        return env_runtime_root
     root = project_root or PROJECT_ROOT
     return os.path.join(root, ".runtime", "freecad")
 
@@ -185,6 +188,26 @@ def _remove_tree_if_exists(path: str) -> Optional[str]:
     if os.path.exists(path):
         return f"Pad bestaat nog na verwijderen: {path}"
     return None
+
+
+def _fallback_runtime_root(runtime_root: str) -> str:
+    parent = os.path.dirname(runtime_root)
+    name = os.path.basename(runtime_root.rstrip(os.sep)) or "freecad"
+    for index in range(1, 100):
+        suffix = "_alt" if index == 1 else f"_alt{index}"
+        candidate = os.path.join(parent, f"{name}{suffix}")
+        if os.path.abspath(candidate) != os.path.abspath(runtime_root) and not os.path.exists(candidate):
+            return candidate
+    return os.path.join(parent, f"{name}_{os.getpid()}")
+
+
+def _should_retry_create_with_fallback(error: str) -> bool:
+    normalized = (error or "").lower()
+    return (
+        "non-conda folder exists at prefix" in normalized
+        or "prefix already exists" in normalized
+        or "cannot overwrite non-directory" in normalized
+    )
 
 
 def diagnose_package_manager() -> Dict[str, Any]:
@@ -445,13 +468,14 @@ def ensure_managed_runtime(
         if os.path.isdir(runtime_root):
             remove_error = _remove_tree_if_exists(runtime_root)
             if remove_error:
-                return {
-                    "success": False,
-                    "installed": False,
-                    "error": f"Bestaande runtime kon niet verwijderd worden: {remove_error}",
-                    "actions": actions,
-                }
-            actions.append("removed_existing_runtime")
+                fallback_root = _fallback_runtime_root(runtime_root)
+                actions.extend([
+                    "failed_to_remove_existing_runtime",
+                    f"fallback_runtime_root={fallback_root}",
+                ])
+                runtime_root = fallback_root
+            else:
+                actions.append("removed_existing_runtime")
         if os.path.exists(metadata_path):
             try:
                 os.remove(metadata_path)
@@ -524,28 +548,53 @@ def ensure_managed_runtime(
                 "bootstrap": bootstrap_result,
             }
 
-    create_cmd = [
-        manager,
-        "create",
-        "-y",
-        "-p",
-        runtime_root,
-        "-c",
-        "conda-forge",
-        "freecad",
-        "git",
-    ]
+    def _create_command(prefix: str) -> List[str]:
+        return [
+            manager,
+            "create",
+            "-y",
+            "-p",
+            prefix,
+            "-c",
+            "conda-forge",
+            "freecad",
+            "git",
+        ]
+
+    create_cmd = _create_command(runtime_root)
     try:
         _run_command(create_cmd)
         actions.append("created_runtime")
     except Exception as exc:
-        return {
-            "success": False,
-            "installed": False,
-            "error": f"Runtime installatie gefaald: {exc}",
-            "command": create_cmd,
-            "actions": actions,
-        }
+        error_text = str(exc)
+        if _should_retry_create_with_fallback(error_text):
+            fallback_root = _fallback_runtime_root(runtime_root)
+            runtime_root = fallback_root
+            runtime_info = detect_runtime_layout(runtime_root)
+            create_cmd = _create_command(runtime_root)
+            try:
+                _run_command(create_cmd)
+                actions.extend([
+                    "create_runtime_failed_for_primary_prefix",
+                    f"fallback_runtime_root={fallback_root}",
+                    "created_runtime",
+                ])
+            except Exception as retry_exc:
+                return {
+                    "success": False,
+                    "installed": False,
+                    "error": f"Runtime installatie gefaald: {retry_exc}",
+                    "command": create_cmd,
+                    "actions": actions,
+                }
+        else:
+            return {
+                "success": False,
+                "installed": False,
+                "error": f"Runtime installatie gefaald: {exc}",
+                "command": create_cmd,
+                "actions": actions,
+            }
 
     runtime_info = detect_runtime_layout(runtime_root)
     sheetmetal_result = _install_sheetmetal_source(
