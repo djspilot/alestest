@@ -91,8 +91,8 @@ def test_run_unfold_uses_host_python_wrapper(tmp_path) -> None:
             self.stdout = "\n✓ Ontbuigen geslaagd!\n"
             self.stderr = ""
 
-    def fake_run(cmd, capture_output, text, timeout):  # type: ignore[no-untyped-def]
-        commands.append(cmd)
+    def fake_run(cmd, capture_output, text, timeout, env):  # type: ignore[no-untyped-def]
+        commands.append((cmd, env))
         return DummyCompletedProcess()
 
     with patch("manufacturing_pipeline.core.runtime_unfold.subprocess.run", side_effect=fake_run):
@@ -100,8 +100,48 @@ def test_run_unfold_uses_host_python_wrapper(tmp_path) -> None:
 
     assert result["success"] is True
     assert commands
-    assert commands[0][0] == runtime_unfold.HOST_PYTHON
-    assert commands[0][1].endswith("freecad_unfold.py")
+    assert commands[0][0][0] == runtime_unfold.HOST_PYTHON
+    assert commands[0][0][1].endswith("freecad_unfold.py")
+    assert isinstance(commands[0][1], dict)
+
+
+def test_build_freecad_subprocess_env_includes_managed_runtime_paths(monkeypatch, tmp_path) -> None:
+    runtime_root = tmp_path / "runtime"
+    lib_dir = runtime_root / "Library" / "bin"
+    mingw_dir = runtime_root / "Library" / "mingw-w64" / "bin"
+    bin_dir = runtime_root / "bin"
+    mod_dir = runtime_root / "Mod"
+    for path in (lib_dir, mingw_dir, bin_dir, mod_dir):
+        path.mkdir(parents=True, exist_ok=True)
+
+    freecad_python = bin_dir / "python.exe"
+    freecad_cmd = bin_dir / "FreeCADCmd.exe"
+    freecad_python.write_text("")
+    freecad_cmd.write_text("")
+
+    class FakeConfig:
+        def __init__(self) -> None:
+            self.freecad_path = str(runtime_root)
+            self.freecad_python = str(freecad_python)
+            self.freecad_cmd = str(freecad_cmd)
+            self.freecad_lib = str(lib_dir)
+            self.freecad_mod = str(mod_dir)
+
+        @staticmethod
+        def _managed_runtime_value(key: str) -> str:
+            return str(runtime_root) if key == "runtime_root" else ""
+
+    config = FakeConfig()
+
+    env = runtime_unfold._build_freecad_subprocess_env(config)
+
+    assert env["FREECAD_RUNTIME_ROOT"] == str(runtime_root)
+    assert env["FREECAD_PYTHON"] == str(freecad_python)
+    assert env["FREECAD_CMD"] == str(freecad_cmd)
+    assert env["FREECAD_LIB"] == str(lib_dir)
+    assert env["FREECAD_MOD"] == str(mod_dir)
+    assert str(lib_dir) in env["PATH"]
+    assert str(mingw_dir) in env["PATH"]
 
 
 def test_summarize_unfold_failure_prefers_exception_details() -> None:
