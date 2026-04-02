@@ -8,6 +8,7 @@ from manufacturing_pipeline.analysis import freecad_unfold
 from manufacturing_pipeline.analysis.sheetmetal import freecad_environment
 from manufacturing_pipeline.core.config import SystemConfig
 from manufacturing_pipeline.core import runtime_unfold
+from manufacturing_pipeline.core.freecad_vendor import ensure_vendor_sheetmetal_on_sys_path
 
 
 def test_windows_config_prefers_freecadcmd_when_python_missing() -> None:
@@ -365,3 +366,14 @@ def test_unfolder_variant_mode_accepts_new_and_old(monkeypatch) -> None:
     assert runtime_unfold._unfolder_variant_mode() == "new"
     monkeypatch.setenv("FREECAD_UNFOLDER_VARIANT", "old")
     assert runtime_unfold._unfolder_variant_mode() == "old"
+
+
+def test_vendor_snapshot_includes_sheetmetal_logger() -> None:
+    vendor_root = ensure_vendor_sheetmetal_on_sys_path()
+    logger_path = f"{vendor_root}/SheetMetalLogger.py"
+
+    with open(logger_path, "r", encoding="utf-8") as handle:
+        content = handle.read()
+
+    assert "class SMLogger" in content
+    assert "class UnfoldException" in content
