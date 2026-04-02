@@ -103,7 +103,7 @@ def _ensure_freecad_imported() -> bool:
     for path in _candidate_freecad_paths():
         if path and os.path.isdir(path) and path not in sys.path:
             sys.path.insert(0, path)
-    for mod_name in ("SheetMetalUnfolder", "SheetMetalTools", "SheetMetalLogger", "lookup"):
+    for mod_name in ("SheetMetalLogger", "SheetMetalUnfolder", "SheetMetalTools", "lookup"):
         sys.modules.pop(mod_name, None)
 
     try:
@@ -129,7 +129,7 @@ def _ensure_freecad_imported() -> bool:
             for path in _candidate_freecad_paths():
                 if path and os.path.isdir(path) and path not in sys.path:
                     sys.path.insert(0, path)
-            for mod_name in ("SheetMetalUnfolder", "SheetMetalTools", "SheetMetalLogger", "lookup"):
+            for mod_name in ("SheetMetalLogger", "SheetMetalUnfolder", "SheetMetalTools", "lookup"):
                 sys.modules.pop(mod_name, None)
             try:
                 import FreeCAD as _FreeCAD

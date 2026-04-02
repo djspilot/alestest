@@ -357,7 +357,7 @@ def _verify_runtime(runtime_info: Dict[str, Any]) -> Dict[str, Any]:
         f"vendor_sheetmetal = {json.dumps(vendor_sheetmetal)}\n"
         "if vendor_sheetmetal and os.path.isdir(vendor_sheetmetal) and vendor_sheetmetal not in sys.path:\n"
         "    sys.path.insert(0, vendor_sheetmetal)\n"
-        "for mod_name in ('SheetMetalUnfolder', 'SheetMetalTools', 'lookup'):\n"
+        "for mod_name in ('SheetMetalLogger', 'SheetMetalUnfolder', 'SheetMetalTools', 'lookup'):\n"
         "    sys.modules.pop(mod_name, None)\n"
         "\n"
         "import FreeCAD\n"

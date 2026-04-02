@@ -420,7 +420,7 @@ import FreeCAD
 import Part
 if vendor_root and os.path.isdir(vendor_root):
     sys.path.insert(0, vendor_root)
-for mod_name in ("SheetMetalUnfolder", "SheetMetalTools", "lookup"):
+for mod_name in ("SheetMetalLogger", "SheetMetalUnfolder", "SheetMetalTools", "lookup"):
     sys.modules.pop(mod_name, None)
 import SheetMetalUnfolder
 sheetmetal_source = getattr(SheetMetalUnfolder, "__file__", "")

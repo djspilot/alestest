@@ -26,29 +26,42 @@ def smIsEqualAngle(angle_a: float, angle_b: float, precision: int = 5) -> bool:
 
 class _Logger:
     @staticmethod
-    def _print(method_name: str, message: str) -> None:
+    def _print(method_name: str, *messages: object) -> None:
         console = getattr(FreeCAD, "Console", None)
         if console is None:
             return
         method = getattr(console, method_name, None)
         if method is None:
             return
+        message = " ".join(str(part) for part in messages)
         if not message.endswith("\n"):
             message += "\n"
         method(message)
 
     @classmethod
-    def warning(cls, message: str) -> None:
-        cls._print("PrintWarning", message)
+    def warning(cls, *messages: object) -> None:
+        cls._print("PrintWarning", *messages)
 
     @classmethod
-    def error(cls, message: str) -> None:
-        cls._print("PrintError", message)
+    def error(cls, *messages: object) -> None:
+        cls._print("PrintError", *messages)
 
     @classmethod
-    def log(cls, message: str) -> None:
-        cls._print("PrintLog", message)
+    def log(cls, *messages: object) -> None:
+        cls._print("PrintLog", *messages)
 
 
 SMLogger = _Logger()
+
+
+class BendException(Exception):
+    pass
+
+
+class TreeException(Exception):
+    pass
+
+
+class UnfoldException(Exception):
+    pass
 
