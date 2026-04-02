@@ -5,6 +5,7 @@ import sys
 import math
 import json
 import subprocess
+from types import SimpleNamespace
 
 from manufacturing_pipeline.core.config import SystemConfig
 
@@ -152,24 +153,76 @@ def _summarize_unfold_failure(result):
 
     return f"Unfold gefaald na {attempts} pogingen zonder bruikbare foutmelding"
 
-def run_unfold_to_step(step_file, output_dir, part_name, analysis):
-    """Run FreeCAD unfold and export both DXF and STEP of flat pattern.
 
-    Returns dict with:
-    - success: bool
-    - flat_step_path: path to flat STEP file
-    - flat_length, flat_width: dimensions
-    - fold_lines: number of bends
-    """
-    # Get system config for paths
-    sys_config = SystemConfig.from_env()
+def _first_existing(candidates):
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return ""
+
+
+def _resolve_windows_desktop_freecad_config():
+    if not sys.platform.startswith("win"):
+        return None
+
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    install_roots = []
+    for base in (program_files, program_files_x86):
+        if not base:
+            continue
+        install_roots.extend([
+            os.path.join(base, "FreeCAD 1.0"),
+            os.path.join(base, "FreeCAD"),
+            os.path.join(base, "FreeCAD 0.21"),
+        ])
+
+    for root in install_roots:
+        cmd_path = _first_existing([
+            os.path.join(root, "bin", "FreeCADCmd.exe"),
+            os.path.join(root, "bin", "freecadcmd.exe"),
+            os.path.join(root, "Library", "bin", "FreeCADCmd.exe"),
+            os.path.join(root, "Library", "bin", "freecadcmd.exe"),
+        ])
+        if not cmd_path:
+            continue
+
+        python_path = _first_existing([
+            os.path.join(root, "python.exe"),
+            os.path.join(root, "Library", "bin", "python.exe"),
+            os.path.join(root, "bin", "python.exe"),
+            cmd_path,
+        ])
+        lib_path = _first_existing([
+            os.path.join(root, "Library", "bin"),
+            os.path.join(root, "Library", "lib"),
+            os.path.join(root, "Lib", "site-packages"),
+            os.path.join(root, "bin"),
+        ])
+        mod_path = _first_existing([
+            os.path.join(root, "Mod"),
+            os.path.join(root, "Library", "Mod"),
+        ])
+
+        return SimpleNamespace(
+            freecad_path=root,
+            freecad_python=python_path,
+            freecad_cmd=cmd_path,
+            freecad_lib=lib_path,
+            freecad_mod=mod_path,
+            _managed_runtime_value=lambda key: "",
+        )
+
+    return None
+
+
+def _run_unfold_subprocess_attempt(step_file, output_dir, part_name, sys_config, runtime_label="managed"):
     fc_lib = sys_config.freecad_lib
     fc_mod = sys_config.freecad_mod
     freecad_python = sys_config.freecad_python
     freecad_env = _build_freecad_subprocess_env(sys_config)
     debug_snapshot = _runtime_debug_snapshot(sys_config, freecad_env)
 
-    # Build unfold script that exports STEP
     unfold_script = f'''
 import sys
 import os
@@ -686,9 +739,7 @@ if not result.get("success"):
 
 print("UNFOLD_RESULT:" + json.dumps(result))
 '''
-
-    # Pre-flight diagnostics
-    sys_config = SystemConfig.from_env()
+    print(f"    FreeCAD runtime source: {runtime_label}")
     print(f"    FreeCAD Python: {freecad_python or '(empty)'}")
     print(f"    FreeCAD root:   {sys_config.freecad_path or '(empty)'}")
     print(f"    FreeCAD cmd:    {sys_config.freecad_cmd or '(empty)'}")
@@ -767,6 +818,49 @@ print("UNFOLD_RESULT:" + json.dumps(result))
     except Exception as e:
         _print_runtime_debug_snapshot("    [runtime-exception]", debug_snapshot)
         return {"success": False, "error": str(e)}
+
+
+def run_unfold_to_step(step_file, output_dir, part_name, analysis):
+    """Run FreeCAD unfold and export both DXF and STEP of flat pattern.
+
+    Returns dict with:
+    - success: bool
+    - flat_step_path: path to flat STEP file
+    - flat_length, flat_width: dimensions
+    - fold_lines: number of bends
+    """
+    sys_config = SystemConfig.from_env()
+    result = _run_unfold_subprocess_attempt(
+        step_file,
+        output_dir,
+        part_name,
+        sys_config,
+        runtime_label="managed/runtime-configured",
+    )
+    if result.get("success") or not sys.platform.startswith("win"):
+        return result
+
+    desktop_config = _resolve_windows_desktop_freecad_config()
+    if not desktop_config:
+        return result
+    if os.path.abspath(str(desktop_config.freecad_cmd or "")) == os.path.abspath(str(sys_config.freecad_cmd or "")):
+        return result
+
+    print("    [runtime-fallback] Managed runtime failed; retrying with desktop FreeCAD installation.")
+    fallback_result = _run_unfold_subprocess_attempt(
+        step_file,
+        output_dir,
+        part_name,
+        desktop_config,
+        runtime_label="desktop-freecad",
+    )
+    if fallback_result.get("success"):
+        fallback_result["runtime_source"] = "desktop-freecad"
+        return fallback_result
+
+    fallback_result.setdefault("runtime_source", "desktop-freecad")
+    fallback_result.setdefault("managed_runtime_error", result.get("error"))
+    return fallback_result
 
 
 
