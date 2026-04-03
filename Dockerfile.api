@@ -21,4 +21,4 @@ ENV FREECAD_RUNTIME_ROOT=/srv/alestest/runtime/freecad
 
 EXPOSE 8000
 
-CMD ["micromamba", "run", "-n", "ales", "sh", "-lc", "python -m manufacturing_pipeline.tools.ensure_python_deps && python -m manufacturing_pipeline.tools.ensure_unfold_runtime && uvicorn manufacturing_pipeline.api.app:app --host 0.0.0.0 --port 8000"]
+CMD ["micromamba", "run", "-n", "ales", "python", "-m", "uvicorn", "manufacturing_pipeline.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
