@@ -8,6 +8,11 @@ def test_managed_runtime_root_prefers_env(monkeypatch):
     assert freecad_runtime.managed_runtime_root() == "/tmp/custom-freecad-runtime"
 
 
+def test_managed_runtime_root_prefers_env(monkeypatch):
+    monkeypatch.setenv("FREECAD_RUNTIME_ROOT", "/tmp/custom-freecad-runtime")
+    assert freecad_runtime.managed_runtime_root() == "/tmp/custom-freecad-runtime"
+
+
 def test_configured_runtime_uses_managed_metadata(tmp_path):
     runtime_root = tmp_path / "freecad"
     (runtime_root / "bin").mkdir(parents=True)
