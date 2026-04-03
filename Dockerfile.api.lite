@@ -8,6 +8,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglu1-mesa \
     libgl1 \
     libgles2 \
+    libxrender1 \
+    libxi6 \
+    libxrandr2 \
+    libxinerama1 \
+    libxcursor1 \
+    libxcomposite1 \
+    libxtst6 \
+    libx11-6 \
+    libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
