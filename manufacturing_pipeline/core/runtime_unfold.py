@@ -80,6 +80,133 @@ def _get_unfold_runtime_settings(config_path=None):
     }
 
 
+def _merge_fold_segments_runtime(bend_line_segments, bends_logical, fold_merge_settings=None):
+    settings = fold_merge_settings or _get_unfold_runtime_settings()["fold_merge"]
+    normalized_segments = []
+    logical_by_index = {}
+    max_index = -1
+
+    for segment in bend_line_segments or []:
+        try:
+            axis = str(segment.get("axis") or "").upper()
+            idx = int(segment.get("index", -1))
+            center = segment.get("center") or [0.0, 0.0, 0.0]
+            axis_span = segment.get("axis_span") or [0.0, 0.0]
+            if axis not in ("X", "Y") or idx < 0 or len(axis_span) < 2:
+                continue
+
+            line_offset = float(center[1] if axis == "X" else center[0])
+            normalized_segments.append(
+                {
+                    "index": idx,
+                    "axis": axis,
+                    "line_offset": line_offset,
+                    "axis_span": [float(axis_span[0]), float(axis_span[1])],
+                    "center": [float(center[0]), float(center[1]), float(center[2])],
+                    "length": float(segment.get("length") or 0.0),
+                    "start": segment.get("start"),
+                    "end": segment.get("end"),
+                }
+            )
+            logical_by_index[idx] = bends_logical[idx] if idx < len(bends_logical) else {}
+            max_index = max(max_index, idx)
+        except Exception:
+            continue
+
+    if not normalized_segments:
+        return [], [], []
+
+    bend_angles = [0.0] * (max_index + 1)
+    bend_radii = [0.0] * (max_index + 1)
+    bend_lengths = [0.0] * (max_index + 1)
+    for segment in normalized_segments:
+        idx = segment["index"]
+        logical = logical_by_index.get(idx) or {}
+        angle = logical.get("angle")
+        radius = logical.get("radius")
+        bend_angles[idx] = float(angle) if angle is not None else 0.0
+        bend_radii[idx] = float(radius) if radius is not None else 0.0
+        bend_lengths[idx] = float(segment.get("length") or 0.0)
+
+    merged_angles, merged_radii, _, merged_groups = freecad_unfold._merge_bends_by_collinear_segments(
+        bend_angles,
+        bend_radii,
+        bend_lengths,
+        normalized_segments,
+        offset_tol=settings["offset_tol_mm"],
+        gap_tol=settings["gap_tol_mm"],
+        overlap_tol=settings["overlap_tol_mm"],
+        angle_tol=settings["angle_tol_deg"],
+        radius_tol=settings["radius_tol_mm"],
+    )
+    if not merged_groups:
+        return [], [], []
+
+    segments_by_index = {segment["index"]: segment for segment in normalized_segments}
+    merged_details = []
+    merged_bends = []
+
+    for group_pos, group in enumerate(merged_groups):
+        members = sorted(int(idx) for idx in group.get("segment_indices") or [])
+        cluster_segments = [segments_by_index[idx] for idx in members if idx in segments_by_index]
+        if not cluster_segments:
+            continue
+
+        axis = str(group.get("axis") or cluster_segments[0].get("axis") or "X").upper()
+        centers = [segment["center"] for segment in cluster_segments]
+        span_min = min(float(min(segment["axis_span"])) for segment in cluster_segments)
+        span_max = max(float(max(segment["axis_span"])) for segment in cluster_segments)
+
+        points = []
+        for segment in cluster_segments:
+            for point_key in ("start", "end"):
+                point = segment.get(point_key)
+                if isinstance(point, (list, tuple)) and len(point) >= 3:
+                    points.append((float(point[0]), float(point[1]), float(point[2])))
+
+        avg_x = sum(float(center[0]) for center in centers) / len(centers)
+        avg_y = sum(float(center[1]) for center in centers) / len(centers)
+        avg_z = sum(float(center[2]) for center in centers) / len(centers)
+
+        if axis == "X":
+            coords = [point[0] for point in points] if points else [span_min, span_max]
+            start = (min(coords), avg_y, avg_z)
+            end = (max(coords), avg_y, avg_z)
+            center = ((start[0] + end[0]) / 2.0, avg_y, avg_z)
+        else:
+            coords = [point[1] for point in points] if points else [span_min, span_max]
+            start = (avg_x, min(coords), avg_z)
+            end = (avg_x, max(coords), avg_z)
+            center = (avg_x, (start[1] + end[1]) / 2.0, avg_z)
+
+        line_length = math.dist(start, end)
+        source_idx = members[0]
+        logical = logical_by_index.get(source_idx) or {}
+
+        merged_details.append(
+            {
+                "id": len(merged_details) + 1,
+                "length": line_length,
+                "center": center,
+                "axis": axis.lower(),
+                "axis_span": (span_min, span_max),
+                "start": start,
+                "end": end,
+                "segment_indices": [idx + 1 for idx in members],
+            }
+        )
+        merged_bends.append(
+            {
+                "id": len(merged_bends) + 1,
+                "type": logical.get("type"),
+                "angle": merged_angles[group_pos] if group_pos < len(merged_angles) else logical.get("angle"),
+                "radius": merged_radii[group_pos] if group_pos < len(merged_radii) else logical.get("radius"),
+            }
+        )
+
+    return merged_details, merged_bends, merged_groups
+
+
 _PERSISTENT_FREECAD_WORKERS = {}
 _PERSISTENT_FREECAD_WORKERS_LOCK = threading.Lock()
 
@@ -556,6 +683,16 @@ def _merge_fold_segments(bend_line_segments, bends_logical):
 
     usable.sort(key=lambda item: (item["axis"], round(item["line_offset"], 3), item["span_min"]))
 
+    def _effective_gap_tol(prev_span, next_span):
+        prev_len = max(0.0, float(prev_span[1]) - float(prev_span[0]))
+        next_len = max(0.0, float(next_span[1]) - float(next_span[0]))
+        dynamic_tol = max(
+            float({unfold_settings["fold_merge"]["gap_tol_mm"]}),
+            2.0 * max(prev_len, next_len),
+            5.0 * min(prev_len, next_len),
+        )
+        return min(dynamic_tol, 500.0)
+
     clusters = []
     current = None
     for item in usable:
@@ -576,7 +713,11 @@ def _merge_fold_segments(bend_line_segments, bends_logical):
         last_item = current["items"][-1]
         overlap = max(0.0, min(last_item["span_max"], item["span_max"]) - max(last_item["span_min"], item["span_min"]))
         gap = max(0.0, item["span_min"] - last_item["span_max"])
-        extension_ok = overlap <= {unfold_settings["fold_merge"]["overlap_tol_mm"]} and gap <= {unfold_settings["fold_merge"]["gap_tol_mm"]}
+        gap_limit = _effective_gap_tol(
+            (last_item["span_min"], last_item["span_max"]),
+            (item["span_min"], item["span_max"]),
+        )
+        extension_ok = overlap <= {unfold_settings["fold_merge"]["overlap_tol_mm"]} and gap <= gap_limit
 
         if same_line and angle_ok and radius_ok and extension_ok:
             current["items"].append(item)

@@ -225,6 +225,50 @@ def test_run_unfold_to_step_retries_with_windows_desktop_freecad(monkeypatch, tm
     assert attempts[1][1] == "desktop-freecad"
 
 
+def test_runtime_merge_fold_segments_merges_hole_interrupted_lines() -> None:
+    bend_line_segments = [
+        {"index": 0, "axis": "X", "center": (20.0, 10.0, 0.0), "axis_span": (0.0, 40.0), "length": 40.0},
+        {"index": 1, "axis": "X", "center": (215.0, 10.2, 0.0), "axis_span": (190.0, 240.0), "length": 50.0},
+        {"index": 2, "axis": "X", "center": (26.0, 90.0, 0.0), "axis_span": (5.0, 47.0), "length": 42.0},
+        {"index": 3, "axis": "X", "center": (224.0, 89.8, 0.0), "axis_span": (205.0, 243.0), "length": 38.0},
+    ]
+    bends_logical = [
+        {"type": "up", "angle": 90.0, "radius": 1.0},
+        {"type": "up", "angle": 90.0, "radius": 1.0},
+        {"type": "down", "angle": -90.0, "radius": 1.0},
+        {"type": "down", "angle": -90.0, "radius": 1.0},
+    ]
+
+    merged_details, merged_bends, merged_groups = runtime_unfold._merge_fold_segments_runtime(
+        bend_line_segments,
+        bends_logical,
+    )
+
+    assert len(merged_details) == 2
+    assert [group["segment_indices"] for group in merged_groups] == [[0, 1], [2, 3]]
+    assert [bend["type"] for bend in merged_bends] == ["up", "down"]
+
+
+def test_runtime_merge_fold_segments_keeps_distinct_lines_separate() -> None:
+    bend_line_segments = [
+        {"index": 0, "axis": "X", "center": (20.0, 10.0, 0.0), "axis_span": (0.0, 40.0), "length": 40.0},
+        {"index": 1, "axis": "X", "center": (215.0, 25.5, 0.0), "axis_span": (190.0, 240.0), "length": 50.0},
+    ]
+    bends_logical = [
+        {"type": "up", "angle": 90.0, "radius": 1.0},
+        {"type": "up", "angle": 90.0, "radius": 1.0},
+    ]
+
+    merged_details, merged_bends, merged_groups = runtime_unfold._merge_fold_segments_runtime(
+        bend_line_segments,
+        bends_logical,
+    )
+
+    assert len(merged_details) == 2
+    assert len(merged_bends) == 2
+    assert [group["segment_indices"] for group in merged_groups] == [[0], [1]]
+
+
 def test_summarize_unfold_failure_prefers_exception_details() -> None:
     result = {
         "attempts": 4,
