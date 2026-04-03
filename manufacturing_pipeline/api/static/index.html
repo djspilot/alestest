@@ -37,6 +37,13 @@
   a.docs-link { color: #555; font-size: 11px; text-decoration: none; }
   a.docs-link:hover { color: #aaa; }
 
+  .upload-bar { display: flex; align-items: center; gap: 10px; padding: 12px 24px; background: #111; border-bottom: 1px solid #1e1e1e; }
+  .upload-btn { background: #1a2a1a; border: 1px solid #2a4a2a; color: #4ade80; padding: 6px 16px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 12px; }
+  .upload-btn:hover { background: #1e341e; }
+  .upload-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  #uploadInput { display: none; }
+  #uploadStatus { font-size: 11px; color: #666; }
+
   table { width: 100%; border-collapse: collapse; }
   thead tr { border-bottom: 1px solid #1e1e1e; }
   th { padding: 8px 12px; text-align: left; font-size: 10px; color: #444; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; }
@@ -75,6 +82,12 @@
   <div class="stat"><div class="stat-label">Geslaagd</div><div class="stat-value green" id="sOk">—</div></div>
   <div class="stat"><div class="stat-label">Mislukt</div><div class="stat-value red" id="sFail">—</div></div>
   <div class="stat"><div class="stat-label">Bezig</div><div class="stat-value yellow" id="sProc">—</div></div>
+</div>
+
+<div class="upload-bar">
+  <input type="file" id="uploadInput" accept=".step,.stp" multiple>
+  <button class="upload-btn" id="uploadBtn" onclick="document.getElementById('uploadInput').click()">+ STEP uploaden</button>
+  <span id="uploadStatus"></span>
 </div>
 
 <div class="toolbar">
@@ -239,6 +252,32 @@
     await Promise.all([checkHealth(), loadStats(), loadJobs()]);
     startAutoRefresh();
   }
+
+  document.getElementById('uploadInput').addEventListener('change', async function() {
+    const files = Array.from(this.files);
+    if (!files.length) return;
+    const btn = document.getElementById('uploadBtn');
+    const status = document.getElementById('uploadStatus');
+    btn.disabled = true;
+    status.textContent = `Uploaden (0/${files.length})…`;
+    let done = 0;
+    for (const file of files) {
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const r = await fetch('/api/v1/analyze', { method: 'POST', headers: headers(), body: fd });
+        if (!r.ok) { status.textContent = `Fout bij ${file.name}: HTTP ${r.status}`; break; }
+        done++;
+        status.textContent = done < files.length ? `Uploaden (${done}/${files.length})…` : `${done} bestand(en) geüpload ✓`;
+      } catch (e) {
+        status.textContent = `Fout: ${e.message}`;
+        break;
+      }
+    }
+    btn.disabled = false;
+    this.value = '';
+    setTimeout(() => loadAll(), 500);
+  });
 
   loadAll();
 </script>
