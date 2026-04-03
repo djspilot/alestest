@@ -14,10 +14,6 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
 
 log "Deploy gestart"
 
-# Haal altijd de nieuwste compose op uit de repo
-log "Compose bijwerken..."
-curl -fsSL "https://raw.githubusercontent.com/aidoel/alestest/main/docker-compose.prod.yml" -o "$COMPOSE_FILE"
-
 # Login bij ghcr.io
 if [ -f "$GHCR_TOKEN" ]; then
     cat "$GHCR_TOKEN" | docker login ghcr.io -u aidoel --password-stdin 2>/dev/null \

@@ -47,6 +47,18 @@ jobs:
     environment: production
 
     steps:
+      - name: Checkout (for compose file)
+        uses: actions/checkout@v4
+
+      - name: Upload compose to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: docker-compose.prod.yml
+          target: /srv/alestest/
+
       - name: SSH deploy
         uses: appleboy/ssh-action@v1
         with:
