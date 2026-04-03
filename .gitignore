@@ -29,6 +29,7 @@ AI-voorbeelden/
 # Environment
 .env
 .vps.env          # lokale VPS configuratie (IP, domein) — nooit committen
+.runtime/
 
 # Temporary local test outputs
 test_*_output.txt

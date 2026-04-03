@@ -1,0 +1,24 @@
+FROM mambaorg/micromamba:1.5.10
+
+WORKDIR /app
+
+COPY --chown=$MAMBA_USER:$MAMBA_USER requirements.txt /app/requirements.txt
+
+RUN micromamba create -y -n ales -c conda-forge python=3.11 freecad git pip && \
+    micromamba clean --all --yes
+
+COPY --chown=$MAMBA_USER:$MAMBA_USER . /app
+
+RUN micromamba run -n ales pip install --no-cache-dir -r /app/requirements.txt && \
+    micromamba run -n ales pip install --no-cache-dir uvicorn
+
+ENV PYTHONUNBUFFERED=1
+ENV API_HOST=0.0.0.0
+ENV API_PORT=8000
+ENV UPLOAD_DIR=/srv/alestest/uploads
+ENV DB_PATH=/srv/alestest/data/db/manufacturing_data.db
+ENV FREECAD_RUNTIME_ROOT=/srv/alestest/runtime/freecad
+
+EXPOSE 8000
+
+CMD ["micromamba", "run", "-n", "ales", "sh", "-lc", "python -m manufacturing_pipeline.tools.ensure_python_deps && python -m manufacturing_pipeline.tools.ensure_unfold_runtime && uvicorn manufacturing_pipeline.api.app:app --host 0.0.0.0 --port 8000"]
