@@ -1,21 +1,30 @@
-FROM python:3.11-slim
+FROM mambaorg/micromamba:1.5.10
 
 WORKDIR /app
 
-COPY requirements.txt /app/requirements.txt
+# ── Env 1: API + cadquery-ocp (no FreeCAD → no VTK conflict) ──────────────────
+COPY --chown=$MAMBA_USER:$MAMBA_USER requirements.txt /app/requirements.txt
 
-RUN pip install --no-cache-dir -r /app/requirements.txt && \
-    pip install --no-cache-dir uvicorn
+RUN micromamba create -y -n ales -c conda-forge python=3.11 pip && \
+    micromamba run -n ales pip install --no-cache-dir -r /app/requirements.txt && \
+    micromamba run -n ales pip install --no-cache-dir uvicorn && \
+    micromamba clean --all --yes
 
-COPY . /app
+# ── Env 2: FreeCAD only (isolated VTK, called via subprocess) ─────────────────
+RUN micromamba create -y -n freecad -c conda-forge freecad && \
+    micromamba clean --all --yes
+
+COPY --chown=$MAMBA_USER:$MAMBA_USER . /app
 
 ENV PYTHONUNBUFFERED=1
 ENV API_HOST=0.0.0.0
 ENV API_PORT=8000
 ENV UPLOAD_DIR=/srv/alestest/uploads
 ENV DB_PATH=/srv/alestest/data/db/manufacturing_data.db
-ENV FREECAD_RUNTIME_ROOT=/srv/alestest/runtime/freecad
+# Points freecad_runtime.py to the isolated conda env
+ENV FREECAD_RUNTIME_ROOT=/opt/conda/envs/freecad
 
 EXPOSE 8000
 
-CMD ["python", "-m", "uvicorn", "manufacturing_pipeline.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["micromamba", "run", "-n", "ales", "python", "-m", "uvicorn", \
+     "manufacturing_pipeline.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
