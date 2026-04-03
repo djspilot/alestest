@@ -84,7 +84,7 @@ async def analyze(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     aag: bool = Query(True, description="Run AAG topology-based feature recognition"),
-    disable_stages: str = Query("", description="Comma-separated stage keys to disable: classify_geometry, detect_holes_pre_unfold, unfold, detect_holes, aag"),
+    disable_stages: str = Query("", description="Comma-separated stage keys to disable: classify_geometry, profile_router, detect_holes_pre_unfold, unfold, detect_holes, aag"),
 ):
     """Upload a STEP file for manufacturing analysis.
 
@@ -317,4 +317,3 @@ def _result_to_xml(result: dict) -> str:
         if tmp_path.exists():
             tmp_path.unlink()
         raise HTTPException(status_code=500, detail=f"XML export failed: {str(e)}")
-

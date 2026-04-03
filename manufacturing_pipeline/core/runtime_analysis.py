@@ -267,7 +267,7 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
     # ================================================================
     # STEP 1.5: Profile Router (Pre-classification)
     # ================================================================
-    if "classify_geometry" not in disabled_stages:
+    if "classify_geometry" not in disabled_stages and "profile_router" not in disabled_stages:
         print("[2/7] Running profile router...")
         with profiler.step("Profile Router", 2, 7):
             try:

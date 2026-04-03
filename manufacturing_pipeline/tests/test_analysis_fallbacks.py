@@ -1,0 +1,218 @@
+"""Tests voor graceful degradation in de analysis service.
+
+Verifieert dat de pipeline correct terugvalt als:
+- FreeCAD niet beschikbaar is (VPS lite mode)
+- Unfold mislukt
+- Een STEP file corrupt is
+- Analysemodules ontbreken of crashen
+"""
+
+import os
+import pytest
+from unittest.mock import patch, MagicMock
+
+
+# ---------------------------------------------------------------------------
+# Analysis service: unfold uitgeschakeld
+# ---------------------------------------------------------------------------
+
+class TestAnalysisServiceUnfoldDisabled:
+    def test_run_step_analysis_with_unfold_disabled_does_not_call_freecad(self):
+        """Als unfold in disable_stages zit, mag FreeCAD nooit aangeroepen worden."""
+        from manufacturing_pipeline.api.analysis_service import run_step_analysis
+
+        with patch("manufacturing_pipeline.core.runtime_unfold.run_unfold_to_step") as mock_unfold:
+            result = run_step_analysis(
+                "/nonexistent/path.step",
+                use_aag=False,
+                disable_stages={"unfold"},
+            )
+            mock_unfold.assert_not_called()
+
+    def test_run_step_analysis_returns_dict_on_failure(self):
+        """Bij een niet-bestaand bestand moet een dict teruggegeven worden, geen exception."""
+        from manufacturing_pipeline.api.analysis_service import run_step_analysis
+
+        result = run_step_analysis("/nonexistent/does_not_exist.step")
+        assert isinstance(result, dict)
+        assert "file" in result
+        assert "success" in result
+
+    def test_run_step_analysis_failure_has_error_key(self):
+        """Een mislukte analyse moet 'success': False en 'error' bevatten."""
+        from manufacturing_pipeline.api.analysis_service import run_step_analysis
+
+        result = run_step_analysis("/nonexistent/does_not_exist.step")
+        assert result["success"] is False
+        assert "error" in result
+        assert result["error"]  # error mag niet leeg zijn
+
+    def test_run_step_analysis_file_key_is_basename(self):
+        """'file' in het resultaat moet de bestandsnaam zijn, niet het volledige pad."""
+        from manufacturing_pipeline.api.analysis_service import run_step_analysis
+
+        result = run_step_analysis("/some/deep/path/mypart.step")
+        assert result["file"] == "mypart.step"
+
+
+# ---------------------------------------------------------------------------
+# FreeCAD auto-install: uitgeschakeld in lite mode
+# ---------------------------------------------------------------------------
+
+class TestFreeCADAutoInstall:
+    def test_auto_install_disabled_when_env_set(self):
+        from manufacturing_pipeline.core import freecad_runtime
+        with patch.dict(os.environ, {"FREECAD_AUTO_INSTALL": "0"}):
+            assert freecad_runtime.auto_install_enabled() is False
+
+    def test_auto_install_enabled_by_default(self):
+        from manufacturing_pipeline.core import freecad_runtime
+        env = os.environ.copy()
+        env.pop("FREECAD_AUTO_INSTALL", None)
+        with patch.dict(os.environ, env, clear=True):
+            assert freecad_runtime.auto_install_enabled() is True
+
+    def test_auto_install_disabled_with_false_string(self):
+        from manufacturing_pipeline.core import freecad_runtime
+        with patch.dict(os.environ, {"FREECAD_AUTO_INSTALL": "false"}):
+            assert freecad_runtime.auto_install_enabled() is False
+
+    def test_auto_install_disabled_with_zero(self):
+        from manufacturing_pipeline.core import freecad_runtime
+        with patch.dict(os.environ, {"FREECAD_AUTO_INSTALL": "0"}):
+            assert freecad_runtime.auto_install_enabled() is False
+
+
+# ---------------------------------------------------------------------------
+# Unfold integration: fallback gedrag
+# ---------------------------------------------------------------------------
+
+class TestUnfoldFallbacks:
+    def test_unfold_failure_result_is_dict(self):
+        """run_unfold_to_step mag nooit een exception gooien, altijd een dict teruggeven."""
+        from manufacturing_pipeline.core import runtime_unfold
+
+        with patch.object(runtime_unfold, "_run_direct_unfold_attempt",
+                          return_value={"success": False, "error": "FreeCAD niet beschikbaar"}), \
+             patch.object(runtime_unfold, "_run_direct_python_worker_attempt",
+                          return_value={"success": False, "error": "Geen python runtime"}), \
+             patch.object(runtime_unfold, "_run_unfold_subprocess_attempt",
+                          return_value={"success": False, "error": "Subprocess gefaald"}):
+
+            result = runtime_unfold.run_unfold_to_step(
+                "/nonexistent.step", "/tmp", "test", analysis=None
+            )
+            assert isinstance(result, dict)
+
+    def test_unfold_failure_has_success_false(self):
+        from manufacturing_pipeline.core import runtime_unfold
+
+        with patch.object(runtime_unfold, "_run_direct_unfold_attempt",
+                          return_value={"success": False, "error": "FreeCAD niet beschikbaar"}), \
+             patch.object(runtime_unfold, "_run_direct_python_worker_attempt",
+                          return_value={"success": False, "error": "geen runtime"}), \
+             patch.object(runtime_unfold, "_run_unfold_subprocess_attempt",
+                          return_value={"success": False, "error": "gefaald"}):
+
+            result = runtime_unfold.run_unfold_to_step(
+                "/nonexistent.step", "/tmp", "test", analysis=None
+            )
+            assert result.get("success") is False
+
+    def test_summarize_unfold_failure_with_none(self):
+        from manufacturing_pipeline.core.runtime_unfold import _summarize_unfold_failure
+        result = _summarize_unfold_failure(None)
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_summarize_unfold_failure_with_error(self):
+        from manufacturing_pipeline.core.runtime_unfold import _summarize_unfold_failure
+        result = _summarize_unfold_failure({"error": "FreeCAD niet gevonden", "attempts": 1})
+        assert "FreeCAD" in result
+
+    def test_summarize_unfold_failure_with_error_details(self):
+        from manufacturing_pipeline.core.runtime_unfold import _summarize_unfold_failure
+        result = _summarize_unfold_failure({
+            "error": None,
+            "attempts": 3,
+            "error_details": [
+                {"stage": "init", "error_code": 1, "message": "Volume onbruikbaar"},
+                {"stage": "analysis", "error_code": 3, "message": "Dikte inconsistent"},
+            ]
+        })
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+
+# ---------------------------------------------------------------------------
+# Analysis service: mesh en tessellatie zijn optioneel
+# ---------------------------------------------------------------------------
+
+class TestMeshFallback:
+    def test_missing_mesh_does_not_break_result(self):
+        """Als tessellatie faalt, mag 'mesh' gewoon ontbreken — geen crash."""
+        from manufacturing_pipeline.api import analysis_service
+
+        mock_analysis = MagicMock()
+        mock_analysis.part_category = "PLAAT"
+        mock_analysis.part_type = None
+        mock_analysis.thickness = 2.0
+        mock_analysis.length = 100.0
+        mock_analysis.width = 50.0
+        mock_analysis.height = 2.0
+        mock_analysis.flat_length = 0
+        mock_analysis.flat_width = 0
+        mock_analysis.bend_count_erp = 0
+        mock_analysis.aag_result = None
+        mock_analysis.route_result = None
+        mock_analysis.unfold_result = None
+        mock_analysis.reasoning = []
+        mock_analysis.classification_visuals = None
+        mock_analysis.classification_trace = {}
+        mock_analysis.classification_criteria = []
+        mock_analysis.detected_hole_visuals = None
+        mock_analysis.detected_hole_visuals_pre_unfold = None
+
+        import manufacturing_pipeline.analysis.step_processing as sp
+
+        mock_shape = MagicMock()
+
+        with patch("manufacturing_pipeline.api.analysis_service.run_analysis",
+                   return_value=(mock_analysis, 0)), \
+             patch("manufacturing_pipeline.api.analysis_service.get_output_dir",
+                   return_value=("/tmp/test_out", "test")), \
+             patch("manufacturing_pipeline.api.analysis_service._load_timing_json",
+                   return_value=None), \
+             patch.object(sp, "load_step_file", return_value=mock_shape), \
+             patch.object(sp, "tessellate_shape",
+                          side_effect=RuntimeError("tessellatie gefaald")):
+
+            result = analysis_service.run_step_analysis(
+                "/fake/test.step", use_aag=False, disable_stages={"unfold", "aag"}
+            )
+
+        # Analyse moet slagen ook zonder mesh
+        assert result.get("success") is True
+        # mesh is optioneel
+        assert "mesh" not in result or result["mesh"] is None
+
+
+# ---------------------------------------------------------------------------
+# Config: FREECAD_RUNTIME_ROOT env var
+# ---------------------------------------------------------------------------
+
+class TestFreeCADRuntimeConfig:
+    def test_managed_runtime_root_uses_env_var(self):
+        from manufacturing_pipeline.core import freecad_runtime
+        with patch.dict(os.environ, {"FREECAD_RUNTIME_ROOT": "/custom/freecad"}):
+            root = freecad_runtime.managed_runtime_root()
+            assert root == "/custom/freecad"
+
+    def test_managed_runtime_root_fallback_to_project(self):
+        from manufacturing_pipeline.core import freecad_runtime
+        env = os.environ.copy()
+        env.pop("FREECAD_RUNTIME_ROOT", None)
+        with patch.dict(os.environ, env, clear=True):
+            root = freecad_runtime.managed_runtime_root()
+            assert ".runtime" in root
+            assert "freecad" in root

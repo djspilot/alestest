@@ -1,0 +1,27 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System deps for cadquery-ocp
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    libglu1-mesa \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt uvicorn
+
+COPY . .
+
+ENV PYTHONUNBUFFERED=1
+ENV API_HOST=0.0.0.0
+ENV API_PORT=8000
+ENV UPLOAD_DIR=/srv/alestest/uploads
+ENV DB_PATH=/srv/alestest/data/db/manufacturing_data.db
+# Disable FreeCAD auto-install — unfold not available in lite image
+ENV FREECAD_AUTO_INSTALL=0
+ENV DISABLE_STAGES=unfold
+
+EXPOSE 8000
+
+CMD ["uvicorn", "manufacturing_pipeline.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

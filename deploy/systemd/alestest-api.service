@@ -1,0 +1,16 @@
+[Unit]
+Description=ALES Manufacturing API
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/srv/alestest/current
+EnvironmentFile=/srv/alestest/shared/alestest-api.env
+ExecStart=/srv/alestest/current/.venv/bin/uvicorn manufacturing_pipeline.api.app:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

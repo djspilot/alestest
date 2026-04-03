@@ -24,9 +24,12 @@ DB_PATH = os.environ.get("DB_PATH", os.path.join(
 ALLOWED_EXTENSIONS = {".step", ".stp"}
 
 # All valid stage keys that can be disabled
-VALID_STAGE_KEYS = {"classify_geometry", "detect_holes_pre_unfold", "unfold", "detect_holes", "aag"}
+VALID_STAGE_KEYS = {"classify_geometry", "profile_router", "detect_holes_pre_unfold", "unfold", "detect_holes", "aag"}
 
-# Comma-separated list of stages to disable by default
-DISABLE_STAGES: set[str] = {
+# Viewer/API defaults: skip noisy pre-routing and pre-unfold hole snapshot unless explicitly re-enabled in code.
+DEFAULT_DISABLE_STAGES = {"profile_router", "detect_holes_pre_unfold"}
+
+# Comma-separated list of additional stages to disable by default
+DISABLE_STAGES: set[str] = DEFAULT_DISABLE_STAGES | {
     s.strip() for s in os.environ.get("DISABLE_STAGES", "").split(",") if s.strip()
 }
