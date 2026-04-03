@@ -27,6 +27,24 @@ export function getApiKeyHeaders(apiKey = '', extraHeaders = {}) {
   return headers
 }
 
+export function sanitizeUploadFileName(fileName = 'upload.step') {
+  const trimmed = String(fileName || '').trim()
+  const fallback = 'upload.step'
+  const normalized = trimmed || fallback
+  const lastDotIndex = normalized.lastIndexOf('.')
+  const rawBase = lastDotIndex > 0 ? normalized.slice(0, lastDotIndex) : normalized
+  const rawExtension = lastDotIndex > 0 ? normalized.slice(lastDotIndex).toLowerCase() : ''
+  const safeBase = rawBase
+    .normalize('NFKD')
+    .replace(/[^\x20-\x7e]/g, '_')
+    .replace(/[^A-Za-z0-9._-]/g, '_')
+    .replace(/_+/g, '_')
+  const collapsedBase = safeBase.replace(/^[_\.]+|[_\.]+$/g, '')
+  const candidateBase = collapsedBase || 'upload'
+  const extension = rawExtension === '.stp' ? '.stp' : '.step'
+  return `${candidateBase}${extension}`
+}
+
 function buildHeaders(apiKey, extraHeaders = {}) {
   return getApiKeyHeaders(apiKey, extraHeaders)
 }
@@ -158,7 +176,7 @@ export async function runPipelineAnalysis(file, options = {}) {
   }
   const analyzeUrl = `${base}/api/v1/analyze?${parts.join('&')}`
   const formData = new FormData()
-  formData.append('file', file)
+  formData.append('file', file, sanitizeUploadFileName(file?.name))
 
   let created
   try {

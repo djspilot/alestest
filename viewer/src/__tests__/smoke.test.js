@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { normalizeStageName, formatDuration, formatLabel, formatDetailValue, parseIsoToMs } from '../pipelineUi'
-import { getApiKeyHeaders } from '../pipelineClient'
+import { getApiKeyHeaders, sanitizeUploadFileName } from '../pipelineClient'
 
 describe('pipelineUi', () => {
   it('normalizes Profile Router to Classify geometry', () => {
@@ -49,5 +49,9 @@ describe('pipelineUi', () => {
 
   it('rejects api keys with non latin-1 characters', () => {
     expect(() => getApiKeyHeaders('abc€')).toThrow(/niet-ondersteunde tekens/i)
+  })
+
+  it('sanitizes upload file names before multipart upload', () => {
+    expect(sanitizeUploadFileName('Müller “plaat” 🚀.step')).toBe('Mu_ller_plaat.step')
   })
 })
