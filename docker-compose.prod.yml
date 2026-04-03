@@ -1,6 +1,6 @@
 services:
   api:
-    image: ghcr.io/djspilot/alestest-api:latest
+    image: ghcr.io/aidoel/alestest-api:latest
     container_name: ales-api
     restart: unless-stopped
     environment:
