@@ -1,14 +1,16 @@
 """API route definitions."""
 
 import csv
+import collections
 import hashlib
 import io
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 
 from manufacturing_pipeline.api.config import ALLOWED_EXTENSIONS, DISABLE_STAGES, MAX_FILE_SIZE_MB, UPLOAD_DIR, VALID_STAGE_KEYS
 from manufacturing_pipeline.api.schemas import (
@@ -33,6 +35,19 @@ from pathlib import Path
 import tempfile
 
 router = APIRouter(prefix="/api/v1")
+
+# In-memory ring buffer for recent log lines (last 500)
+_LOG_BUFFER: collections.deque = collections.deque(maxlen=500)
+
+
+class _BufferHandler(logging.Handler):
+    def emit(self, record):
+        _LOG_BUFFER.append(self.format(record))
+
+
+_buf_handler = _BufferHandler()
+_buf_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+logging.getLogger().addHandler(_buf_handler)
 DEFAULT_VIEWER_STEP = Path(__file__).resolve().parents[2] / "data" / "testfile" / "nieuwmodel.step"
 
 
@@ -341,6 +356,13 @@ async def get_unfold_artifact(job_id: str, artifact_name: str):
 async def health():
     """Health check endpoint."""
     return HealthResponse()
+
+
+@router.get("/debug/logs", response_class=PlainTextResponse)
+async def debug_logs(n: int = Query(200, ge=1, le=500)):
+    """Return the last N server log lines. Requires API key."""
+    lines = list(_LOG_BUFFER)[-n:]
+    return "\n".join(lines) if lines else "(no logs yet)"
 
 
 @router.get("/viewer/default-step")
