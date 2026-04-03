@@ -105,6 +105,27 @@ class AnalysisResult(BaseModel):
     error: Optional[str] = None
 
 
+class UnfoldResult(BaseModel):
+    success: bool
+    error: Optional[str] = None
+    flat_length: Optional[float] = None
+    flat_width: Optional[float] = None
+    fold_lines: int = 0
+    raw_fold_lines: Optional[int] = None
+    bend_line_groups: list[dict] = Field(default_factory=list)
+    flat_step_url: Optional[str] = None
+    dxf_url: Optional[str] = None
+
+
+class UnfoldStatus(BaseModel):
+    status: Literal["idle", "queued", "processing", "completed", "failed"] = "idle"
+    requested_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error: Optional[str] = None
+    result: Optional[UnfoldResult] = None
+
+
 class JobCreated(BaseModel):
     job_id: str
     status: Literal["queued"] = "queued"
@@ -121,6 +142,7 @@ class JobStatus(BaseModel):
     timeline_events: list[TimelineEvent] = Field(default_factory=list)
     result: Optional[AnalysisResult] = None
     error: Optional[str] = None
+    unfold: Optional[UnfoldStatus] = None
 
 
 class JobTimelineResponse(BaseModel):
@@ -156,6 +178,7 @@ class JobListItem(BaseModel):
     completed_at: Optional[str] = None
     error: Optional[str] = None
     result: Optional[ResultSummary] = None
+    unfold: Optional[UnfoldStatus] = None
 
 
 class JobListResponse(BaseModel):

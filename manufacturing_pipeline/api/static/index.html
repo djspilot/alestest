@@ -58,6 +58,16 @@
   .badge.failed    { background: #450a0a; color: #f87171; }
   .badge.processing{ background: #1c1917; color: #fbbf24; }
   .badge.queued    { background: #1e1b4b; color: #818cf8; }
+  .badge.idle      { background: #111827; color: #9ca3af; }
+  .badge.unfold-completed { background: #0f3d2e; color: #5eead4; }
+
+  .action-cell { min-width: 210px; }
+  .action-stack { display: flex; flex-direction: column; gap: 6px; }
+  .action-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .mini-btn, .artifact-link { background: #161616; border: 1px solid #2e2e2e; color: #cfcfcf; padding: 4px 8px; border-radius: 4px; font-family: inherit; font-size: 11px; text-decoration: none; cursor: pointer; }
+  .mini-btn:hover, .artifact-link:hover { border-color: #4a4a4a; color: #fff; }
+  .mini-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .subtle { font-size: 10px; color: #666; }
 
   .empty { padding: 60px; text-align: center; color: #333; }
   .error-msg { padding: 12px 24px; color: #ef4444; font-size: 11px; }
@@ -110,10 +120,11 @@
       <th>Zettingen</th>
       <th>Tijd</th>
       <th>Duur</th>
+      <th>Acties</th>
     </tr>
   </thead>
   <tbody id="jobTable">
-    <tr><td colspan="10" class="empty">Laden…</td></tr>
+    <tr><td colspan="11" class="empty">Laden…</td></tr>
   </tbody>
 </table>
 
@@ -137,6 +148,73 @@
 
   function headers() {
     return apiKey ? { 'X-API-Key': apiKey } : {};
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function renderUnfoldActions(job) {
+    const unfold = job.unfold || { status: 'idle' };
+    const unfoldStatus = unfold.status || 'idle';
+    const unfoldResult = unfold.result || null;
+    const unfoldBadgeClass = unfoldStatus === 'completed' ? 'unfold-completed' : unfoldStatus;
+    const statusBadge = `<span class="badge ${unfoldBadgeClass}">${escapeHtml(unfoldStatus)}</span>`;
+    const canQueue = job.status === 'completed' && !['queued', 'processing'].includes(unfoldStatus);
+    const unfoldError = unfold.error ? `<div class="subtle">${escapeHtml(unfold.error)}</div>` : '';
+    const foldSummary = unfoldResult?.fold_lines != null
+      ? `<div class="subtle">zetlijnen ${escapeHtml(unfoldResult.fold_lines)} / raw ${escapeHtml(unfoldResult.raw_fold_lines ?? '—')}</div>`
+      : '';
+    const links = [];
+    if (unfoldResult?.flat_step_url) {
+      links.push(`<a class="artifact-link" href="${escapeHtml(unfoldResult.flat_step_url)}">Flat STEP</a>`);
+    }
+    if (unfoldResult?.dxf_url) {
+      links.push(`<a class="artifact-link" href="${escapeHtml(unfoldResult.dxf_url)}">DXF</a>`);
+    }
+
+    return `
+      <div class="action-stack">
+        <div class="action-row">
+          ${statusBadge}
+          <button class="mini-btn" onclick="requestUnfold('${escapeHtml(job.job_id)}')" ${canQueue ? '' : 'disabled'}>
+            ${unfoldStatus === 'completed' ? 'Opnieuw unfolden' : 'Unfold'}
+          </button>
+        </div>
+        ${foldSummary}
+        ${links.length ? `<div class="action-row">${links.join('')}</div>` : ''}
+        ${unfoldError}
+      </div>
+    `;
+  }
+
+  async function requestUnfold(jobId) {
+    const errEl = document.getElementById('errorMsg');
+    try {
+      const r = await fetch(`/api/v1/jobs/${jobId}/unfold`, {
+        method: 'POST',
+        headers: headers(),
+      });
+      if (r.status === 401) throw new Error('401 — Vul een geldige API key in.');
+      if (!r.ok) {
+        let detail = `HTTP ${r.status}`;
+        try {
+          const payload = await r.json();
+          detail = payload.detail || detail;
+        } catch {}
+        throw new Error(detail);
+      }
+      errEl.style.display = 'none';
+      await loadJobs();
+    } catch (error) {
+      errEl.style.display = '';
+      errEl.textContent = error.message;
+    }
   }
 
   async function checkHealth() {
@@ -177,7 +255,7 @@
       if (r.status === 401) {
         errEl.style.display = '';
         errEl.textContent = '401 — Vul een geldige API key in.';
-        tbody.innerHTML = '<tr><td colspan="10" class="empty">Geen toegang</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" class="empty">Geen toegang</td></tr>';
         return;
       }
       errEl.style.display = 'none';
@@ -186,7 +264,7 @@
       const items = data.items || [];
 
       if (!items.length) {
-        tbody.innerHTML = '<tr><td colspan="10" class="empty">Nog geen jobs</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" class="empty">Nog geen jobs</td></tr>';
         return;
       }
 
@@ -214,22 +292,24 @@
         const holes = prod.holes_total ?? '—';
         const bends = prod.bends_total ?? '—';
         const fname = job.file_name || res.file || job.job_id.slice(0,8);
+        const actions = renderUnfoldActions(job);
 
         return `<tr>
-          <td class="file" title="${fname}">${fname}</td>
+          <td class="file" title="${escapeHtml(fname)}">${escapeHtml(fname)}</td>
           <td>${badge}</td>
-          <td>${cat}</td>
-          <td>${type}</td>
+          <td>${escapeHtml(cat)}</td>
+          <td>${escapeHtml(type)}</td>
           <td class="mono">${thick}</td>
           <td class="mono">${dimStr}</td>
           <td class="mono">${holes}</td>
           <td class="mono">${bends}</td>
           <td class="mono">${timeStr}</td>
           <td class="mono">${dur}</td>
+          <td class="action-cell">${actions}</td>
         </tr>`;
       }).join('');
     } catch (e) {
-      tbody.innerHTML = `<tr><td colspan="10" class="empty">Fout: ${e.message}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="11" class="empty">Fout: ${escapeHtml(e.message)}</td></tr>`;
     }
   }
 

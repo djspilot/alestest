@@ -30,11 +30,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build & push API (lite)
+      - name: Build & push API (full unfold runtime)
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: Dockerfile.api.lite
+          file: Dockerfile.api
           push: true
           tags: ${{ env.IMAGE_API }}:latest,${{ env.IMAGE_API }}:${{ github.sha }}
           cache-from: type=gha,scope=api

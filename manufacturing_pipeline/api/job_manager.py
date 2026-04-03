@@ -19,7 +19,9 @@ from manufacturing_pipeline.api.config import JOB_TTL_SECONDS, DB_PATH
 class Job:
     __slots__ = ("job_id", "status", "created_at", "started_at", "completed_at",
                  "result", "error", "file_path", "file_name", "file_hash",
-                 "file_size_bytes", "progress_events", "progress_summary")
+                 "file_size_bytes", "progress_events", "progress_summary",
+                 "unfold_status", "unfold_requested_at", "unfold_started_at",
+                 "unfold_completed_at", "unfold_result", "unfold_error")
 
     def __init__(self, job_id: str, file_path: str, file_name: str = "",
                  file_hash: str = "", file_size_bytes: int = 0):
@@ -36,6 +38,12 @@ class Job:
         self.file_size_bytes = file_size_bytes
         self.progress_events: list[dict] = []
         self.progress_summary: Optional[dict] = None
+        self.unfold_status = "idle"
+        self.unfold_requested_at: Optional[datetime] = None
+        self.unfold_started_at: Optional[datetime] = None
+        self.unfold_completed_at: Optional[datetime] = None
+        self.unfold_result: Optional[dict] = None
+        self.unfold_error: Optional[str] = None
 
 
 class JobManager:
@@ -58,6 +66,7 @@ class JobManager:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS api_jobs (
                     job_id TEXT PRIMARY KEY,
+                    file_path TEXT,
                     file_name TEXT NOT NULL,
                     file_hash TEXT,
                     file_size_bytes INTEGER,
@@ -66,10 +75,38 @@ class JobManager:
                     started_at TEXT,
                     completed_at TEXT,
                     result_json TEXT,
-                    error TEXT
+                    error TEXT,
+                    unfold_status TEXT NOT NULL DEFAULT 'idle',
+                    unfold_requested_at TEXT,
+                    unfold_started_at TEXT,
+                    unfold_completed_at TEXT,
+                    unfold_result_json TEXT,
+                    unfold_error TEXT
                 );
+            """)
+            existing_columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(api_jobs)").fetchall()
+            }
+            if "unfold_status" not in existing_columns:
+                conn.execute("ALTER TABLE api_jobs ADD COLUMN unfold_status TEXT NOT NULL DEFAULT 'idle'")
+            if "file_path" not in existing_columns:
+                conn.execute("ALTER TABLE api_jobs ADD COLUMN file_path TEXT")
+            if "unfold_requested_at" not in existing_columns:
+                conn.execute("ALTER TABLE api_jobs ADD COLUMN unfold_requested_at TEXT")
+            if "unfold_started_at" not in existing_columns:
+                conn.execute("ALTER TABLE api_jobs ADD COLUMN unfold_started_at TEXT")
+            if "unfold_completed_at" not in existing_columns:
+                conn.execute("ALTER TABLE api_jobs ADD COLUMN unfold_completed_at TEXT")
+            if "unfold_result_json" not in existing_columns:
+                conn.execute("ALTER TABLE api_jobs ADD COLUMN unfold_result_json TEXT")
+            if "unfold_error" not in existing_columns:
+                conn.execute("ALTER TABLE api_jobs ADD COLUMN unfold_error TEXT")
+            conn.executescript("""
                 CREATE INDEX IF NOT EXISTS idx_api_jobs_status
                     ON api_jobs(status);
+                CREATE INDEX IF NOT EXISTS idx_api_jobs_unfold_status
+                    ON api_jobs(unfold_status);
                 CREATE INDEX IF NOT EXISTS idx_api_jobs_created_at
                     ON api_jobs(created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_api_jobs_file_hash
@@ -118,11 +155,18 @@ class JobManager:
         job.started_at = self._str_to_dt(row["started_at"])
         job.completed_at = self._str_to_dt(row["completed_at"])
         job.error = row["error"]
-        job.file_path = ""
+        job.file_path = row["file_path"] if "file_path" in row.keys() else ""
         result_json = row["result_json"]
         job.result = json.loads(result_json) if result_json else None
         job.progress_events = []
         job.progress_summary = None
+        job.unfold_status = row["unfold_status"] or "idle"
+        job.unfold_requested_at = self._str_to_dt(row["unfold_requested_at"])
+        job.unfold_started_at = self._str_to_dt(row["unfold_started_at"])
+        job.unfold_completed_at = self._str_to_dt(row["unfold_completed_at"])
+        job.unfold_error = row["unfold_error"]
+        unfold_result_json = row["unfold_result_json"]
+        job.unfold_result = json.loads(unfold_result_json) if unfold_result_json else None
         return job
 
     # ------------------------------------------------------------------
@@ -138,10 +182,11 @@ class JobManager:
         try:
             conn.execute(
                 """INSERT INTO api_jobs
-                   (job_id, file_name, file_hash, file_size_bytes, status, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (job_id, job.file_name, file_hash, file_size_bytes,
-                 "queued", self._dt_to_str(job.created_at))
+                   (job_id, file_path, file_name, file_hash, file_size_bytes, status, created_at,
+                    unfold_status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (job_id, file_path, job.file_name, file_hash, file_size_bytes,
+                 "queued", self._dt_to_str(job.created_at), "idle")
             )
             conn.commit()
         finally:
@@ -201,6 +246,72 @@ class JobManager:
                         completed_at=self._dt_to_str(now),
                         error=error)
 
+    def queue_unfold(self, job_id: str):
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job:
+                job.unfold_status = "queued"
+                job.unfold_requested_at = now
+                job.unfold_started_at = None
+                job.unfold_completed_at = None
+                job.unfold_result = None
+                job.unfold_error = None
+        self._update_db(
+            job_id,
+            unfold_status="queued",
+            unfold_requested_at=self._dt_to_str(now),
+            unfold_started_at=None,
+            unfold_completed_at=None,
+            unfold_result_json=None,
+            unfold_error=None,
+        )
+
+    def mark_unfold_processing(self, job_id: str):
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job:
+                job.unfold_status = "processing"
+                job.unfold_started_at = now
+        self._update_db(
+            job_id,
+            unfold_status="processing",
+            unfold_started_at=self._dt_to_str(now),
+        )
+
+    def mark_unfold_completed(self, job_id: str, result: dict):
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job:
+                job.unfold_status = "completed"
+                job.unfold_completed_at = now
+                job.unfold_result = result
+                job.unfold_error = None
+        self._update_db(
+            job_id,
+            unfold_status="completed",
+            unfold_completed_at=self._dt_to_str(now),
+            unfold_result_json=json.dumps(result, default=str),
+            unfold_error=None,
+        )
+
+    def mark_unfold_failed(self, job_id: str, error: str):
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job:
+                job.unfold_status = "failed"
+                job.unfold_completed_at = now
+                job.unfold_error = error
+        self._update_db(
+            job_id,
+            unfold_status="failed",
+            unfold_completed_at=self._dt_to_str(now),
+            unfold_error=error,
+        )
+
     def record_progress(self, job_id: str, event: dict, summary: Optional[dict] = None):
         with self._lock:
             job = self._jobs.get(job_id)
@@ -230,9 +341,11 @@ class JobManager:
             ).fetchone()[0]
 
             rows = conn.execute(
-                f"""SELECT job_id, file_name, file_hash, file_size_bytes,
+                f"""SELECT job_id, file_path, file_name, file_hash, file_size_bytes,
                            status, created_at, started_at, completed_at, error,
-                           result_json
+                           result_json, unfold_status, unfold_requested_at,
+                           unfold_started_at, unfold_completed_at, unfold_result_json,
+                           unfold_error
                     FROM api_jobs {where}
                     ORDER BY created_at DESC
                     LIMIT ? OFFSET ?""",
@@ -252,6 +365,14 @@ class JobManager:
                     "completed_at": row["completed_at"],
                     "error": row["error"],
                     "result": None,
+                    "unfold": {
+                        "status": row["unfold_status"] or "idle",
+                        "requested_at": row["unfold_requested_at"],
+                        "started_at": row["unfold_started_at"],
+                        "completed_at": row["unfold_completed_at"],
+                        "error": row["unfold_error"],
+                        "result": None,
+                    },
                 }
                 result_json = row["result_json"]
                 if result_json:
@@ -263,6 +384,23 @@ class JobManager:
                             "thickness": full.get("thickness"),
                             "dimensions": full.get("dimensions"),
                             "production": full.get("production"),
+                        }
+                    except Exception:
+                        pass
+                unfold_result_json = row["unfold_result_json"]
+                if unfold_result_json:
+                    try:
+                        unfold_result = json.loads(unfold_result_json)
+                        item["unfold"]["result"] = {
+                            "success": bool(unfold_result.get("success")),
+                            "error": unfold_result.get("error"),
+                            "flat_length": unfold_result.get("flat_length"),
+                            "flat_width": unfold_result.get("flat_width"),
+                            "fold_lines": unfold_result.get("fold_lines", 0),
+                            "raw_fold_lines": unfold_result.get("raw_fold_lines"),
+                            "bend_line_groups": unfold_result.get("bend_line_groups", []),
+                            "flat_step_url": unfold_result.get("flat_step_url"),
+                            "dxf_url": unfold_result.get("dxf_url"),
                         }
                     except Exception:
                         pass

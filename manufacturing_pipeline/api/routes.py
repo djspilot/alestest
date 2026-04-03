@@ -5,7 +5,6 @@ import hashlib
 import io
 import os
 import uuid
-import shutil
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
@@ -23,9 +22,12 @@ from manufacturing_pipeline.api.schemas import (
     JobTimelineResponse,
     TimelineEvent,
     TimelineSummary,
+    UnfoldStatus,
+    UnfoldResult,
 )
 from manufacturing_pipeline.api.job_manager import jobs
 from manufacturing_pipeline.api.analysis_service import run_step_analysis
+from manufacturing_pipeline.core.runtime_unfold import run_unfold_to_step
 from manufacturing_pipeline.reporting.xml_exporter import export_to_xml
 from pathlib import Path
 import tempfile
@@ -73,10 +75,66 @@ def _run_analysis_job(job_id: str, step_path: str, use_aag: bool, disable_stages
         jobs.mark_completed(job_id, result)
     except Exception as e:
         jobs.mark_failed(job_id, str(e))
-    finally:
-        # Cleanup uploaded file
-        upload_dir = os.path.dirname(step_path)
-        shutil.rmtree(upload_dir, ignore_errors=True)
+
+
+def _build_unfold_result(job_id: str, result: dict | None, error: str | None = None) -> dict | None:
+    if not result and not error:
+        return None
+
+    payload = dict(result or {})
+    payload.setdefault("success", False)
+    payload["error"] = error or payload.get("error")
+    payload["flat_step_url"] = (
+        f"/api/v1/jobs/{job_id}/unfold/artifacts/flat-step"
+        if payload.get("flat_step_path") and os.path.exists(payload["flat_step_path"])
+        else None
+    )
+    dxf_path = payload.get("dxf_path") or payload.get("output_dxf")
+    payload["dxf_url"] = (
+        f"/api/v1/jobs/{job_id}/unfold/artifacts/dxf"
+        if dxf_path and os.path.exists(dxf_path)
+        else None
+    )
+    return payload
+
+
+def _build_unfold_status(job) -> UnfoldStatus:
+    unfold_payload = _build_unfold_result(job.job_id, getattr(job, "unfold_result", None), getattr(job, "unfold_error", None))
+    return UnfoldStatus(
+        status=getattr(job, "unfold_status", "idle") or "idle",
+        requested_at=getattr(job, "unfold_requested_at", None),
+        started_at=getattr(job, "unfold_started_at", None),
+        completed_at=getattr(job, "unfold_completed_at", None),
+        error=getattr(job, "unfold_error", None),
+        result=UnfoldResult(**unfold_payload) if unfold_payload else None,
+    )
+
+
+def _run_unfold_job(job_id: str):
+    jobs.mark_unfold_processing(job_id)
+    job = jobs.get(job_id)
+    if not job:
+        return
+    if not job.file_path or not os.path.exists(job.file_path):
+        jobs.mark_unfold_failed(job_id, "Bron STEP bestand niet meer beschikbaar")
+        return
+
+    output_dir = os.path.join(UPLOAD_DIR, job_id, "unfold")
+    os.makedirs(output_dir, exist_ok=True)
+    part_name = Path(job.file_name).stem or "part"
+    from types import SimpleNamespace
+
+    try:
+        analysis_stub = SimpleNamespace(
+            bend_count_erp=(job.result or {}).get("production", {}).get("bends_total", 0),
+            thickness=(job.result or {}).get("thickness") or 0.0,
+            is_sheet_metal=True,
+        )
+        result = run_unfold_to_step(job.file_path, output_dir, part_name, analysis_stub)
+        result["dxf_path"] = os.path.join(output_dir, f"{part_name}_flat.dxf")
+        jobs.mark_unfold_completed(job_id, _build_unfold_result(job_id, result) or result)
+    except Exception as exc:
+        jobs.mark_unfold_failed(job_id, str(exc))
 
 
 @router.post("/analyze", response_model=JobCreated, status_code=202)
@@ -184,6 +242,7 @@ async def get_job(
         timeline_summary=TimelineSummary(**summary_raw) if summary_raw else None,
         timeline_events=[TimelineEvent(**e) for e in timeline_raw],
         error=job.error,
+        unfold=_build_unfold_status(job),
     )
 
     if job.status == "completed" and job.result:
@@ -215,6 +274,67 @@ async def get_job_timeline(job_id: str):
         summary=summary,
         events=events,
     )
+
+
+@router.post("/jobs/{job_id}/unfold", response_model=UnfoldStatus, status_code=202)
+async def request_unfold(job_id: str, background_tasks: BackgroundTasks):
+    """Queue a server-side unfold job for a completed analysis."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "completed":
+        raise HTTPException(status_code=409, detail="Analysis job is not completed yet")
+    if not job.file_path or not os.path.exists(job.file_path):
+        raise HTTPException(status_code=404, detail="Source STEP file is no longer available")
+
+    current_status = getattr(job, "unfold_status", "idle") or "idle"
+    if current_status in {"queued", "processing"}:
+        return _build_unfold_status(job)
+
+    jobs.queue_unfold(job_id)
+    background_tasks.add_task(_run_unfold_job, job_id)
+    return _build_unfold_status(jobs.get(job_id))
+
+
+@router.get("/jobs/{job_id}/unfold", response_model=UnfoldStatus)
+async def get_unfold_status(job_id: str):
+    """Get the unfold status and artifact links for a job."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _build_unfold_status(job)
+
+
+@router.get("/jobs/{job_id}/unfold/artifacts/{artifact_name}")
+async def get_unfold_artifact(job_id: str, artifact_name: str):
+    """Download unfold artifacts for a completed unfold job."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    unfold_result = getattr(job, "unfold_result", None) or {}
+    if getattr(job, "unfold_status", "idle") != "completed" or not unfold_result:
+        raise HTTPException(status_code=404, detail="Unfold artifact not available")
+
+    artifact_map = {
+        "flat-step": (
+            unfold_result.get("flat_step_path"),
+            f"{Path(job.file_name).stem or 'part'}_flat.step",
+            "application/step",
+        ),
+        "dxf": (
+            unfold_result.get("dxf_path") or unfold_result.get("output_dxf"),
+            f"{Path(job.file_name).stem or 'part'}_flat.dxf",
+            "application/dxf",
+        ),
+    }
+    if artifact_name not in artifact_map:
+        raise HTTPException(status_code=404, detail="Unknown artifact")
+
+    artifact_path, download_name, media_type = artifact_map[artifact_name]
+    if not artifact_path or not os.path.exists(artifact_path):
+        raise HTTPException(status_code=404, detail="Artifact file not found")
+    return FileResponse(artifact_path, filename=download_name, media_type=media_type)
 
 
 @router.get("/health", response_model=HealthResponse)

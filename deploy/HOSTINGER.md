@@ -4,7 +4,7 @@
 
 ```
 git push → GitHub Actions
-              ├── build Dockerfile.api.lite  → ghcr.io/djspilot/alestest-api:latest
+              ├── build Dockerfile.api       → ghcr.io/djspilot/alestest-api:latest
               └── build Dockerfile.viewer    → ghcr.io/djspilot/alestest-viewer:latest
                          ↓
                     SSH naar VPS
@@ -13,6 +13,7 @@ git push → GitHub Actions
 ```
 
 De VPS bouwt **nooit** zelf een image. Hij downloadt altijd een pre-gebouwd image van ghcr.io.
+De productie-image bevat nu ook de volledige FreeCAD-unfold runtime.
 
 ---
 
@@ -34,6 +35,7 @@ nano /srv/alestest/.env
 Minimaal:
 ```env
 API_KEYS=genereer-een-lange-random-sleutel
+FREECAD_RUNTIME_ROOT=/srv/alestest/shared/runtime/freecad
 ```
 
 Genereer een sleutel:
