@@ -14,11 +14,11 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
 
 log "Deploy gestart"
 
-# Login bij ghcr.io
-if [ -f "$GHCR_TOKEN" ]; then
+# Login bij ghcr.io (handmatig: gebruik .ghcr_token; via Actions: al ingelogd)
+if [ -f "$GHCR_TOKEN" ] && ! docker info 2>/dev/null | grep -q "ghcr.io"; then
     cat "$GHCR_TOKEN" | docker login ghcr.io -u aidoel --password-stdin 2>/dev/null \
-        && log "ghcr.io login OK" \
-        || log "Waarschuwing: ghcr.io login gefaald (images mogelijk al lokaal)"
+        && log "ghcr.io login OK (token)" \
+        || log "Waarschuwing: ghcr.io login gefaald"
 fi
 
 # Nieuwe images ophalen
