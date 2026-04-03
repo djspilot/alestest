@@ -144,11 +144,16 @@ class TestGitHubActionsWorkflow:
                any("login-action" in u for u in uses_list), \
             "Build job moet inloggen bij ghcr.io"
 
-    def test_deploy_uses_ssh(self):
-        deploy_steps = self.workflow["jobs"]["deploy"]["steps"]
-        uses_list = [s.get("uses", "") for s in deploy_steps]
-        assert any("ssh-action" in u for u in uses_list), \
-            "Deploy job moet ssh-action gebruiken"
+    def test_deploy_runs_on_vps(self):
+        # Deploy via self-hosted runner on the VPS (no SSH action needed —
+        # the runner itself is the VPS).
+        deploy_job = self.workflow["jobs"]["deploy"]
+        runs_on = deploy_job.get("runs-on", "")
+        uses_list = [s.get("uses", "") for s in deploy_job.get("steps", [])]
+        self_hosted = isinstance(runs_on, list) and "self-hosted" in runs_on
+        uses_ssh = any("ssh-action" in u for u in uses_list)
+        assert self_hosted or uses_ssh, \
+            "Deploy job moet draaien op een self-hosted VPS runner of via ssh-action"
 
     def test_workflow_dispatch_enabled(self):
         on = self.workflow.get("on", self.workflow.get(True, {}))

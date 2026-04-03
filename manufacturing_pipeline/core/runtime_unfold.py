@@ -7,6 +7,7 @@ import json
 import subprocess
 import threading
 import queue
+import time
 import uuid
 import atexit
 from types import SimpleNamespace
@@ -1500,24 +1501,36 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     - flat_step_path: path to flat STEP file
     - flat_length, flat_width: dimensions
     - fold_lines: number of bends
+    - unfold_timings_ms: per-phase timings in milliseconds
     """
+    _t_total = time.perf_counter()
+    timings: dict = {}
+
     mode = os.getenv("FREECAD_UNFOLD_MODE", "auto").strip().lower()
 
     direct_result = {"success": False, "error": "Host direct mode skipped"}
     if mode not in {"direct-python", "python"}:
+        _t0 = time.perf_counter()
         direct_result = _run_direct_unfold_attempt(step_file, output_dir, part_name)
+        timings["direct_attempt_ms"] = round((time.perf_counter() - _t0) * 1000)
         if direct_result.get("success"):
+            timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
+            timings["route"] = "direct"
+            direct_result["unfold_timings_ms"] = timings
             return direct_result
 
     sys_config = SystemConfig.from_env()
     if _persistent_freecad_worker_enabled():
+        _t0 = time.perf_counter()
         python_runtime_result = _run_direct_python_worker_attempt(
             step_file,
             output_dir,
             part_name,
             sys_config,
         )
+        timings["worker_attempt_ms"] = round((time.perf_counter() - _t0) * 1000)
         if python_runtime_result.get("worker_transport_error"):
+            _t0 = time.perf_counter()
             python_runtime_result = _run_unfold_subprocess_attempt(
                 step_file,
                 output_dir,
@@ -1525,7 +1538,9 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
                 sys_config,
                 runtime_label="direct-freecad-python",
             )
+            timings["subprocess_fallback_ms"] = round((time.perf_counter() - _t0) * 1000)
     else:
+        _t0 = time.perf_counter()
         python_runtime_result = _run_unfold_subprocess_attempt(
             step_file,
             output_dir,
@@ -1533,27 +1548,48 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
             sys_config,
             runtime_label="direct-freecad-python",
         )
+        timings["subprocess_attempt_ms"] = round((time.perf_counter() - _t0) * 1000)
+
     if python_runtime_result.get("success"):
         python_runtime_result.setdefault("runtime_source", "direct-freecad-python")
         python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
+        timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
+        timings["route"] = "worker" if _persistent_freecad_worker_enabled() else "subprocess"
+        python_runtime_result["unfold_timings_ms"] = timings
+        _print_unfold_timings(part_name, timings)
         return python_runtime_result
 
     if os.getenv("FREECAD_UNFOLD_DISABLE_FALLBACK", "").strip().lower() in {"1", "true", "yes", "on"}:
-        return python_runtime_result if python_runtime_result.get("error") else direct_result
+        result = python_runtime_result if python_runtime_result.get("error") else direct_result
+        timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
+        timings["route"] = "disabled-fallback"
+        result["unfold_timings_ms"] = timings
+        return result
 
     if not sys.platform.startswith("win"):
         python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
+        timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
+        timings["route"] = "failed"
+        python_runtime_result["unfold_timings_ms"] = timings
+        _print_unfold_timings(part_name, timings)
         return python_runtime_result
 
     desktop_config = _resolve_windows_desktop_freecad_config()
     if not desktop_config:
         python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
+        timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
+        timings["route"] = "failed-no-desktop"
+        python_runtime_result["unfold_timings_ms"] = timings
         return python_runtime_result
     if os.path.abspath(str(desktop_config.freecad_cmd or "")) == os.path.abspath(str(sys_config.freecad_cmd or "")):
         python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
+        timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
+        timings["route"] = "failed-same-desktop"
+        python_runtime_result["unfold_timings_ms"] = timings
         return python_runtime_result
 
     print("    [runtime-fallback] Direct FreeCAD Python runtime failed; retrying with desktop FreeCAD installation.")
+    _t0 = time.perf_counter()
     fallback_result = _run_unfold_subprocess_attempt(
         step_file,
         output_dir,
@@ -1561,17 +1597,34 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
         desktop_config,
         runtime_label="desktop-freecad",
     )
+    timings["desktop_fallback_ms"] = round((time.perf_counter() - _t0) * 1000)
+    timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
+
     if fallback_result.get("success"):
         fallback_result["runtime_source"] = "desktop-freecad"
         fallback_result.setdefault("direct_runtime_error", direct_result.get("error"))
         fallback_result.setdefault("python_runtime_error", python_runtime_result.get("error"))
+        timings["route"] = "desktop-fallback"
+        fallback_result["unfold_timings_ms"] = timings
+        _print_unfold_timings(part_name, timings)
         return fallback_result
 
     fallback_result.setdefault("runtime_source", "desktop-freecad")
     fallback_result.setdefault("managed_runtime_error", python_runtime_result.get("error"))
     fallback_result.setdefault("direct_runtime_error", direct_result.get("error"))
     fallback_result.setdefault("python_runtime_error", python_runtime_result.get("error"))
+    timings["route"] = "all-failed"
+    fallback_result["unfold_timings_ms"] = timings
+    _print_unfold_timings(part_name, timings)
     return fallback_result
+
+
+def _print_unfold_timings(part_name: str, timings: dict) -> None:
+    total = timings.get("total_ms", "?")
+    route = timings.get("route", "?")
+    phases = {k: v for k, v in timings.items() if k not in {"total_ms", "route"}}
+    phase_str = "  ".join(f"{k}={v}ms" for k, v in phases.items())
+    print(f"  [unfold-timing] {part_name}  total={total}ms  route={route}  {phase_str}")
 
 
 

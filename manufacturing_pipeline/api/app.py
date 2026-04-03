@@ -55,6 +55,37 @@ async def startup():
     """Initialize on startup."""
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     asyncio.create_task(_cleanup_loop())
+    # Pre-warm FreeCAD worker so the first unfold job pays no cold-start penalty.
+    if "unfold" not in _disabled_stages():
+        asyncio.create_task(_prewarm_freecad_worker())
+
+
+def _disabled_stages() -> set:
+    from manufacturing_pipeline.api.config import DISABLE_STAGES
+    return DISABLE_STAGES
+
+
+async def _prewarm_freecad_worker():
+    """Spawn the persistent FreeCAD worker in the background at startup."""
+    import time
+    loop = asyncio.get_event_loop()
+    try:
+        t0 = time.perf_counter()
+        await loop.run_in_executor(None, _start_freecad_worker)
+        elapsed = round((time.perf_counter() - t0) * 1000)
+        print(f"  [freecad-prewarm] worker ready in {elapsed}ms")
+    except Exception as exc:
+        print(f"  [freecad-prewarm] failed (unfold will still work on demand): {exc}")
+
+
+def _start_freecad_worker():
+    from manufacturing_pipeline.core.runtime_unfold import (
+        _get_persistent_freecad_worker,
+        _persistent_freecad_worker_enabled,
+    )
+    from manufacturing_pipeline.core.config import SystemConfig
+    if _persistent_freecad_worker_enabled():
+        _get_persistent_freecad_worker(SystemConfig.from_env())
 
 
 # API routes
