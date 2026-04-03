@@ -17,14 +17,6 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
 
-  viewer:
-    image: ghcr.io/djspilot/alestest-viewer:latest
-    container_name: ales-viewer
-    restart: unless-stopped
-    depends_on:
-      - api
-    ports:
-      - "127.0.0.1:8080:80"
 
 volumes:
   ales_uploads:

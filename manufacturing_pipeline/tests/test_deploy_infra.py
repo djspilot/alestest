@@ -67,18 +67,10 @@ class TestDockerComposeProd:
     def test_has_api_service(self):
         assert "api" in self.compose["services"]
 
-    def test_has_viewer_service(self):
-        assert "viewer" in self.compose["services"]
-
     def test_api_uses_ghcr_image(self):
         image = self.compose["services"]["api"]["image"]
         assert image.startswith("ghcr.io/"), \
             f"API service moet ghcr.io image gebruiken, niet: {image}"
-
-    def test_viewer_uses_ghcr_image(self):
-        image = self.compose["services"]["viewer"]["image"]
-        assert image.startswith("ghcr.io/"), \
-            f"Viewer service moet ghcr.io image gebruiken, niet: {image}"
 
     def test_api_no_local_build(self):
         assert "build" not in self.compose["services"]["api"], \
