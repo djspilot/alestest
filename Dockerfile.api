@@ -33,5 +33,5 @@ ENV FREECAD_RUNTIME_ROOT=/opt/conda/envs/freecad
 
 EXPOSE 8000
 
-CMD ["micromamba", "run", "-n", "ales", "python", "-m", "uvicorn", \
+CMD ["/opt/conda/envs/ales/bin/python", "-m", "uvicorn", \
      "manufacturing_pipeline.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
