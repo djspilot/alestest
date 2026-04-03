@@ -8,7 +8,7 @@ import { SelectionProvider, useSelectionContext } from './context/SelectionConte
 import { useViewer } from './hooks/useViewer'
 import { fetchFileAsBrowserFile } from './lib/files'
 import { normalizeStageName, MERGED_HOLES_STAGE } from './pipelineUi'
-import { getDefaultPipelineApiBase } from './pipelineClient'
+import { getApiKeyHeaders, getDefaultPipelineApiBase } from './pipelineClient'
 
 import { normalizeFoldId } from './lib/holes'
 
@@ -128,7 +128,7 @@ function AppContent() {
         `${pipeline.pipelineApiBase || getDefaultPipelineApiBase()}/api/v1/viewer/default-step`,
         'nieuwmodel.step',
         {
-          headers: pipeline.pipelineApiKey ? { 'X-API-Key': pipeline.pipelineApiKey } : undefined,
+          headers: getApiKeyHeaders(pipeline.pipelineApiKey),
         },
       )
       viewer.handleFile(file)

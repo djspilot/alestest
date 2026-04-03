@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { normalizeStageName, formatDuration, formatLabel, formatDetailValue, parseIsoToMs } from '../pipelineUi'
+import { getApiKeyHeaders } from '../pipelineClient'
 
 describe('pipelineUi', () => {
   it('normalizes Profile Router to Classify geometry', () => {
@@ -39,5 +40,14 @@ describe('pipelineUi', () => {
   it('returns null for invalid ISO', () => {
     expect(parseIsoToMs('not-a-date')).toBeNull()
     expect(parseIsoToMs(null)).toBeNull()
+  })
+
+  it('builds the api key header for latin-1 values', () => {
+    const headers = getApiKeyHeaders('abc123')
+    expect(headers.get('X-API-Key')).toBe('abc123')
+  })
+
+  it('rejects api keys with non latin-1 characters', () => {
+    expect(() => getApiKeyHeaders('abc€')).toThrow(/niet-ondersteunde tekens/i)
   })
 })

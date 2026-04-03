@@ -5,12 +5,30 @@ function trimTrailingSlash(value) {
   return (value || '').replace(/\/$/, '')
 }
 
-function buildHeaders(apiKey, extraHeaders = {}) {
-  const headers = new Headers(extraHeaders)
-  if (apiKey) {
-    headers.set('X-API-Key', apiKey)
+function validateHeaderValue(value, label) {
+  const stringValue = String(value ?? '')
+  for (let index = 0; index < stringValue.length; index += 1) {
+    const codePoint = stringValue.charCodeAt(index)
+    if (codePoint > 0xff) {
+      throw new Error(`${label} bevat niet-ondersteunde tekens. Gebruik alleen standaard ASCII/Latin-1 tekens.`)
+    }
   }
+  if (/[\r\n]/.test(stringValue)) {
+    throw new Error(`${label} bevat ongeldige regeleinden.`)
+  }
+  return stringValue
+}
+
+export function getApiKeyHeaders(apiKey = '', extraHeaders = {}) {
+  const headers = new Headers(extraHeaders)
+  const trimmedApiKey = String(apiKey || '').trim()
+  if (!trimmedApiKey) return headers
+  headers.set('X-API-Key', validateHeaderValue(trimmedApiKey, 'API key'))
   return headers
+}
+
+function buildHeaders(apiKey, extraHeaders = {}) {
+  return getApiKeyHeaders(apiKey, extraHeaders)
 }
 
 function getErrorMessage(error, fallback) {
