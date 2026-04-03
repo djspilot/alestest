@@ -809,8 +809,12 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
 
     # ================================================================
     # STEP 6: Detect holes - on FLAT pattern if available
+    # Classificatie-route:
+    # - PROFIEL / PLAAT (vlak) / GEBOGEN PLAATWERK -> stap 6 actief
+    # - ANDERS -> stap 6 overslaan (direct naar stap 7 rapportage)
     # ================================================================
-    if "detect_holes" not in disabled_stages:
+    should_detect_holes = part_category != "ANDERS"
+    if "detect_holes" not in disabled_stages and should_detect_holes:
         print("\n[6/7] Detecting holes...")
         with profiler.step("Detect holes", 6, 7):
             pre_unfold_shaped_holes = []
@@ -1277,7 +1281,8 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
         )
 
     else:
-        print("\n[6/7] Detect holes: Overgeslagen (uitgeschakeld)")
+        skip_reason = "uitgeschakeld" if "detect_holes" in disabled_stages else f"classificatie ({part_category})"
+        print(f"\n[6/7] Detect holes: Overgeslagen ({skip_reason})")
         circular_holes, shaped_holes = [], []
         circular_debug, shaped_debug = [], []
         dedup_rejections = []
@@ -1286,7 +1291,20 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
         analysis.detected_hole_visuals = {"source": "skipped", "items": [], "total_candidates": 0, "accepted_total": 0, "rejected_total": 0, "method_order": []}
         with profiler.step("Detect holes", 6, 7) as s:
             s["status"] = "SKIP"
-        profiler.emit("holes_detected", "Detect holes", {"skipped": True, "total": 0, "reason": "Stage uitgeschakeld via disable_stages"}, status="SKIP")
+        profiler.emit(
+            "holes_detected",
+            "Detect holes",
+            {
+                "skipped": True,
+                "total": 0,
+                "reason": (
+                    "Stage uitgeschakeld via disable_stages"
+                    if "detect_holes" in disabled_stages
+                    else f"Overgeslagen door classificatie ({part_category})"
+                ),
+            },
+            status="SKIP",
+        )
 
     # ================================================================
     # STEP 7: Save results

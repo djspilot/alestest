@@ -17,6 +17,13 @@ Analyseert STEP CAD-bestanden: classificeert onderdelen, detecteert features (ga
                     └──────────────────────────────────────────────────────┘     └──────────────┘
 ```
 
+### Classificatie-afhankelijke flow (na stap 2)
+
+- **Profiel**: stap 3 → stap 5 (stap 4 overslaan)
+- **Vlakke plaat**: stap 3 → stap 5 (stap 4 overslaan)
+- **Gezette plaat**: stap 3 → stap 4 → stap 5 (volledige flow)
+- **Anders**: direct stap 5 (stap 3 en 4 overslaan)
+
 ## Snel aan de slag
 
 ### Vereisten
