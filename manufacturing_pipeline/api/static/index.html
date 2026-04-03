@@ -1,1270 +1,246 @@
 <!DOCTYPE html>
 <html lang="nl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manufacturing Analysis</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ALES API</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: ui-monospace, 'SF Mono', monospace; background: #0d0d0d; color: #e0e0e0; font-size: 13px; }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: #ffffff;
-            color: #000000;
-            line-height: 1.6;
-            font-size: 15px;
-        }
+  header { display: flex; align-items: center; gap: 16px; padding: 16px 24px; border-bottom: 1px solid #222; }
+  header h1 { font-size: 14px; font-weight: 600; letter-spacing: 0.05em; color: #fff; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #444; flex-shrink: 0; }
+  .dot.ok { background: #22c55e; box-shadow: 0 0 6px #22c55e88; }
+  .dot.err { background: #ef4444; }
+  .uptime { margin-left: auto; color: #555; font-size: 11px; }
 
-        .header {
-            background: #000000;
-            color: #ffffff;
-            padding: 24px 32px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
+  .key-bar { display: flex; gap: 8px; padding: 12px 24px; background: #111; border-bottom: 1px solid #1e1e1e; }
+  .key-bar input { flex: 1; background: #1a1a1a; border: 1px solid #2a2a2a; color: #ccc; padding: 6px 10px; border-radius: 4px; font-family: inherit; font-size: 12px; }
+  .key-bar input:focus { outline: none; border-color: #444; }
+  .key-bar input::placeholder { color: #444; }
+  .key-bar button { background: #222; border: 1px solid #333; color: #aaa; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 12px; }
+  .key-bar button:hover { background: #2a2a2a; color: #fff; }
 
-        .header h1 {
-            font-size: 1.25rem;
-            font-weight: 500;
-            letter-spacing: 0.02em;
-        }
+  .stats { display: flex; gap: 1px; background: #1a1a1a; border-bottom: 1px solid #222; }
+  .stat { flex: 1; padding: 14px 20px; background: #0d0d0d; }
+  .stat-label { color: #555; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+  .stat-value { font-size: 22px; font-weight: 700; color: #fff; }
+  .stat-value.green { color: #22c55e; }
+  .stat-value.red { color: #ef4444; }
+  .stat-value.yellow { color: #eab308; }
 
-        .header-status {
-            font-size: 0.8rem;
-            opacity: 0.6;
-        }
+  .toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 24px; border-bottom: 1px solid #1e1e1e; }
+  .toolbar span { color: #555; font-size: 11px; }
+  .refresh-btn { margin-left: auto; background: none; border: 1px solid #2a2a2a; color: #666; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 11px; }
+  .refresh-btn:hover { border-color: #444; color: #aaa; }
+  a.docs-link { color: #555; font-size: 11px; text-decoration: none; }
+  a.docs-link:hover { color: #aaa; }
 
-        .container {
-            max-width: 1320px;
-            margin: 0 auto;
-            padding: 40px 32px;
-        }
+  table { width: 100%; border-collapse: collapse; }
+  thead tr { border-bottom: 1px solid #1e1e1e; }
+  th { padding: 8px 12px; text-align: left; font-size: 10px; color: #444; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; }
+  tbody tr { border-bottom: 1px solid #131313; transition: background 0.1s; }
+  tbody tr:hover { background: #111; }
+  td { padding: 10px 12px; color: #bbb; }
+  td.file { color: #fff; font-weight: 500; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.mono { font-family: ui-monospace, monospace; font-size: 11px; color: #888; }
 
-        /* Drop zone */
-        .dropzone {
-            border: 3px dashed #cccccc;
-            padding: 60px 40px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            margin-bottom: 32px;
-        }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+  .badge.completed { background: #14532d; color: #4ade80; }
+  .badge.failed    { background: #450a0a; color: #f87171; }
+  .badge.processing{ background: #1c1917; color: #fbbf24; }
+  .badge.queued    { background: #1e1b4b; color: #818cf8; }
 
-        .dropzone:hover,
-        .dropzone.dragover {
-            border-color: #000000;
-            background: #fafafa;
-        }
-
-        .dropzone-icon {
-            font-size: 3rem;
-            margin-bottom: 16px;
-            opacity: 0.3;
-        }
-
-        .dropzone-text {
-            font-size: 1.1rem;
-            color: #666666;
-            margin-bottom: 8px;
-        }
-
-        .dropzone-hint {
-            font-size: 0.85rem;
-            color: #999999;
-        }
-
-        .dropzone input[type="file"] {
-            display: none;
-        }
-
-        /* Processing state */
-        .processing {
-            text-align: center;
-            padding: 60px 40px;
-            display: none;
-        }
-
-        .spinner {
-            width: 48px;
-            height: 48px;
-            border: 4px solid #e0e0e0;
-            border-top-color: #000000;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-            margin: 0 auto 24px;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .processing-text {
-            font-size: 1.1rem;
-            color: #333333;
-        }
-
-        .processing-sub {
-            font-size: 0.85rem;
-            color: #999999;
-            margin-top: 8px;
-        }
-
-        /* Error state */
-        .error-box {
-            background: #fff5f5;
-            border: 1px solid #000000;
-            padding: 20px 24px;
-            margin-bottom: 24px;
-            display: none;
-        }
-
-        .error-title {
-            font-weight: 600;
-            margin-bottom: 8px;
-        }
-
-        .error-message {
-            font-size: 0.9rem;
-            color: #333333;
-        }
-
-        /* Results */
-        .results {
-            display: none;
-        }
-
-        .result-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 24px;
-            padding-bottom: 12px;
-            border-bottom: 2px solid #000000;
-        }
-
-        .result-title {
-            font-size: 1.5rem;
-            font-weight: 600;
-        }
-
-        .result-actions {
-            display: flex;
-            gap: 12px;
-        }
-
-        .btn {
-            padding: 8px 20px;
-            font-size: 0.9rem;
-            font-weight: 500;
-            cursor: pointer;
-            border: 2px solid #000000;
-            background: #ffffff;
-            color: #000000;
-            transition: all 0.15s ease;
-        }
-
-        .btn:hover {
-            background: #000000;
-            color: #ffffff;
-        }
-
-        .btn-primary {
-            background: #000000;
-            color: #ffffff;
-        }
-
-        .btn-primary:hover {
-            background: #333333;
-        }
-
-        /* Result sections */
-        .result-section {
-            margin-bottom: 24px;
-        }
-
-        .viewer-layout {
-            display: grid;
-            grid-template-columns: 1.8fr 1fr;
-            gap: 16px;
-            margin-bottom: 24px;
-        }
-
-        @media (max-width: 860px) {
-            .viewer-layout {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        .viewer-box {
-            border: 1px solid #000000;
-            min-height: 560px;
-            position: relative;
-            overflow: hidden;
-            background: linear-gradient(180deg, #ffffff 0%, #f5f5f5 100%);
-        }
-
-        .model-panels {
-            display: grid;
-            grid-template-columns: 1fr;
-            grid-template-rows: 2fr 1fr;
-            gap: 10px;
-            padding: 10px;
-            height: 100%;
-            min-height: 560px;
-        }
-
-        @media (max-width: 860px) {
-            .model-panels {
-                grid-template-columns: 1fr;
-                grid-template-rows: 1fr 1fr;
-            }
-        }
-
-        .model-panel {
-            border: 1px solid #d2d2d2;
-            background: #ffffff;
-            position: relative;
-            min-height: 165px;
-        }
-
-        .model-panel-3d {
-            min-height: 360px;
-            background: linear-gradient(180deg, #f6fbff 0%, #eef4ff 100%);
-        }
-
-        .model-panel-2d {
-            min-height: 180px;
-        }
-
-        .model-label {
-            position: absolute;
-            left: 8px;
-            top: 6px;
-            font-size: 0.72rem;
-            color: #444444;
-            z-index: 2;
-            padding: 2px 6px;
-            border: 1px solid #e0e0e0;
-            background: rgba(255, 255, 255, 0.88);
-        }
-
-        .model-canvas {
-            width: 100%;
-            height: 100%;
-            min-height: 125px;
-            display: block;
-        }
-
-        .viewer3d-host {
-            position: absolute;
-            inset: 0;
-            z-index: 1;
-        }
-
-        .overlay-canvas {
-            position: absolute;
-            inset: 0;
-            z-index: 2;
-            pointer-events: none;
-        }
-
-        .viewer3d-toolbar {
-            position: absolute;
-            right: 8px;
-            top: 6px;
-            z-index: 3;
-            display: flex;
-            gap: 6px;
-            align-items: center;
-            background: rgba(255, 255, 255, 0.9);
-            border: 1px solid #d7d7d7;
-            padding: 4px 6px;
-            font-size: 0.72rem;
-        }
-
-        .viewer3d-state {
-            color: #374151;
-        }
-
-        .viewer-box.is-fullscreen {
-            position: fixed;
-            inset: 12px;
-            z-index: 2000;
-            background: #ffffff;
-        }
-
-        .viewer-caption {
-            position: absolute;
-            left: 10px;
-            bottom: 8px;
-            font-size: 0.75rem;
-            color: #666666;
-            background: rgba(255, 255, 255, 0.85);
-            border: 1px solid #d0d0d0;
-            padding: 4px 6px;
-        }
-
-        .timeline-box {
-            border: 1px solid #000000;
-            padding: 12px;
-            background: #ffffff;
-        }
-
-        .timeline-controls {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 10px;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-
-        .timeline-slider {
-            width: 100%;
-            margin: 8px 0;
-        }
-
-        .timeline-event {
-            font-size: 0.88rem;
-            border: 1px solid #e0e0e0;
-            padding: 8px;
-            background: #fafafa;
-            min-height: 92px;
-        }
-
-        .timeline-meta {
-            font-size: 0.8rem;
-            color: #555555;
-            margin-top: 6px;
-        }
-
-        .section-title {
-            font-size: 1.1rem;
-            font-weight: 600;
-            margin-bottom: 12px;
-            padding-bottom: 6px;
-            border-bottom: 1px solid #e0e0e0;
-        }
-
-        .result-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
-            margin-bottom: 24px;
-        }
-
-        @media (max-width: 600px) {
-            .result-grid { grid-template-columns: 1fr; }
-            .container { padding: 24px 16px; }
-        }
-
-        .result-card {
-            border: 1px solid #000000;
-            padding: 16px 20px;
-        }
-
-        .card-label {
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: #666666;
-            margin-bottom: 4px;
-        }
-
-        .card-value {
-            font-size: 1.5rem;
-            font-weight: 600;
-        }
-
-        .card-sub {
-            font-size: 0.8rem;
-            color: #999999;
-            margin-top: 2px;
-        }
-
-        /* Data table */
-        .data-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        .data-table th {
-            background: #000000;
-            color: #ffffff;
-            padding: 10px 16px;
-            text-align: left;
-            font-weight: 500;
-            font-size: 0.85rem;
-        }
-
-        .data-table td {
-            padding: 10px 16px;
-            border-bottom: 1px solid #e0e0e0;
-            font-size: 0.9rem;
-        }
-
-        .data-table tr:nth-child(even) {
-            background: #fafafa;
-        }
-
-        /* Category badge */
-        .badge {
-            display: inline-block;
-            padding: 4px 12px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            border: 1px solid #000000;
-        }
-
-        .badge-dark {
-            background: #000000;
-            color: #ffffff;
-        }
-
-        .footer {
-            text-align: center;
-            padding: 24px;
-            color: #999999;
-            font-size: 0.8rem;
-            margin-top: 48px;
-        }
-    </style>
+  .empty { padding: 60px; text-align: center; color: #333; }
+  .error-msg { padding: 12px 24px; color: #ef4444; font-size: 11px; }
+  #autoRefreshLabel { font-size: 10px; color: #333; }
+</style>
 </head>
 <body>
-    <div class="header">
-        <h1>Manufacturing Analysis</h1>
-        <span class="header-status" id="headerStatus">Ready</span>
-    </div>
 
-    <div class="container">
-        <!-- Upload State -->
-        <div id="uploadSection">
-            <div class="dropzone" id="dropzone">
-                <div class="dropzone-icon">&#9881;</div>
-                <div class="dropzone-text">Sleep een STEP bestand hierheen</div>
-                <div class="dropzone-hint">of klik om een bestand te selecteren (.step, .stp)</div>
-                <input type="file" id="fileInput" accept=".step,.stp,.STEP,.STP">
-            </div>
-        </div>
+<header>
+  <div class="dot" id="healthDot"></div>
+  <h1>ALES · Manufacturing API</h1>
+  <span class="uptime" id="healthLabel">verbinden…</span>
+</header>
 
-        <!-- Processing State -->
-        <div class="processing" id="processingSection">
-            <div class="spinner"></div>
-            <div class="processing-text" id="processingText">Analyseren...</div>
-            <div class="processing-sub" id="processingSub">STEP bestand wordt verwerkt</div>
-        </div>
+<div class="key-bar">
+  <input type="password" id="apiKeyInput" placeholder="API key (opgeslagen in browser)" autocomplete="off">
+  <button onclick="saveKey()">Opslaan</button>
+</div>
 
-        <!-- Error State -->
-        <div class="error-box" id="errorSection">
-            <div class="error-title">Analyse mislukt</div>
-            <div class="error-message" id="errorMessage"></div>
-            <br>
-            <button class="btn" onclick="reset()">Opnieuw proberen</button>
-        </div>
+<div class="stats">
+  <div class="stat"><div class="stat-label">Totaal</div><div class="stat-value" id="sTotal">—</div></div>
+  <div class="stat"><div class="stat-label">Geslaagd</div><div class="stat-value green" id="sOk">—</div></div>
+  <div class="stat"><div class="stat-label">Mislukt</div><div class="stat-value red" id="sFail">—</div></div>
+  <div class="stat"><div class="stat-label">Bezig</div><div class="stat-value yellow" id="sProc">—</div></div>
+</div>
 
-        <!-- Results State -->
-        <div class="results" id="resultsSection">
-            <div class="result-header">
-                <div class="result-title" id="resultFilename">result.step</div>
-                <div class="result-actions">
-                    <button class="btn" onclick="downloadCSV()">CSV Download</button>
-                    <button class="btn btn-primary" onclick="reset()">Nieuw bestand</button>
-                </div>
-            </div>
+<div class="toolbar">
+  <span id="autoRefreshLabel"></span>
+  <a class="docs-link" href="/docs" target="_blank">→ API docs</a>
+  <button class="refresh-btn" onclick="loadAll()">↻ Ververs</button>
+</div>
 
-            <!-- Classification Cards -->
-            <div class="result-grid">
-                <div class="result-card">
-                    <div class="card-label">Categorie</div>
-                    <div class="card-value" id="resCategory">-</div>
-                </div>
-                <div class="result-card">
-                    <div class="card-label">Type</div>
-                    <div class="card-value" id="resType">-</div>
-                </div>
-                <div class="result-card">
-                    <div class="card-label">Dikte</div>
-                    <div class="card-value" id="resThickness">-</div>
-                    <div class="card-sub">mm</div>
-                </div>
-                <div class="result-card">
-                    <div class="card-label">Afmetingen</div>
-                    <div class="card-value" id="resDimensions">-</div>
-                    <div class="card-sub" id="resDimensionsSub">L x B x H (mm)</div>
-                </div>
-            </div>
+<div id="errorMsg" class="error-msg" style="display:none"></div>
+<table>
+  <thead>
+    <tr>
+      <th>Bestand</th>
+      <th>Status</th>
+      <th>Categorie</th>
+      <th>Type</th>
+      <th>Dikte</th>
+      <th>L × B × H (mm)</th>
+      <th>Gaten</th>
+      <th>Zettingen</th>
+      <th>Tijd</th>
+      <th>Duur</th>
+    </tr>
+  </thead>
+  <tbody id="jobTable">
+    <tr><td colspan="10" class="empty">Laden…</td></tr>
+  </tbody>
+</table>
 
-            <!-- 3D Viewer + Pipeline Timeline -->
-            <div class="result-section">
-                <div class="section-title">3D Pipeline Replay</div>
-                <div class="viewer-layout">
-                    <div class="viewer-box">
-                        <div class="model-panels">
-                            <div class="model-panel model-panel-3d">
-                                <div class="model-label">3D View</div>
-                                <div id="viewer3dHost" class="viewer3d-host"></div>
-                                <canvas id="viewer3dCanvas" class="model-canvas overlay-canvas"></canvas>
-                                <div class="viewer3d-toolbar">
-                                    <span id="viewer3dState" class="viewer3d-state">Viewer: initializing...</span>
-                                    <button class="btn" id="viewer3dResetBtn" type="button" style="padding:4px 8px; font-size:0.72rem;">Reset View</button>
-                                    <button class="btn" id="viewer3dFullscreenBtn" type="button" style="padding:4px 8px; font-size:0.72rem;">Fullscreen</button>
-                                </div>
-                            </div>
-                            <div class="model-panel model-panel-2d">
-                                <div class="model-label">2D Projectie</div>
-                                <canvas id="viewer2dCanvas" class="model-canvas"></canvas>
-                            </div>
-                        </div>
-                        <div class="viewer-caption" id="viewerCaption">3D preview</div>
-                    </div>
-                    <div class="timeline-box">
-                        <div class="timeline-controls">
-                            <button class="btn" id="timelinePlayBtn" type="button">Play</button>
-                            <button class="btn" id="timelinePauseBtn" type="button">Pause</button>
-                            <span class="card-sub" id="timelineIndexLabel">Event 0/0</span>
-                        </div>
-                        <input class="timeline-slider" id="timelineSlider" type="range" min="0" max="0" value="0">
-                        <div class="timeline-event" id="timelineEventDetails">Geen timeline data geladen.</div>
-                        <div class="timeline-meta" id="timelineSummaryText">-</div>
-                    </div>
-                </div>
-            </div>
+<script>
+  const KEY_STORE = 'ales_api_key';
+  let apiKey = localStorage.getItem(KEY_STORE) || '';
+  let refreshTimer = null;
+  const REFRESH_INTERVAL = 30;
 
-            <!-- Production Data -->
-            <div class="result-section">
-                <div class="section-title">Productie Data</div>
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Parameter</th>
-                            <th>Waarde</th>
-                        </tr>
-                    </thead>
-                    <tbody id="productionTable">
-                    </tbody>
-                </table>
-            </div>
+  document.getElementById('apiKeyInput').value = apiKey;
 
-            <!-- Flat Dimensions (conditional) -->
-            <div class="result-section" id="flatSection" style="display:none">
-                <div class="section-title">Uitslag (Flat Pattern)</div>
-                <table class="data-table">
-                    <tbody id="flatTable">
-                    </tbody>
-                </table>
-            </div>
+  function saveKey() {
+    apiKey = document.getElementById('apiKeyInput').value.trim();
+    localStorage.setItem(KEY_STORE, apiKey);
+    loadAll();
+  }
 
-            <!-- AAG Details (conditional) -->
-            <div class="result-section" id="aagSection" style="display:none">
-                <div class="section-title">AAG Analyse Details</div>
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Parameter</th>
-                            <th>Waarde</th>
-                        </tr>
-                    </thead>
-                    <tbody id="aagTable">
-                    </tbody>
-                </table>
-            </div>
+  document.getElementById('apiKeyInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') saveKey();
+  });
 
-            <!-- Hole Details (conditional) -->
-            <div class="result-section" id="holeSection" style="display:none">
-                <div class="section-title">Gaten Detail</div>
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Type</th>
-                            <th>Diameter</th>
-                            <th>Q-waarde</th>
-                        </tr>
-                    </thead>
-                    <tbody id="holeTable">
-                    </tbody>
-                </table>
-            </div>
+  function headers() {
+    return apiKey ? { 'X-API-Key': apiKey } : {};
+  }
 
-            <!-- Bend Details (conditional) -->
-            <div class="result-section" id="bendSection" style="display:none">
-                <div class="section-title">Zettingen Detail</div>
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Type</th>
-                            <th>Hoek</th>
-                            <th>Radius</th>
-                            <th>Lengte</th>
-                        </tr>
-                    </thead>
-                    <tbody id="bendTable">
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
+  async function checkHealth() {
+    const dot = document.getElementById('healthDot');
+    const label = document.getElementById('healthLabel');
+    try {
+      const r = await fetch('/api/v1/health');
+      if (r.ok) {
+        dot.className = 'dot ok';
+        label.textContent = 'online';
+      } else {
+        dot.className = 'dot err';
+        label.textContent = `HTTP ${r.status}`;
+      }
+    } catch {
+      dot.className = 'dot err';
+      label.textContent = 'niet bereikbaar';
+    }
+  }
 
-    <div class="footer">
-        Manufacturing Analysis API &mdash; STEP File Analyzer
-    </div>
+  async function loadStats() {
+    try {
+      const r = await fetch('/api/v1/stats', { headers: headers() });
+      if (!r.ok) return;
+      const d = await r.json();
+      document.getElementById('sTotal').textContent = d.total ?? '—';
+      document.getElementById('sOk').textContent    = d.completed ?? '—';
+      document.getElementById('sFail').textContent  = d.failed ?? '—';
+      document.getElementById('sProc').textContent  = d.processing ?? '—';
+    } catch {}
+  }
 
-    <script>
-        let currentJobId = null;
-        let currentResult = null;
-        let pollTimer = null;
-        let timelineData = [];
-        let timelineSummary = null;
-        let timelinePlayTimer = null;
-        let viewer2dCtx = null;
-        let currentDims = { x: 80, y: 30, z: 55 };
-        let visualState = {
-            hue: 0.58,
-            markerCount: 0,
-            eventLabel: 'none',
-            mode: 'default',
-            profileLabel: null,
-        };
+  async function loadJobs() {
+    const tbody = document.getElementById('jobTable');
+    const errEl = document.getElementById('errorMsg');
+    try {
+      const r = await fetch('/api/v1/jobs?limit=50&offset=0', { headers: headers() });
+      if (r.status === 401) {
+        errEl.style.display = '';
+        errEl.textContent = '401 — Vul een geldige API key in.';
+        tbody.innerHTML = '<tr><td colspan="10" class="empty">Geen toegang</td></tr>';
+        return;
+      }
+      errEl.style.display = 'none';
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      const items = data.items || [];
 
-        const threeState = {
-            ready: false,
-            THREE: null,
-            scene: null,
-            camera: null,
-            renderer: null,
-            controls: null,
-            mesh: null,
-            rafId: null,
-        };
+      if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="10" class="empty">Nog geen jobs</td></tr>';
+        return;
+      }
 
-        const dropzone = document.getElementById('dropzone');
-        const fileInput = document.getElementById('fileInput');
-        const timelineSlider = document.getElementById('timelineSlider');
-        const timelineEventDetails = document.getElementById('timelineEventDetails');
-        const timelineSummaryText = document.getElementById('timelineSummaryText');
-        const timelineIndexLabel = document.getElementById('timelineIndexLabel');
-        const viewer3dCanvas = document.getElementById('viewer3dCanvas');
-        const viewer2dCanvas = document.getElementById('viewer2dCanvas');
-        const viewer3dHost = document.getElementById('viewer3dHost');
-        const viewer3dState = document.getElementById('viewer3dState');
-        const viewer3dResetBtn = document.getElementById('viewer3dResetBtn');
-        const viewer3dFullscreenBtn = document.getElementById('viewer3dFullscreenBtn');
-        const viewerBox = document.querySelector('.viewer-box');
+      tbody.innerHTML = items.map(job => {
+        const res = job.result || {};
+        const prod = res.production || {};
+        const dims = res.dimensions || {};
+        const created = new Date(job.created_at);
+        const timeStr = created.toLocaleString('nl-NL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
 
-        dropzone.addEventListener('click', () => fileInput.click());
-        dropzone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            dropzone.classList.add('dragover');
-        });
-        dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
-        dropzone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            dropzone.classList.remove('dragover');
-            const file = e.dataTransfer.files[0];
-            if (file) handleFile(file);
-        });
-        fileInput.addEventListener('change', () => {
-            if (fileInput.files[0]) handleFile(fileInput.files[0]);
-        });
-
-        async function handleFile(file) {
-            const ext = file.name.split('.').pop().toLowerCase();
-            if (!['step', 'stp'].includes(ext)) {
-                showError('Ongeldig bestandstype. Alleen .step en .stp bestanden zijn toegestaan.');
-                return;
-            }
-
-            showProcessing(file.name);
-            const formData = new FormData();
-            formData.append('file', file);
-
-            try {
-                const resp = await fetch('/api/v1/analyze', { method: 'POST', body: formData });
-                if (!resp.ok) {
-                    const err = await resp.json();
-                    throw new Error(err.detail || `HTTP ${resp.status}`);
-                }
-                const data = await resp.json();
-                currentJobId = data.job_id;
-                startPolling();
-            } catch (e) {
-                showError('Upload mislukt: ' + e.message);
-            }
+        let dur = '—';
+        if (job.started_at && job.completed_at) {
+          const s = (new Date(job.completed_at) - new Date(job.started_at)) / 1000;
+          dur = s < 60 ? `${s.toFixed(0)}s` : `${(s/60).toFixed(1)}m`;
         }
 
-        function startPolling() {
-            pollTimer = setInterval(pollJob, 2000);
-        }
-
-        async function pollJob() {
-            if (!currentJobId) return;
-            try {
-                const resp = await fetch(`/api/v1/jobs/${currentJobId}`);
-                const data = await resp.json();
-                if (data.status === 'completed') {
-                    clearInterval(pollTimer);
-                    currentResult = data.result;
-                    showResults(data.result);
-                    loadTimeline(currentJobId);
-                } else if (data.status === 'failed') {
-                    clearInterval(pollTimer);
-                    showError(data.error || 'Analyse mislukt (onbekende fout)');
-                } else if (data.status === 'processing') {
-                    document.getElementById('processingSub').textContent = 'Bezig met analyse...';
-                }
-            } catch (e) {
-                clearInterval(pollTimer);
-                showError('Verbinding verloren: ' + e.message);
-            }
-        }
-
-        function showProcessing(filename) {
-            document.getElementById('uploadSection').style.display = 'none';
-            document.getElementById('errorSection').style.display = 'none';
-            document.getElementById('resultsSection').style.display = 'none';
-            document.getElementById('processingSection').style.display = 'block';
-            document.getElementById('processingText').textContent = `Analyseren: ${filename}`;
-            document.getElementById('processingSub').textContent = 'STEP bestand wordt verwerkt...';
-            document.getElementById('headerStatus').textContent = 'Analyseren...';
-        }
-
-        function showError(message) {
-            document.getElementById('uploadSection').style.display = 'none';
-            document.getElementById('processingSection').style.display = 'none';
-            document.getElementById('resultsSection').style.display = 'none';
-            document.getElementById('errorSection').style.display = 'block';
-            document.getElementById('errorMessage').textContent = message;
-            document.getElementById('headerStatus').textContent = 'Fout';
-        }
-
-        function showResults(result) {
-            document.getElementById('uploadSection').style.display = 'none';
-            document.getElementById('processingSection').style.display = 'none';
-            document.getElementById('errorSection').style.display = 'none';
-            document.getElementById('resultsSection').style.display = 'block';
-            document.getElementById('headerStatus').textContent = 'Klaar';
-            document.getElementById('resultFilename').textContent = result.file || 'Resultaat';
-
-            document.getElementById('resCategory').textContent = result.category || '-';
-            document.getElementById('resType').textContent = (result.part_type || '-').toUpperCase();
-            document.getElementById('resThickness').textContent = result.thickness ? result.thickness.toFixed(2) : '-';
-
-            const d = result.dimensions;
-            if (d) {
-                document.getElementById('resDimensions').textContent = `${d.length.toFixed(1)} x ${d.width.toFixed(1)} x ${d.height.toFixed(1)}`;
-            }
-
-            const prod = result.production || {};
-            const prodRows = [
-                ['Gaten (totaal)', prod.holes_total || 0],
-                ['Zettingen (totaal)', prod.bends_total || 0],
-                ['Zettingen (up)', prod.bends_up || 0],
-                ['Tegenzettingen (down)', prod.bends_down || 0],
-            ];
-            document.getElementById('productionTable').innerHTML = prodRows.map(([k, v]) => `<tr><td>${k}</td><td><strong>${v}</strong></td></tr>`).join('');
-
-            const flat = result.flat_dimensions;
-            if (flat && flat.length > 0) {
-                document.getElementById('flatSection').style.display = 'block';
-                document.getElementById('flatTable').innerHTML = `<tr><td>Uitslag afmetingen</td><td><strong>${flat.length.toFixed(1)} x ${flat.width.toFixed(1)} mm</strong></td></tr>`;
-            } else {
-                document.getElementById('flatSection').style.display = 'none';
-            }
-
-            const aag = result.aag_details;
-            if (aag) {
-                document.getElementById('aagSection').style.display = 'block';
-                const aagRows = [];
-                if (aag.cut_length != null) aagRows.push(['Snijlengte', `${aag.cut_length.toFixed(1)} mm`]);
-                if (aag.total_cut_length != null) aagRows.push(['Totale snijlengte', `${aag.total_cut_length.toFixed(1)} mm`]);
-                if (aag.pierce_count != null) aagRows.push(['Piercings', aag.pierce_count]);
-                if (aag.estimated_cut_time_seconds != null) aagRows.push(['Geschatte snijtijd', `${aag.estimated_cut_time_seconds.toFixed(1)} sec`]);
-                if (aag.face_count != null) aagRows.push(['Faces', aag.face_count]);
-                if (aag.edge_count != null) aagRows.push(['Edges', aag.edge_count]);
-                document.getElementById('aagTable').innerHTML = aagRows.map(([k, v]) => `<tr><td>${k}</td><td><strong>${v}</strong></td></tr>`).join('');
-
-                if (aag.hole_details && aag.hole_details.length > 0) {
-                    document.getElementById('holeSection').style.display = 'block';
-                    document.getElementById('holeTable').innerHTML = aag.hole_details.map((h) => `<tr><td>${h.type || '-'}</td><td>${h.diameter ? h.diameter.toFixed(2) + ' mm' : '-'}</td><td>${h.isoperimetric_quotient ? h.isoperimetric_quotient.toFixed(3) : '-'}</td></tr>`).join('');
-                } else {
-                    document.getElementById('holeSection').style.display = 'none';
-                }
-
-                if (aag.bend_details && aag.bend_details.length > 0) {
-                    document.getElementById('bendSection').style.display = 'block';
-                    document.getElementById('bendTable').innerHTML = aag.bend_details.map((b) => `<tr><td>${b.type || '-'}</td><td>${b.angle ? b.angle.toFixed(1) + '\u00B0' : '-'}</td><td>${b.radius ? 'R' + b.radius.toFixed(1) + ' mm' : '-'}</td><td>${b.length ? b.length.toFixed(1) + ' mm' : '-'}</td></tr>`).join('');
-                } else {
-                    document.getElementById('bendSection').style.display = 'none';
-                }
-            } else {
-                document.getElementById('aagSection').style.display = 'none';
-                document.getElementById('holeSection').style.display = 'none';
-                document.getElementById('bendSection').style.display = 'none';
-            }
-
-            renderPartPreview(result);
-        }
-
-        async function loadTimeline(jobId) {
-            try {
-                const resp = await fetch(`/api/v1/jobs/${jobId}/timeline`);
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                const data = await resp.json();
-                timelineData = data.events || [];
-                timelineSummary = data.summary || null;
-                timelineSlider.max = Math.max(0, timelineData.length - 1);
-                timelineSlider.value = 0;
-
-                if (timelineData.length > 0) {
-                    renderTimelineEvent(0);
-                } else {
-                    timelineEventDetails.textContent = 'Geen timeline events beschikbaar voor deze job.';
-                    timelineIndexLabel.textContent = 'Event 0/0';
-                }
-
-                if (timelineSummary) {
-                    timelineSummaryText.textContent = `Duur: ${timelineSummary.total_elapsed_seconds.toFixed(2)}s | Stappen: ${timelineSummary.step_count} | Events: ${timelineSummary.event_count}`;
-                } else {
-                    timelineSummaryText.textContent = '-';
-                }
-            } catch (e) {
-                timelineEventDetails.textContent = `Timeline laden mislukt: ${e.message}`;
-                timelineSummaryText.textContent = '-';
-            }
-        }
-
-        function renderTimelineEvent(index) {
-            if (!timelineData.length) return;
-            const idx = Math.max(0, Math.min(index, timelineData.length - 1));
-            const event = timelineData[idx];
-            timelineIndexLabel.textContent = `Event ${idx + 1}/${timelineData.length}`;
-            timelineSlider.value = idx;
-
-            const payload = JSON.stringify(event.payload || {}, null, 2);
-            timelineEventDetails.innerHTML = `<strong>${event.type}</strong><br>Stap: ${event.stage}<br>Status: ${event.status || '-'}<br>Tijd: ${event.timestamp_ms} ms<pre style="margin-top:8px; font-size:0.76rem; white-space:pre-wrap;">${payload}</pre>`;
-
-            updateVisualStateFromEvent(event, idx);
-            draw3DOverlay(event);
-            draw2DProjection(event);
-        }
-
-        function startTimelinePlayback() {
-            if (timelinePlayTimer || timelineData.length <= 1) return;
-            timelinePlayTimer = setInterval(() => {
-                let next = Number(timelineSlider.value) + 1;
-                if (next >= timelineData.length) next = 0;
-                renderTimelineEvent(next);
-            }, 900);
-        }
-
-        function pauseTimelinePlayback() {
-            if (timelinePlayTimer) {
-                clearInterval(timelinePlayTimer);
-                timelinePlayTimer = null;
-            }
-        }
-
-        function fitCanvasToContainer(canvas) {
-            const rect = canvas.getBoundingClientRect();
-            const dpr = window.devicePixelRatio || 1;
-            canvas.width = Math.max(1, Math.round(rect.width * dpr));
-            canvas.height = Math.max(1, Math.round(rect.height * dpr));
-            const ctx = canvas.getContext('2d');
-            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            return ctx;
-        }
-
-        async function ensureThreeViewer() {
-            if (threeState.ready) return true;
-            try {
-                const THREE = await import('/static/vendor/three.module.min.js');
-                const { OrbitControls } = await import('/static/vendor/three_addons/controls/OrbitControls.js');
-                threeState.THREE = THREE;
-
-                const scene = new THREE.Scene();
-                scene.background = new THREE.Color(0xf7fbff);
-                const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
-                camera.position.set(140, 110, 160);
-
-                const renderer = new THREE.WebGLRenderer({ antialias: true });
-                viewer3dHost.innerHTML = '';
-                viewer3dHost.appendChild(renderer.domElement);
-
-                const controls = new OrbitControls(camera, renderer.domElement);
-                controls.enableDamping = true;
-                controls.dampingFactor = 0.08;
-                controls.target.set(0, 0, 0);
-
-                scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-                scene.add(new THREE.HemisphereLight(0xddeeff, 0x404040, 0.4));
-                const light = new THREE.DirectionalLight(0xffffff, 0.8);
-                light.position.set(150, 200, 100);
-                scene.add(light);
-                const light2 = new THREE.DirectionalLight(0xffffff, 0.3);
-                light2.position.set(-100, 50, -80);
-                scene.add(light2);
-                scene.add(new THREE.GridHelper(500, 25, 0xc8ced8, 0xe5e9ef));
-
-                threeState.scene = scene;
-                threeState.camera = camera;
-                threeState.renderer = renderer;
-                threeState.controls = controls;
-
-                const animate = () => {
-                    controls.update();
-                    renderer.render(scene, camera);
-                    threeState.rafId = requestAnimationFrame(animate);
-                };
-                animate();
-
-                resizeThreeViewer();
-                threeState.ready = true;
-                viewer3dState.textContent = 'Viewer: Three.js actief';
-                return true;
-            } catch (e) {
-                viewer3dState.textContent = 'Viewer: Three.js load fout';
-                return false;
-            }
-        }
-
-        function resizeThreeViewer() {
-            if (!threeState.ready) return;
-            const w = Math.max(1, viewer3dHost.clientWidth);
-            const h = Math.max(1, viewer3dHost.clientHeight);
-            threeState.camera.aspect = w / h;
-            threeState.camera.updateProjectionMatrix();
-            threeState.renderer.setSize(w, h);
-            fitCanvasToContainer(viewer3dCanvas);
-            fitCanvasToContainer(viewer2dCanvas);
-        }
-
-        function clearThreeMesh() {
-            if (!threeState.mesh) return;
-            threeState.scene.remove(threeState.mesh);
-            threeState.mesh.traverse(child => {
-                if (child.geometry) child.geometry.dispose();
-                if (child.material) {
-                    if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
-                    else child.material.dispose();
-                }
-            });
-            threeState.mesh = null;
-        }
-
-        function fitCameraToMesh(geometry) {
-            const THREE = threeState.THREE;
-            geometry.computeBoundingBox();
-            const box = geometry.boundingBox;
-            const size = new THREE.Vector3();
-            const center = new THREE.Vector3();
-            box.getSize(size);
-            box.getCenter(center);
-            const maxDim = Math.max(size.x, size.y, size.z);
-            const dist = maxDim * 1.8;
-            threeState.camera.position.set(center.x + dist * 0.7, center.y + dist * 0.5, center.z + dist * 0.8);
-            threeState.controls.target.copy(center);
-            threeState.controls.update();
-            // Update grid size to match part
-            threeState.scene.children.forEach(c => {
-                if (c.isGridHelper) { threeState.scene.remove(c); c.dispose(); }
-            });
-            const gridSize = Math.max(500, maxDim * 3);
-            threeState.scene.add(new THREE.GridHelper(gridSize, 25, 0xc8ced8, 0xe5e9ef));
-        }
-
-        function setThreeMeshFromData(meshData) {
-            if (!threeState.ready) return;
-            const THREE = threeState.THREE;
-            clearThreeMesh();
-
-            const geometry = new THREE.BufferGeometry();
-            const positions = new Float32Array(meshData.vertices);
-            const idx = new Uint32Array(meshData.indices);
-
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            geometry.setIndex(new THREE.BufferAttribute(idx, 1));
-
-            // Use provided normals or compute them
-            const hasNormals = meshData.normals && meshData.normals.length === meshData.vertices.length;
-            const allZero = hasNormals && meshData.normals.every(n => n === 0);
-            if (hasNormals && !allZero) {
-                geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(meshData.normals), 3));
-            } else {
-                geometry.computeVertexNormals();
-            }
-
-            // Material: industrial metallic look
-            const mat = new THREE.MeshStandardMaterial({
-                color: 0x7899aa,
-                metalness: 0.35,
-                roughness: 0.55,
-                side: THREE.DoubleSide,
-            });
-            const mesh = new THREE.Mesh(geometry, mat);
-
-            // Edge lines for CAD-style wireframe (only sharp edges)
-            const edgesGeo = new THREE.EdgesGeometry(geometry, 20);
-            const edgesMat = new THREE.LineBasicMaterial({ color: 0x2a3a4a, linewidth: 1 });
-            mesh.add(new THREE.LineSegments(edgesGeo, edgesMat));
-
-            threeState.scene.add(mesh);
-            threeState.mesh = mesh;
-            fitCameraToMesh(geometry);
-            viewer3dState.textContent = `Mesh: ${(meshData.vertices.length / 3).toLocaleString()} vertices, ${(meshData.indices.length / 3).toLocaleString()} driehoeken`;
-        }
-
-        function setThreeMeshFromDims() {
-            if (!threeState.ready) return;
-            const THREE = threeState.THREE;
-            clearThreeMesh();
-
-            const geom = new THREE.BoxGeometry(currentDims.x, currentDims.y, currentDims.z);
-            const mat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.22, roughness: 0.48 });
-            const mesh = new THREE.Mesh(geom, mat);
-            mesh.position.set(0, currentDims.y / 2, 0);
-
-            const edges = new THREE.LineSegments(
-                new THREE.EdgesGeometry(geom),
-                new THREE.LineBasicMaterial({ color: 0xffffff })
-            );
-            mesh.add(edges);
-            threeState.scene.add(mesh);
-            threeState.mesh = mesh;
-
-            threeState.controls.target.set(0, currentDims.y / 2, 0);
-            threeState.controls.update();
-            viewer3dState.textContent = 'Viewer: bounding box (geen mesh data)';
-        }
-
-        function worldToScreen(x, y, z) {
-            const v = new threeState.THREE.Vector3(x, y, z);
-            v.project(threeState.camera);
-            const w = viewer3dCanvas.clientWidth;
-            const h = viewer3dCanvas.clientHeight;
-            return { x: (v.x + 1) * 0.5 * w, y: (-v.y + 1) * 0.5 * h };
-        }
-
-        function draw3DOverlay(event = null) {
-            if (!threeState.ready) return;
-            const ctx = fitCanvasToContainer(viewer3dCanvas);
-            const w = viewer3dCanvas.clientWidth;
-            const h = viewer3dCanvas.clientHeight;
-            ctx.clearRect(0, 0, w, h);
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
-            ctx.fillRect(0, h - 24, w, 24);
-            ctx.fillStyle = '#ffffff';
-            ctx.font = '12px monospace';
-            ctx.fillText(`Stap: ${visualState.eventLabel}`, 10, h - 8);
-
-            const topY = currentDims.y + 1.2;
-            if (visualState.mode === 'classification' || visualState.mode === 'profile') {
-                const a = worldToScreen(-currentDims.x / 2, topY, -currentDims.z / 2);
-                const b = worldToScreen(currentDims.x / 2, topY, -currentDims.z / 2);
-                const c = worldToScreen(currentDims.x / 2, topY, currentDims.z / 2);
-                const d = worldToScreen(-currentDims.x / 2, topY, currentDims.z / 2);
-                ctx.fillStyle = 'rgba(37, 99, 235, 0.24)';
-                ctx.beginPath();
-                ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath();
-                ctx.fill();
-            }
-
-            if (visualState.mode === 'holes') {
-                const n = Math.min(18, Math.max(1, visualState.markerCount));
-                for (let i = 0; i < n; i++) {
-                    const gx = -0.35 + (i % 6) * 0.14;
-                    const gz = -0.30 + Math.floor(i / 6) * 0.24;
-                    const p = worldToScreen(gx * currentDims.x, topY, gz * currentDims.z);
-                    ctx.fillStyle = 'rgba(220, 38, 38, 0.95)';
-                    ctx.beginPath();
-                    ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-            }
-
-            if (visualState.mode === 'bends' || visualState.mode === 'unfold') {
-                const lines = Math.min(6, Math.max(1, visualState.markerCount));
-                ctx.strokeStyle = 'rgba(124, 58, 237, 0.92)';
-                ctx.lineWidth = 2;
-                for (let i = 0; i < lines; i++) {
-                    const z = (-0.38 + i * (0.76 / Math.max(1, lines - 1))) * currentDims.z;
-                    const a = worldToScreen(-currentDims.x / 2, topY, z);
-                    const b = worldToScreen(currentDims.x / 2, topY, z);
-                    ctx.beginPath();
-                    ctx.moveTo(a.x, a.y);
-                    ctx.lineTo(b.x, b.y);
-                    ctx.stroke();
-                }
-            }
-        }
-
-        function draw2DProjection(event = null) {
-            if (!viewer2dCtx) viewer2dCtx = fitCanvasToContainer(viewer2dCanvas);
-            const ctx = viewer2dCtx;
-            const w = viewer2dCanvas.clientWidth;
-            const h = viewer2dCanvas.clientHeight;
-            ctx.clearRect(0, 0, w, h);
-            ctx.fillStyle = '#fcfcfd';
-            ctx.fillRect(0, 0, w, h);
-
-            const margin = 18;
-            const areaW = (w - margin * 3) / 2;
-            const areaH = h - margin * 2;
-            const topRect = { x: margin, y: margin, w: areaW, h: areaH };
-            const frontRect = { x: margin * 2 + areaW, y: margin, w: areaW, h: areaH };
-            const topScale = Math.min(topRect.w / currentDims.x, topRect.h / currentDims.z);
-            const frontScale = Math.min(frontRect.w / currentDims.x, frontRect.h / currentDims.y);
-            const topW = currentDims.x * topScale;
-            const topH = currentDims.z * topScale;
-            const frontW = currentDims.x * frontScale;
-            const frontH = currentDims.y * frontScale;
-            const topX = topRect.x + (topRect.w - topW) / 2;
-            const topY = topRect.y + (topRect.h - topH) / 2;
-            const frontX = frontRect.x + (frontRect.w - frontW) / 2;
-            const frontY = frontRect.y + (frontRect.h - frontH) / 2;
-
-            ctx.strokeStyle = '#111827';
-            ctx.lineWidth = 1.5;
-            ctx.strokeRect(topX, topY, topW, topH);
-            ctx.strokeRect(frontX, frontY, frontW, frontH);
-            ctx.fillStyle = 'rgba(10, 26, 42, 0.06)';
-            ctx.fillRect(topX, topY, topW, topH);
-            ctx.fillRect(frontX, frontY, frontW, frontH);
-
-            const label = event ? event.type : 'init';
-            ctx.fillStyle = '#1f2937';
-            ctx.font = '11px monospace';
-            ctx.fillText('TOP', topX + 4, topY + 13);
-            ctx.fillText('FRONT', frontX + 4, frontY + 13);
-            ctx.fillText(`EV: ${label}`, 8, h - 8);
-
-            const dots = Math.min(16, Math.max(0, visualState.markerCount));
-            ctx.fillStyle = `hsl(${visualState.hue * 360}, 78%, 40%)`;
-            for (let i = 0; i < dots; i++) {
-                const t = i / Math.max(1, dots - 1);
-                const px = topX + 10 + t * Math.max(6, topW - 20);
-                const py = topY + 14 + ((i * 23) % Math.max(18, topH - 28));
-                ctx.beginPath();
-                ctx.arc(px, py, 3, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        }
-
-        function updateVisualStateFromEvent(event, idx) {
-            const type = String(event.type || '').toLowerCase();
-            const stage = String(event.stage || '').toLowerCase();
-            visualState.eventLabel = event.type || 'unknown';
-            const payload = event.payload || {};
-
-            if (type.includes('classification') || stage.includes('router') || stage.includes('classify')) {
-                visualState.mode = payload.profile_label ? 'profile' : 'classification';
-                visualState.hue = 0.58;
-                visualState.profileLabel = payload.profile_label || null;
-            } else if (type.includes('holes') || stage.includes('holes')) {
-                visualState.mode = 'holes';
-                visualState.hue = 0.0;
-            } else if (type.includes('bends') || type.includes('unfold') || stage.includes('unfold')) {
-                visualState.mode = type.includes('unfold') ? 'unfold' : 'bends';
-                visualState.hue = 0.75;
-            } else {
-                visualState.mode = 'default';
-                visualState.hue = 0.62;
-            }
-
-            if (typeof payload.total === 'number') visualState.markerCount = payload.total;
-            else if (typeof payload.count === 'number') visualState.markerCount = payload.count;
-            else if (typeof payload.fold_lines === 'number') visualState.markerCount = payload.fold_lines;
-            else visualState.markerCount = Math.max(1, Math.round((idx + 1) / 2));
-        }
-
-        async function renderPartPreview(result) {
-            viewer2dCtx = fitCanvasToContainer(viewer2dCanvas);
-            fitCanvasToContainer(viewer3dCanvas);
-            const d = result.dimensions || {};
-            currentDims = {
-                x: Math.max(12, Number(d.length) || 60),
-                y: Math.max(6, Number(d.height) || 20),
-                z: Math.max(12, Number(d.width) || 40),
-            };
-
-            const ok = await ensureThreeViewer();
-            if (ok) {
-                const mesh = result.mesh;
-                if (mesh && mesh.vertices && mesh.vertices.length > 0) {
-                    setThreeMeshFromData(mesh);
-                    document.getElementById('viewerCaption').textContent =
-                        `3D STEP-geometrie — ${currentDims.x.toFixed(0)} x ${currentDims.z.toFixed(0)} x ${currentDims.y.toFixed(0)} mm`;
-                } else {
-                    setThreeMeshFromDims();
-                    document.getElementById('viewerCaption').textContent =
-                        `Bounding box (afmetingen) — ${currentDims.x.toFixed(0)} x ${currentDims.z.toFixed(0)} x ${currentDims.y.toFixed(0)} mm`;
-                }
-                draw3DOverlay();
-            }
-            draw2DProjection();
-        }
-
-        function toggleFullscreenViewer() {
-            viewerBox.classList.toggle('is-fullscreen');
-            viewer3dFullscreenBtn.textContent = viewerBox.classList.contains('is-fullscreen') ? 'Exit Fullscreen' : 'Fullscreen';
-            setTimeout(() => {
-                resizeThreeViewer();
-                draw3DOverlay();
-                draw2DProjection();
-            }, 60);
-        }
-
-        function resetViewerCamera() {
-            if (!threeState.ready) return;
-            if (threeState.mesh && threeState.mesh.geometry) {
-                fitCameraToMesh(threeState.mesh.geometry);
-            } else {
-                threeState.camera.position.set(140, 110, 160);
-                threeState.controls.target.set(0, currentDims.y / 2, 0);
-            }
-            threeState.controls.update();
-            draw3DOverlay();
-        }
-
-        function reset() {
-            if (pollTimer) clearInterval(pollTimer);
-            pauseTimelinePlayback();
-            currentJobId = null;
-            currentResult = null;
-            timelineData = [];
-            timelineSummary = null;
-            fileInput.value = '';
-            document.getElementById('uploadSection').style.display = 'block';
-            document.getElementById('processingSection').style.display = 'none';
-            document.getElementById('errorSection').style.display = 'none';
-            document.getElementById('resultsSection').style.display = 'none';
-            document.getElementById('headerStatus').textContent = 'Ready';
-            timelineSlider.value = 0;
-            timelineSlider.max = 0;
-            timelineIndexLabel.textContent = 'Event 0/0';
-            timelineEventDetails.textContent = 'Geen timeline data geladen.';
-            timelineSummaryText.textContent = '-';
-        }
-
-        function downloadCSV() {
-            if (!currentJobId) return;
-            window.open(`/api/v1/jobs/${currentJobId}?format=csv`, '_blank');
-        }
-
-        timelineSlider.addEventListener('input', () => renderTimelineEvent(Number(timelineSlider.value)));
-        document.getElementById('timelinePlayBtn').addEventListener('click', startTimelinePlayback);
-        document.getElementById('timelinePauseBtn').addEventListener('click', pauseTimelinePlayback);
-        viewer3dResetBtn.addEventListener('click', resetViewerCamera);
-        viewer3dFullscreenBtn.addEventListener('click', toggleFullscreenViewer);
-        window.addEventListener('resize', () => {
-            resizeThreeViewer();
-            draw3DOverlay();
-            draw2DProjection();
-        });
-
-        viewer3dState.textContent = 'Viewer: klaar voor Three.js';
-    </script>
+        const dimStr = dims.length
+          ? `${+dims.length.toFixed(1)} × ${+dims.width.toFixed(1)} × ${+dims.height.toFixed(1)}`
+          : '—';
+
+        const badge = `<span class="badge ${job.status}">${job.status}</span>`;
+        const cat = res.category || '—';
+        const type = res.part_type || '—';
+        const thick = res.thickness ? `${res.thickness} mm` : '—';
+        const holes = prod.holes_total ?? '—';
+        const bends = prod.bends_total ?? '—';
+        const fname = job.file_name || res.file || job.job_id.slice(0,8);
+
+        return `<tr>
+          <td class="file" title="${fname}">${fname}</td>
+          <td>${badge}</td>
+          <td>${cat}</td>
+          <td>${type}</td>
+          <td class="mono">${thick}</td>
+          <td class="mono">${dimStr}</td>
+          <td class="mono">${holes}</td>
+          <td class="mono">${bends}</td>
+          <td class="mono">${timeStr}</td>
+          <td class="mono">${dur}</td>
+        </tr>`;
+      }).join('');
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="10" class="empty">Fout: ${e.message}</td></tr>`;
+    }
+  }
+
+  function startAutoRefresh() {
+    if (refreshTimer) clearInterval(refreshTimer);
+    let countdown = REFRESH_INTERVAL;
+    const label = document.getElementById('autoRefreshLabel');
+    label.textContent = `Auto-refresh over ${countdown}s`;
+    refreshTimer = setInterval(() => {
+      countdown--;
+      if (countdown <= 0) {
+        countdown = REFRESH_INTERVAL;
+        loadAll();
+      }
+      label.textContent = `Auto-refresh over ${countdown}s`;
+    }, 1000);
+  }
+
+  async function loadAll() {
+    await Promise.all([checkHealth(), loadStats(), loadJobs()]);
+    startAutoRefresh();
+  }
+
+  loadAll();
+</script>
 </body>
 </html>

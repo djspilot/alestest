@@ -231,14 +231,44 @@ class JobManager:
 
             rows = conn.execute(
                 f"""SELECT job_id, file_name, file_hash, file_size_bytes,
-                           status, created_at, started_at, completed_at, error
+                           status, created_at, started_at, completed_at, error,
+                           result_json
                     FROM api_jobs {where}
                     ORDER BY created_at DESC
                     LIMIT ? OFFSET ?""",
                 params + [limit, offset]
             ).fetchall()
 
-            return [dict(row) for row in rows], total
+            items = []
+            for row in rows:
+                item = {
+                    "job_id": row["job_id"],
+                    "file_name": row["file_name"],
+                    "file_hash": row["file_hash"],
+                    "file_size_bytes": row["file_size_bytes"],
+                    "status": row["status"],
+                    "created_at": row["created_at"],
+                    "started_at": row["started_at"],
+                    "completed_at": row["completed_at"],
+                    "error": row["error"],
+                    "result": None,
+                }
+                result_json = row["result_json"]
+                if result_json:
+                    try:
+                        full = json.loads(result_json)
+                        item["result"] = {
+                            "category": full.get("category"),
+                            "part_type": full.get("part_type"),
+                            "thickness": full.get("thickness"),
+                            "dimensions": full.get("dimensions"),
+                            "production": full.get("production"),
+                        }
+                    except Exception:
+                        pass
+                items.append(item)
+
+            return items, total
         finally:
             conn.close()
 

@@ -135,6 +135,15 @@ class HealthResponse(BaseModel):
     version: str = "1.0.0"
 
 
+class ResultSummary(BaseModel):
+    """Compact result summary for job list view."""
+    category: Optional[str] = None
+    part_type: Optional[str] = None
+    thickness: Optional[float] = None
+    dimensions: Optional[dict] = None
+    production: Optional[dict] = None
+
+
 class JobListItem(BaseModel):
     """Lightweight job summary for list view (no full result blob)."""
     job_id: str
@@ -146,6 +155,7 @@ class JobListItem(BaseModel):
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     error: Optional[str] = None
+    result: Optional[ResultSummary] = None
 
 
 class JobListResponse(BaseModel):
