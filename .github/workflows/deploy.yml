@@ -68,4 +68,9 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          script: /srv/alestest/deploy.sh
+          envs: GHCR_READ_TOKEN
+          script: |
+            echo "$GHCR_READ_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            /srv/alestest/deploy.sh
+        env:
+          GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
