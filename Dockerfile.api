@@ -5,6 +5,13 @@ WORKDIR /app
 # ── Env 1: API + cadquery-ocp (no FreeCAD → no VTK conflict) ──────────────────
 COPY --chown=$MAMBA_USER:$MAMBA_USER requirements.txt /app/requirements.txt
 
+# libGL is required by cadquery-ocp (OCP kernel) on headless servers
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+USER $MAMBA_USER
+
 RUN micromamba create -y -n ales -c conda-forge python=3.11 pip && \
     micromamba run -n ales pip install --no-cache-dir -r /app/requirements.txt && \
     micromamba run -n ales pip install --no-cache-dir uvicorn && \
