@@ -231,6 +231,9 @@ def _serialize_analysis_reasoning(analysis) -> list[dict]:
 def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=None, disable_stages: set[str] | None = None) -> dict:
     """Run the manufacturing analysis pipeline on a STEP file.
 
+    For multi-solid (assembly) STEP files each solid is analysed separately and
+    the result contains ``is_assembly=True`` plus a ``parts`` list.
+
     Args:
         step_file: Absolute path to the STEP file.
         use_aag: Whether to run AAG topology-based feature recognition.
@@ -239,6 +242,34 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
     Returns:
         Enriched result dict with analysis data, AAG details, and production info.
     """
+    import shutil
+    from manufacturing_pipeline.analysis.io.step_file_io import extract_solids_to_temp_files
+
+    solids = extract_solids_to_temp_files(step_file)
+    if solids:
+        tmp_dir = solids[0]["tmp_dir"]
+        parts = []
+        try:
+            for solid_info in solids:
+                part_result = run_step_analysis(
+                    solid_info["path"],
+                    use_aag=use_aag,
+                    progress_callback=None,
+                    disable_stages=disable_stages,
+                )
+                part_result["solid_name"] = solid_info["name"]
+                part_result["solid_index"] = solid_info["index"]
+                parts.append(part_result)
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        return {
+            "file": os.path.basename(step_file),
+            "success": all(p.get("success") for p in parts),
+            "is_assembly": True,
+            "solid_count": len(solids),
+            "parts": parts,
+        }
 
     class Args:
         def __init__(self):

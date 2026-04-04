@@ -32,7 +32,10 @@ from manufacturing_pipeline.core.python_dependencies import (
 # ---------------------------------------------------------------------------
 
 def run_quick(step_file, args):
-    """Run quick analysis on a single STEP file."""
+    """Run quick analysis on a single STEP file (or each solid in an assembly)."""
+    import shutil
+    from manufacturing_pipeline.analysis.io.step_file_io import extract_solids_to_temp_files
+
     output_dir, part_name = get_output_dir(step_file)
 
     print(f"\n{'=' * 60}")
@@ -42,8 +45,51 @@ def run_quick(step_file, args):
     print(f"Output: {output_dir}/")
     print("Mode:   Quick")
 
+    # Detect assembly (multiple solids) and process each separately
+    solids = extract_solids_to_temp_files(step_file)
+    if solids:
+        print(f"\nAssembly gedetecteerd: {len(solids)} onderdelen")
+        print("Elk onderdeel wordt afzonderlijk geanalyseerd.")
+
+        tmp_dir = solids[0]["tmp_dir"]
+        errors = []
+        try:
+            for solid_info in solids:
+                solid_name = solid_info["name"]
+                solid_step = solid_info["path"]
+                safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in solid_name)
+                solid_output_dir = os.path.join(output_dir, safe_name or f"part_{solid_info['index'] + 1:03d}")
+                os.makedirs(solid_output_dir, exist_ok=True)
+
+                print(f"\n{'─' * 60}")
+                print(f"Onderdeel {solid_info['index'] + 1}/{len(solids)}: {solid_name}")
+
+                try:
+                    run_analysis(solid_step, solid_output_dir, args)
+                except Exception as exc:
+                    errors.append((solid_name, exc))
+                    print(f"  Fout: {exc}")
+                    if args.verbose:
+                        import traceback
+                        traceback.print_exc()
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        print(f"\n{'=' * 60}")
+        ok = len(solids) - len(errors)
+        print(f"COMPLETE — {ok}/{len(solids)} onderdelen verwerkt")
+        if errors:
+            for name, exc in errors:
+                print(f"  FOUT '{name}': {exc}")
+        print(f"{'=' * 60}")
+        print(f"Output: {output_dir}/")
+        if errors:
+            sys.exit(1)
+        return
+
+    # Single-solid path
     try:
-        analysis, total_holes = run_analysis(step_file, output_dir, args)
+        run_analysis(step_file, output_dir, args)
 
         print(f"\n{'=' * 60}")
         print(f"COMPLETE")

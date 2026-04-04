@@ -14,6 +14,77 @@ from OCP.TopoDS import TopoDS
 STEP_HEADER = b"ISO-10303-21;"
 
 
+def extract_solids_to_temp_files(step_file: str) -> list[dict] | None:
+    """Detect multi-solid STEP file and extract each solid to its own temp STEP.
+
+    Returns a list of dicts with keys {name, path, volume, index, tmp_dir}
+    when the file contains more than one solid. Returns None for single-solid
+    files or when detection fails.
+
+    The caller is responsible for cleaning up ``tmp_dir`` after use.
+    """
+    try:
+        from manufacturing_pipeline.core.xcaf_reader import read_step_with_names
+        from OCP.STEPControl import STEPControl_Writer, STEPControl_AsIs
+        from OCP.IFSelect import IFSelect_RetDone
+
+        rows = read_step_with_names(step_file)
+        if not rows or len(rows) <= 1:
+            return None
+
+        tmp_dir = tempfile.mkdtemp(prefix="mfg_split_")
+        results = []
+        seen_names: dict[str, int] = {}
+
+        for idx, row in enumerate(rows):
+            name = row.get("name") or f"Part_{idx + 1:03d}"
+            solid = row["solid"]
+            volume = float(row.get("volume") or 0.0)
+
+            # Sanitize name for use as filename
+            safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
+            if not safe_name:
+                safe_name = f"Part_{idx + 1:03d}"
+
+            # De-duplicate filenames when the same part occurs multiple times
+            count = seen_names.get(safe_name, 0)
+            seen_names[safe_name] = count + 1
+            if count > 0:
+                out_path = os.path.join(tmp_dir, f"{safe_name}_{count + 1:03d}.step")
+            else:
+                out_path = os.path.join(tmp_dir, f"{safe_name}.step")
+
+            try:
+                writer = STEPControl_Writer()
+                writer.Transfer(solid, STEPControl_AsIs)
+                status = writer.Write(out_path)
+                if status == IFSelect_RetDone and os.path.exists(out_path):
+                    results.append(
+                        {
+                            "name": name,
+                            "path": out_path,
+                            "volume": volume,
+                            "index": idx,
+                            "tmp_dir": tmp_dir,
+                        }
+                    )
+                else:
+                    print(f"  [multi-solid] Kon solid '{name}' niet exporteren naar STEP")
+            except Exception as exc:
+                print(f"  [multi-solid] Export mislukt voor '{name}': {exc}")
+
+        if len(results) <= 1:
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            return None
+
+        return results
+
+    except Exception as exc:
+        print(f"  [multi-solid] Detectie mislukt: {exc}")
+        return None
+
+
 def _normalize_step_file(filepath: str) -> str:
     """Return a sanitized STEP path when the file has junk before the STEP header."""
     with open(filepath, "rb") as handle:

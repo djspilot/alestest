@@ -530,20 +530,8 @@ def _merge_bends_colinear(bend_angles, bend_radii, bend_lengths):
     return bend_angles, bend_radii, bend_lengths
 
 
-def export_to_xml(result: Dict[str, Any], output_path: Path, part_name: Optional[str] = None) -> None:
-    """Export analysis result to AutoPOL-compatible XML format.
-
-    Args:
-        result: Analysis result dict (from run.py or API)
-        output_path: Path where XML file should be written
-        part_name: Optional part name (defaults to filename without extension)
-    """
-    # Extract filename without extension if part_name not provided
-    if part_name is None:
-        part_name = Path(result.get('file', 'unknown')).stem
-
-    # Create root element
-    root = ET.Element('CalculationResults')
+def _append_calculation_result(root: "_Elem", result: Dict[str, Any], part_name: str) -> None:
+    """Append one <CalculationResult> element to *root* for a single part."""
     calc = ET.SubElement(root, 'CalculationResult')
 
     # Part identification
@@ -669,14 +657,11 @@ def export_to_xml(result: Dict[str, Any], output_path: Path, part_name: Optional
     # Fallback to AAG holes only when visuals don't provide accepted hole items.
     hole_details = aag_details.get('hole_details', [])
     if hole_details and not accepted_visual_holes:
-        # Hole contours (perimeters)
         hole_contours = '_'.join(
             _format_float(h.get('perimeter', 0))
             for h in hole_details
             if h.get('perimeter')
         )
-
-        # Hole radii (diameter / 2)
         hole_radii = '_'.join(
             _format_float(h.get('diameter', 0) / 2)
             for h in hole_details
@@ -718,28 +703,22 @@ def export_to_xml(result: Dict[str, Any], output_path: Path, part_name: Optional
         ET.SubElement(calc, 'Sheet_HoleRadii').text = ''
 
     # Volume and area calculations
-    # Note: These would require full geometry analysis
-    # For now, we estimate based on bounding box and thickness
     length = dimensions.get('length', 0)
     width = dimensions.get('width', 0)
     height = dimensions.get('height', 0)
 
-    # Simple volume estimation (bounding box)
     volume = length * width * height
     ET.SubElement(calc, 'Sheet_Volume').text = _format_float(volume)
 
-    # Top area (for sheet metal, approximately length × width)
     if category == 'SHEET_METAL':
         top_area = length * width
     else:
         top_area = 0
     ET.SubElement(calc, 'Sheet_TopArea').text = _format_float(top_area)
 
-    # Total surface area (rough estimate for sheet metal)
     if category == 'SHEET_METAL' and thickness > 0:
-        # Box area = 2(lw + lh + wh)
         box_area = 2 * (length * width + length * height + width * height)
-        total_area = box_area  # Simplified
+        total_area = box_area
     else:
         box_area = 0
         total_area = 0
@@ -747,20 +726,40 @@ def export_to_xml(result: Dict[str, Any], output_path: Path, part_name: Optional
     ET.SubElement(calc, 'Sheet_BoxArea').text = _format_float(box_area)
     ET.SubElement(calc, 'Sheet_TotalArea').text = _format_float(total_area)
 
-    # Cutting information (from AAG)
     cut_length = aag_details.get('total_cut_length', 0)
     ET.SubElement(calc, 'Sheet_OuterContour').text = _format_float(cut_length)
     ET.SubElement(calc, 'Sheet_TotalContour').text = _format_float(cut_length)
 
-    # Weight estimation (requires material density)
-    # Default to steel (~7.85 g/cm³)
     weight = _estimate_weight(volume, material)
     ET.SubElement(calc, 'Sheet_Weight').text = _format_float(weight)
 
-    # Create pretty-printed XML
-    xml_string = _prettify_xml(root)
 
-    # Write to file
+def export_to_xml(result: Dict[str, Any], output_path: Path, part_name: Optional[str] = None) -> None:
+    """Export analysis result to AutoPOL-compatible XML format.
+
+    For assembly results (``is_assembly=True``) every part in ``result['parts']``
+    gets its own ``<CalculationResult>`` element in a single XML file.
+
+    Args:
+        result: Analysis result dict (from run.py or API)
+        output_path: Path where XML file should be written
+        part_name: Optional part name (defaults to filename without extension)
+    """
+    root = ET.Element('CalculationResults')
+
+    if result.get('is_assembly') and result.get('parts'):
+        for part in result['parts']:
+            pname = (
+                part.get('solid_name')
+                or Path(part.get('file', 'unknown')).stem
+            )
+            _append_calculation_result(root, part, pname)
+    else:
+        if part_name is None:
+            part_name = Path(result.get('file', 'unknown')).stem
+        _append_calculation_result(root, result, part_name)
+
+    xml_string = _prettify_xml(root)
     output_path.write_text(xml_string, encoding='utf-8')
 
 

@@ -1,5 +1,7 @@
 """Pydantic models for API request/response schemas."""
 
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional, Literal
 from pydantic import BaseModel, Field
@@ -91,6 +93,14 @@ class MeshData(BaseModel):
 class AnalysisResult(BaseModel):
     file: str
     success: bool
+    # Assembly fields (present when the uploaded STEP contains multiple solids)
+    is_assembly: Optional[bool] = None
+    solid_count: Optional[int] = None
+    parts: Optional[list[dict]] = None  # per-solid AnalysisResult dicts
+    # Per-solid identification (set when this result is a part inside an assembly)
+    solid_name: Optional[str] = None
+    solid_index: Optional[int] = None
+    # Standard single-part fields
     category: Optional[str] = None
     part_type: Optional[str] = None
     thickness: Optional[float] = None
