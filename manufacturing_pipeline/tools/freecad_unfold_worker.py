@@ -55,6 +55,16 @@ import Part  # type: ignore  # noqa: E402
 
 from manufacturing_pipeline.analysis import freecad_unfold  # noqa: E402
 
+# Sync already-imported FreeCAD/Part into freecad_environment so that
+# unfold_sheet_metal() skips the _ensure_freecad_imported() bootstrap and
+# goes straight to the direct-import path. Without this, the environment
+# module sees FreeCAD=None and tries _run_subprocess_fallback, returning 0 attempts.
+_env = freecad_unfold._freecad_environment
+_env.FreeCAD = FreeCAD
+_env.Part = Part
+freecad_unfold.FreeCAD = FreeCAD
+freecad_unfold.Part = Part
+
 
 def _serializable_error_details(error_details: Any) -> list[dict[str, Any]]:
     if not isinstance(error_details, list):

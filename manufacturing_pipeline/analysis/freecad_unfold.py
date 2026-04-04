@@ -190,6 +190,8 @@ def find_all_base_face_candidates(shape):
     """
     Vind alle mogelijke base faces, gesorteerd op geschiktheid.
     Returns lijst van candidates voor als de eerste niet werkt.
+    Ranked by: dominant-normal alignment first, then area — so parallel
+    sheet faces (top/bottom) are tried before edge faces.
     """
     planar_faces = []
 
@@ -209,8 +211,17 @@ def find_all_base_face_candidates(shape):
     if not planar_faces:
         return []
 
-    # Sorteer op oppervlakte (grootste eerst)
+    # Determine dominant normal from the largest face
     planar_faces.sort(key=lambda x: x['area'], reverse=True)
+    dom = planar_faces[0]['normal']
+
+    def _normal_score(f):
+        n = f['normal']
+        return abs(n.x * dom.x + n.y * dom.y + n.z * dom.z)
+
+    # Primary key: alignment with dominant normal (sheet faces first)
+    # Secondary key: area (larger first within same orientation group)
+    planar_faces.sort(key=lambda f: (_normal_score(f), f['area']), reverse=True)
 
     return planar_faces
 
@@ -926,33 +937,32 @@ def unfold_sheet_metal(
         # Probeer meerdere base faces
         attempts_to_try = min(max_attempts, len(base_candidates))
 
-        for attempt, base_info in enumerate(base_candidates[:attempts_to_try]):
+        # Create the document once and reuse it across attempts (faster than
+        # creating/destroying a new document for every failed attempt)
+        doc = FreeCAD.newDocument("UnfoldDoc")
+        obj = doc.addObject("Part::Feature", "SheetPart")
+        obj.Shape = solid
+        doc.recompute()
+
+        class ObjWrapper:
+            def __init__(self, real_obj):
+                self._obj = real_obj
+                self.Refine = False
+
+            def __getattr__(self, name):
+                return getattr(self._obj, name)
+
+        wrapped_obj = ObjWrapper(obj)
+        MockSelection._selection = [wrapped_obj]
+
+        try:
+          for attempt, base_info in enumerate(base_candidates[:attempts_to_try]):
             result['attempts'] = attempt + 1
             base_face_idx = base_info['index']
 
             print(f"\nPoging {attempt + 1}/{attempts_to_try}: face {base_face_idx} (area {base_info['area']:.1f} mm²)")
 
-            # Maak een FreeCAD document voor de operatie
-            doc = FreeCAD.newDocument("UnfoldDoc")
-
             try:
-                # Voeg shape toe aan document
-                obj = doc.addObject("Part::Feature", "SheetPart")
-                obj.Shape = solid
-                doc.recompute()
-
-                # Mock object wrapper die Refine attribuut heeft
-                class ObjWrapper:
-                    def __init__(self, real_obj):
-                        self._obj = real_obj
-                        self.Refine = False
-
-                    def __getattr__(self, name):
-                        return getattr(self._obj, name)
-
-                wrapped_obj = ObjWrapper(obj)
-                MockSelection._selection = [wrapped_obj]
-
                 unfold_tree = _build_sheet_tree(
                     SheetMetalUnfolder,
                     solid,
@@ -1060,7 +1070,7 @@ def unfold_sheet_metal(
                             export_to_dxf(flat_shell, output_dxf, foldLines)
                             print(f"  ✓ DXF: {output_dxf}")
 
-                        return result  # Success!
+                        break  # Success! Exit attempt loop; doc closed in outer finally
                     else:
                         result['error_details'].append({
                             'face_idx': base_face_idx,
@@ -1087,11 +1097,14 @@ def unfold_sheet_metal(
                 })
                 print(f"  ✗ Exception: {str(e)}")
 
-            finally:
-                try:
-                    FreeCAD.closeDocument("UnfoldDoc")
-                except Exception:
-                    pass
+        finally:
+            try:
+                FreeCAD.closeDocument("UnfoldDoc")
+            except Exception:
+                pass
+
+        if result['success']:
+            return result
 
         # Geen van de pogingen werkte
         if result['error_details']:
