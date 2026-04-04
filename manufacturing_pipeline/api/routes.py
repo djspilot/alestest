@@ -7,10 +7,11 @@ import io
 import logging
 import os
 import uuid
+import zipfile
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 
 from manufacturing_pipeline.api.config import ALLOWED_EXTENSIONS, DISABLE_STAGES, MAX_FILE_SIZE_MB, UPLOAD_DIR, VALID_STAGE_KEYS
 from manufacturing_pipeline.api.schemas import (
@@ -122,6 +123,111 @@ def _build_unfold_status(job) -> UnfoldStatus:
         completed_at=getattr(job, "unfold_completed_at", None),
         error=getattr(job, "unfold_error", None),
         result=UnfoldResult(**unfold_payload) if unfold_payload else None,
+    )
+
+
+def _safe_download_stem(value: str | None, fallback: str = "result") -> str:
+    stem = Path(value or fallback).stem.strip() or fallback
+    cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in stem)
+    return cleaned or fallback
+
+
+def _build_xml_bytes(result: dict) -> bytes:
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".xml") as tmp:
+        tmp_path = Path(tmp.name)
+
+    try:
+        export_to_xml(result, tmp_path)
+        return tmp_path.read_bytes()
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+
+def _build_xml_response(result: dict) -> Response:
+    filename = f"{_safe_download_stem(result.get('file'))}.xml"
+    return Response(
+        content=_build_xml_bytes(result),
+        media_type="application/xml",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _part_results_for_download(job) -> list[tuple[str, dict]]:
+    result = getattr(job, "result", None) or {}
+    parts = result.get("parts") or []
+    if result.get("is_assembly") and parts:
+        part_results: list[tuple[str, dict]] = []
+        for index, part in enumerate(parts, start=1):
+            part_copy = dict(part)
+            part_name = (
+                part_copy.get("solid_name")
+                or part_copy.get("file")
+                or f"part_{index:02d}"
+            )
+            part_copy["file"] = part_name
+            part_results.append((part_name, part_copy))
+        return part_results
+
+    if result:
+        single = dict(result)
+        single_name = single.get("file") or getattr(job, "file_name", None) or job.job_id
+        single["file"] = single_name
+        return [(single_name, single)]
+
+    return []
+
+
+def _build_part_xml_zip(job) -> Response:
+    parts = _part_results_for_download(job)
+    if not parts:
+        raise HTTPException(status_code=404, detail="Geen analyse-resultaten beschikbaar voor losse XML-bestanden")
+
+    bundle = io.BytesIO()
+    base_name = _safe_download_stem(getattr(job, "file_name", None) or job.job_id, fallback=job.job_id)
+    folder_name = f"{base_name}_xml"
+    with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for index, (part_name, part_result) in enumerate(parts, start=1):
+            filename = f"{index:02d}_{_safe_download_stem(part_name, fallback=f'part_{index:02d}')}.xml"
+            archive.writestr(f"{folder_name}/{filename}", _build_xml_bytes(part_result))
+
+    return Response(
+        content=bundle.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{folder_name}.zip"'},
+    )
+
+
+def _build_unfold_zip(job) -> Response:
+    unfold_result = getattr(job, "unfold_result", None) or {}
+    if getattr(job, "unfold_status", "idle") != "completed" or not unfold_result:
+        raise HTTPException(status_code=404, detail="Unfold-bestanden zijn nog niet beschikbaar")
+
+    artifact_specs = [
+        (
+            unfold_result.get("flat_step_path"),
+            f"{_safe_download_stem(getattr(job, 'file_name', None) or 'part')}_flat.step",
+        ),
+        (
+            unfold_result.get("dxf_path") or unfold_result.get("output_dxf"),
+            f"{_safe_download_stem(getattr(job, 'file_name', None) or 'part')}_flat.dxf",
+        ),
+    ]
+    existing_specs = [(path, name) for path, name in artifact_specs if path and os.path.exists(path)]
+    if not existing_specs:
+        raise HTTPException(status_code=404, detail="Geen unfold-artifacts gevonden")
+
+    bundle = io.BytesIO()
+    base_name = _safe_download_stem(getattr(job, "file_name", None) or job.job_id, fallback=job.job_id)
+    folder_name = f"{base_name}_unfold"
+    with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for artifact_path, archive_name in existing_specs:
+            archive.write(artifact_path, arcname=f"{folder_name}/{archive_name}")
+
+    return Response(
+        content=bundle.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{folder_name}.zip"'},
     )
 
 
@@ -238,7 +344,7 @@ async def get_job(
         return _result_to_csv(job.result)
 
     if format == "xml" and job.status == "completed" and job.result:
-        return _result_to_xml(job.result)
+        return _build_xml_response(job.result)
 
 
     if job.status == "completed":
@@ -352,6 +458,25 @@ async def get_unfold_artifact(job_id: str, artifact_name: str):
     return FileResponse(artifact_path, filename=download_name, media_type=media_type)
 
 
+@router.get("/jobs/{job_id}/downloads/{bundle_name}")
+async def download_job_bundle(job_id: str, bundle_name: str):
+    """Download bundled job outputs as a zip or file."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "completed" or not getattr(job, "result", None):
+        raise HTTPException(status_code=409, detail="Analysis job is not completed yet")
+
+    if bundle_name == "total-xml":
+        return _build_xml_response(job.result)
+    if bundle_name == "part-xmls":
+        return _build_part_xml_zip(job)
+    if bundle_name == "unfold-files":
+        return _build_unfold_zip(job)
+
+    raise HTTPException(status_code=404, detail="Unknown download bundle")
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health():
     """Health check endpoint."""
@@ -430,32 +555,4 @@ def _result_to_csv(result: dict) -> str:
 
 def _result_to_xml(result: dict) -> str:
     """Convert analysis result dict to XML string response."""
-    from fastapi.responses import Response
-
-    # Create temporary file for XML export
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.xml') as tmp:
-        tmp_path = Path(tmp.name)
-
-    try:
-        # Export to XML using the exporter module
-        export_to_xml(result, tmp_path)
-
-        # Read the XML content
-        xml_content = tmp_path.read_text(encoding='utf-8')
-
-        # Clean up temp file
-        tmp_path.unlink()
-
-        # Return as XML response
-        filename = Path(result.get('file', 'result')).stem
-        return Response(
-            content=xml_content,
-            media_type="application/xml",
-            headers={"Content-Disposition": f"attachment; filename={filename}.xml"},
-        )
-
-    except Exception as e:
-        # Clean up temp file on error
-        if tmp_path.exists():
-            tmp_path.unlink()
-        raise HTTPException(status_code=500, detail=f"XML export failed: {str(e)}")
+    return _build_xml_response(result)
