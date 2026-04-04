@@ -185,6 +185,7 @@
           <button class="mini-btn" onclick="requestUnfold('${escapeHtml(job.job_id)}')" ${canQueue ? '' : 'disabled'}>
             ${unfoldStatus === 'completed' ? 'Opnieuw unfolden' : 'Unfold'}
           </button>
+          ${job.status === 'completed' ? `<a class="artifact-link" href="#" onclick="downloadArtifact(event,'/api/v1/jobs/${escapeHtml(job.job_id)}?format=xml','${escapeHtml((job.file_name||job.job_id).replace(/\.[^.]+$/,''))}.xml')">XML</a>` : ''}
         </div>
         ${foldSummary}
         ${links.length ? `<div class="action-row">${links.join('')}</div>` : ''}
