@@ -281,6 +281,7 @@ function AppContent() {
         {rightPanelOpen && (
           <StageDetailsPanel
             pipelineVisuals={pipeline.pipelineVisuals}
+            pipelineResult={pipeline.pipelineState?.result}
             groupedStages={pipeline.groupedStages}
             summary={pipeline.summary}
             liveActiveElapsed={liveActiveElapsed}

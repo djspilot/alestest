@@ -11,6 +11,7 @@ import {
   summarizePayload,
 } from './pipelineUi'
 import { normalizeFoldId, isIrregularHole, isHiddenHoleCandidate } from './lib/holes'
+import AssemblyPanel from './panels/AssemblyPanel'
 
 function getHoleStatusLabel(status) {
   if (status === 'accepted') return 'Geaccepteerd'
@@ -102,6 +103,7 @@ function getClassificationStatusClass(status) {
 
 export default function StageDetailsPanel({
   pipelineVisuals,
+  pipelineResult,
   groupedStages,
   summary,
   liveActiveElapsed,
@@ -416,7 +418,12 @@ export default function StageDetailsPanel({
   if (!selectedStage) {
     return (
       <div className="details-panel">
-        <div className="details-placeholder">Kies links een afgeronde pipeline-stap om hier de details te zien.</div>
+        {pipelineResult?.is_assembly && (
+          <AssemblyPanel pipelineResult={pipelineResult} />
+        )}
+        {!pipelineResult?.is_assembly && (
+          <div className="details-placeholder">Kies links een afgeronde pipeline-stap om hier de details te zien.</div>
+        )}
       </div>
     )
   }
@@ -441,6 +448,9 @@ export default function StageDetailsPanel({
 
   return (
     <div className="details-panel">
+      {pipelineResult?.is_assembly && (
+        <AssemblyPanel pipelineResult={pipelineResult} />
+      )}
       <div className="timeline-detail-card">
         <div className="timeline-detail-head">
           <div>
