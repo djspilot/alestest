@@ -60,8 +60,16 @@
   .badge.queued    { background: #1e1b4b; color: #818cf8; }
   .badge.idle      { background: #111827; color: #9ca3af; }
   .badge.unfold-completed { background: #0f3d2e; color: #5eead4; }
+  .badge.assembly { background: #1e1b4b; color: #a5b4fc; }
 
   .action-cell { min-width: 210px; }
+
+  .assembly-parts { display: none; background: #0a0a0a; }
+  .assembly-parts.open { display: table-row-group; }
+  .assembly-part-row td { padding: 6px 12px 6px 32px; border-bottom: 1px solid #111; color: #888; font-size: 11px; }
+  .assembly-part-row td.part-name { color: #ccc; font-weight: 500; }
+  .expand-btn { background: none; border: 1px solid #2a2a2a; color: #666; padding: 2px 8px; border-radius: 3px; cursor: pointer; font-family: inherit; font-size: 11px; }
+  .expand-btn:hover { border-color: #444; color: #aaa; }
   .action-stack { display: flex; flex-direction: column; gap: 6px; }
   .action-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .mini-btn, .artifact-link { background: #161616; border: 1px solid #2e2e2e; color: #cfcfcf; padding: 4px 8px; border-radius: 4px; font-family: inherit; font-size: 11px; text-decoration: none; cursor: pointer; }
@@ -297,6 +305,8 @@
 
       tbody.innerHTML = items.map(job => {
         const res = job.result || {};
+        const isAssembly = !!res.is_assembly;
+        const parts = res.parts || [];
         const prod = res.production || {};
         const dims = res.dimensions || {};
         const created = new Date(job.created_at);
@@ -308,32 +318,68 @@
           dur = s < 60 ? `${s.toFixed(0)}s` : `${(s/60).toFixed(1)}m`;
         }
 
-        const dimStr = dims.length
-          ? `${+dims.length.toFixed(1)} × ${+dims.width.toFixed(1)} × ${+dims.height.toFixed(1)}`
-          : '—';
+        let cat, type, thick, holes, bends, dimStr, expandBtn = '', partRows = '';
+
+        if (isAssembly) {
+          const n = res.solid_count || parts.length;
+          cat = `<span class="badge assembly">Assembly · ${n}×</span>`;
+          type = '—';
+          thick = '—';
+          dimStr = '—';
+          holes = parts.reduce((s, p) => s + (p.production?.holes_total ?? 0), 0) || '—';
+          bends = parts.reduce((s, p) => s + (p.production?.bends_total ?? 0), 0) || '—';
+
+          const rowId = `parts-${escapeHtml(job.job_id)}`;
+          expandBtn = `<button class="expand-btn" onclick="toggleParts('${rowId}')">▶ Onderdelen</button>`;
+
+          partRows = `<tr class="assembly-parts" id="${rowId}"><td colspan="11" style="padding:0">
+            <table style="width:100%">
+              ${parts.map((p, i) => {
+                const pd = p.dimensions || {};
+                const pp = p.production || {};
+                const pdim = pd.length ? `${+pd.length.toFixed(1)} × ${+pd.width.toFixed(1)} × ${+pd.height.toFixed(1)}` : '—';
+                const pcat = escapeHtml(p.category || p.part_type || '—');
+                const pthick = p.thickness ? `${p.thickness} mm` : '—';
+                return `<tr class="assembly-part-row">
+                  <td class="part-name">${escapeHtml(p.solid_name || `Onderdeel ${i+1}`)}</td>
+                  <td>${pcat}</td>
+                  <td class="mono">${pthick}</td>
+                  <td class="mono">${pdim}</td>
+                  <td class="mono">${pp.holes_total ?? '—'} gaten</td>
+                  <td class="mono">${pp.bends_total ?? '—'} zett.</td>
+                  <td colspan="5"></td>
+                </tr>`;
+              }).join('')}
+            </table>
+          </td></tr>`;
+        } else {
+          dimStr = dims.length
+            ? `${+dims.length.toFixed(1)} × ${+dims.width.toFixed(1)} × ${+dims.height.toFixed(1)}`
+            : '—';
+          cat = escapeHtml(res.category || '—');
+          type = escapeHtml(res.part_type || '—');
+          thick = res.thickness ? `${res.thickness} mm` : '—';
+          holes = prod.holes_total ?? '—';
+          bends = prod.bends_total ?? '—';
+        }
 
         const badge = `<span class="badge ${job.status}">${job.status}</span>`;
-        const cat = res.category || '—';
-        const type = res.part_type || '—';
-        const thick = res.thickness ? `${res.thickness} mm` : '—';
-        const holes = prod.holes_total ?? '—';
-        const bends = prod.bends_total ?? '—';
         const fname = job.file_name || res.file || job.job_id.slice(0,8);
         const actions = renderUnfoldActions(job);
 
         return `<tr>
           <td class="file" title="${escapeHtml(fname)}">${escapeHtml(fname)}</td>
           <td>${badge}</td>
-          <td>${escapeHtml(cat)}</td>
-          <td>${escapeHtml(type)}</td>
+          <td>${cat}</td>
+          <td>${type}</td>
           <td class="mono">${thick}</td>
           <td class="mono">${dimStr}</td>
           <td class="mono">${holes}</td>
           <td class="mono">${bends}</td>
           <td class="mono">${timeStr}</td>
           <td class="mono">${dur}</td>
-          <td class="action-cell">${actions}</td>
-        </tr>`;
+          <td class="action-cell">${actions}${expandBtn ? '<div style="margin-top:6px">'+expandBtn+'</div>' : ''}</td>
+        </tr>${partRows}`;
       }).join('');
     } catch (e) {
       tbody.innerHTML = `<tr><td colspan="11" class="empty">Fout: ${escapeHtml(e.message)}</td></tr>`;
@@ -385,6 +431,14 @@
     this.value = '';
     setTimeout(() => loadAll(), 500);
   });
+
+  function toggleParts(rowId) {
+    const el = document.getElementById(rowId);
+    if (!el) return;
+    const open = el.classList.toggle('open');
+    const btn = el.previousElementSibling?.querySelector('.expand-btn');
+    if (btn) btn.textContent = open ? '▼ Onderdelen' : '▶ Onderdelen';
+  }
 
   loadAll();
 </script>
