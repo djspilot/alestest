@@ -3,6 +3,11 @@ const STEP_HEADER_BYTES = new TextEncoder().encode(STEP_HEADER)
 
 let occtInstancePromise = null
 let currentRequestId = null
+const WORKER_BASE_URL = new URL(self.location.href)
+
+function assetUrl(name) {
+  return new URL(name, WORKER_BASE_URL).toString()
+}
 
 function serializeError(error, phase, extra = {}) {
   return {
@@ -48,7 +53,7 @@ function normalizeStepBuffer(buffer) {
 async function initOcct() {
   if (!occtInstancePromise) {
     occtInstancePromise = (async () => {
-      self.importScripts('/occt-import-js.js')
+      self.importScripts(assetUrl('occt-import-js.js'))
 
       if (typeof self.occtimportjs !== 'function') {
         throw new Error('occt-import-js niet beschikbaar in worker')
@@ -56,8 +61,8 @@ async function initOcct() {
 
       return self.occtimportjs({
         locateFile: (name) => {
-          if (name.endsWith('.wasm')) return '/occt-import-js.wasm'
-          return name
+          if (name.endsWith('.wasm')) return assetUrl('occt-import-js.wasm')
+          return assetUrl(name)
         },
       })
     })()
