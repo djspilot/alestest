@@ -7,7 +7,6 @@ ALES ERP system and Spaceclaim/AutoPOL format.
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-from xml.dom import minidom
 import os
 import sys
 import re
@@ -783,14 +782,9 @@ def _prettify_xml(elem: ET.Element) -> str:
     Returns:
         Pretty-printed XML string
     """
-    # Convert to string
-    rough_string = ET.tostring(elem, encoding='utf-8')
-
-    # Parse with minidom for pretty printing
-    reparsed = minidom.parseString(rough_string)
-
-    # Return pretty printed string with XML declaration
-    return reparsed.toprettyxml(indent='  ', encoding='utf-8').decode('utf-8')
+    # Pretty-print using ET.indent (Python 3.9+, no pyexpat needed)
+    ET.indent(elem, space='  ')
+    return '<?xml version="1.0" encoding="utf-8"?>\n' + ET.tostring(elem, encoding='unicode')
 
 
 # =============================================================================
