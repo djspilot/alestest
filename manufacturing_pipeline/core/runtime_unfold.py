@@ -987,16 +987,43 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
     detected_thickness = get_thickness_from_solid(solid)
     print(f"DEBUG: detected thickness={{detected_thickness}}")
 
-    # Find planar faces for base
+    # Find planar faces for base — ranked to hit the main flat face first.
+    # Sheet metal has two dominant parallel faces with the largest area and
+    # matching normals (roughly antiparallel). Prefer faces whose normals are
+    # near-parallel to the dominant cluster; deprioritise thin edge/side faces.
     planar_faces = []
     for i, face in enumerate(solid.Faces):
         try:
             if "Plane" in face.Surface.TypeId:
-                planar_faces.append({{"index": i, "area": face.Area}})
+                n = face.Surface.Axis
+                planar_faces.append({{"index": i, "area": face.Area, "normal": (n.x, n.y, n.z)}})
         except:
             pass
-    planar_faces.sort(key=lambda x: x["area"], reverse=True)
-    print(f"DEBUG: {{len(planar_faces)}} planar faces")
+
+    if planar_faces:
+        max_area = planar_faces[0]["area"] if planar_faces else 1
+        # Find the dominant normal: the normal of the single largest face
+        planar_faces.sort(key=lambda x: x["area"], reverse=True)
+        max_area = planar_faces[0]["area"]
+        dom = planar_faces[0]["normal"]
+
+        def _normal_score(f):
+            # dot product with dominant normal — faces that are parallel (|dot|≈1)
+            # to the largest face score highest; edge faces (dot≈0) score low
+            nx, ny, nz = f["normal"]
+            dot = abs(nx * dom[0] + ny * dom[1] + nz * dom[2])
+            return dot
+
+        # Sort: first by normal alignment (main flat faces first), then by area
+        planar_faces.sort(key=lambda f: (_normal_score(f), f["area"]), reverse=True)
+    print(f"DEBUG: {{len(planar_faces)}} planar faces (ranked by normal alignment + area)")
+
+    # Create FreeCAD document ONCE per solid — reused across all face attempts.
+    # obj.Shape only needs to be assigned once since the solid doesn't change.
+    doc = FreeCAD.newDocument("UnfoldDoc")
+    obj = doc.addObject("Part::Feature", "SheetPart")
+    obj.Shape = solid
+    doc.recompute()
 
     # Try the configured number of largest faces to find the best base for unfolding
     for base_info in planar_faces[:{unfold_settings["candidate_limits"]["max_base_faces_per_solid"]}]:
@@ -1004,11 +1031,6 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
         result["attempts"] += 1
         print(f"DEBUG: trying base face {{base_idx}}, area={{base_info['area']:.1f}}")
         try:
-            doc = FreeCAD.newDocument("UnfoldDoc")
-            obj = doc.addObject("Part::Feature", "SheetPart")
-            obj.Shape = solid
-            doc.recompute()
-
             should_try_new = unfolder_variant_mode in ("auto", "new")
             if should_try_new:
                 try:
@@ -1018,13 +1040,11 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
                     new_result["first_traceback"] = result.get("first_traceback")
                     result = new_result
                     best_score = max(best_score, len(new_result.get("bend_line_segments") or []))
-                    FreeCAD.closeDocument("UnfoldDoc")
                     continue
                 except Exception as new_exc:
                     print(f"DEBUG: new unfolder failed on face {{base_idx}}: {{new_exc}}")
                     _record_error(result, base_idx, "new_unfolder", -3, str(new_exc))
                     if unfolder_variant_mode == "new":
-                        FreeCAD.closeDocument("UnfoldDoc")
                         continue
 
             unfold_tree = build_sheet_tree(solid, base_idx, kFactorLookup, obj)
@@ -1037,7 +1057,6 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
                     unfold_tree.error_code,
                     UNFOLD_ERROR_MESSAGES.get(unfold_tree.error_code, f"Onbekende fout ({{unfold_tree.error_code}})"),
                 )
-                FreeCAD.closeDocument("UnfoldDoc")
                 continue
 
             unfold_tree.Bend_analysis(base_idx, None)
@@ -1205,19 +1224,22 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
                         -2,
                         "Unfold leverde geen vlak patroon op voor dit basisvlak",
                     )
-                            
-            FreeCAD.closeDocument("UnfoldDoc")
+
         except Exception as e:
             print(f"DEBUG EXCEPTION on face {{base_idx}}: {{type(e).__name__}}: {{e}}")
             tb = traceback.format_exc()
             if not result.get("first_traceback"):
                 result["first_traceback"] = tb
             _record_error(result, base_idx, "exception", -1, f"{{type(e).__name__}}: {{e}}", tb=tb)
-            try:
-                FreeCAD.closeDocument("UnfoldDoc")
-            except:
-                pass
-            continue
+
+        # Stop as soon as we have a successful result
+        if result.get("success"):
+            break
+
+    try:
+        FreeCAD.closeDocument("UnfoldDoc")
+    except:
+        pass
 
 if not result.get("success"):
     exception_details = [d for d in result["error_details"] if d.get("stage") == "exception"]
