@@ -1,3 +1,18 @@
+# ── Stage 0: build the React viewer ──────────────────────────────────────────
+FROM node:20-alpine AS viewer-build
+
+WORKDIR /viewer
+COPY viewer/package*.json ./
+RUN npm ci
+
+COPY viewer ./
+
+ARG VITE_PIPELINE_API_BASE_URL
+ENV VITE_PIPELINE_API_BASE_URL=${VITE_PIPELINE_API_BASE_URL}
+
+RUN npm run build
+
+# ── Stage 1: API + cadquery-ocp + FreeCAD ─────────────────────────────────────
 FROM mambaorg/micromamba:1.5.10
 
 WORKDIR /app
@@ -22,6 +37,9 @@ RUN micromamba create -y -n freecad -c conda-forge freecad && \
     micromamba clean --all --yes
 
 COPY --chown=$MAMBA_USER:$MAMBA_USER . /app
+
+# Embed the pre-built viewer so FastAPI can serve it at /
+COPY --from=viewer-build /viewer/dist /app/manufacturing_pipeline/api/static
 
 ENV PYTHONUNBUFFERED=1
 ENV API_HOST=0.0.0.0
