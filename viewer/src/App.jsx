@@ -18,6 +18,28 @@ const ViewerCanvas = lazy(() => import('./ViewerCanvas'))
 
 const VIEWER_REVISION = '026734d'
 
+function mergeJobWithUnfoldResult(job, unfoldStatus) {
+  const unfoldResult = unfoldStatus?.result
+  if (!job || !unfoldResult) return job
+
+  const visuals = { ...(job.result?.visuals || {}) }
+  visuals.unfold = {
+    ...(visuals.unfold || {}),
+    ...unfoldResult,
+  }
+
+  return {
+    ...job,
+    unfold: unfoldStatus,
+    result: job.result
+      ? {
+          ...job.result,
+          visuals,
+        }
+      : job.result,
+  }
+}
+
 function ViewerCanvasFallback() {
   return (
     <div className="loading-overlay">
@@ -95,6 +117,8 @@ function AppContent() {
 
     const headers = getApiKeyHeaders(urlKey)
 
+    let hydratedJob = null
+
     fetch(`${apiBase}/api/v1/jobs/${jobId}`, { headers })
       .then(async (response) => {
         if (!response.ok) {
@@ -110,6 +134,27 @@ function AppContent() {
         return response.json()
       })
       .then((job) => {
+        hydratedJob = job
+        if (job?.status !== 'completed') return job
+        return fetch(`${apiBase}/api/v1/jobs/${jobId}/unfold`, { headers })
+          .then(async (response) => {
+            if (!response.ok) {
+              let detail = ''
+              try {
+                const payload = await response.json()
+                detail = payload?.detail || ''
+              } catch {
+                detail = await response.text()
+              }
+              throw new Error(detail || `${response.status} ${response.statusText}`)
+            }
+            return response.json()
+          })
+          .then((unfoldStatus) => mergeJobWithUnfoldResult(job, unfoldStatus))
+          .catch(() => job)
+      })
+      .then((job) => {
+        hydratedJob = job
         if (job?.status === 'completed') {
           pipeline.setPipelineState({
             ...EMPTY_PIPELINE_STATE,
@@ -139,7 +184,28 @@ function AppContent() {
         )
       })
       .then((file) => viewer.handleFile(file, { skipPipelineStart: true }))
-      .catch((err) => viewer.setError(`STEP bestand laden mislukt: ${err.message}`))
+      .catch((err) => {
+        if (hydratedJob?.status === 'completed') {
+          pipeline.setPipelineState({
+            ...EMPTY_PIPELINE_STATE,
+            status: 'completed',
+            jobId: hydratedJob.job_id,
+            result: hydratedJob.result || null,
+            events: hydratedJob.timeline_events || [],
+            summary: hydratedJob.timeline_summary || null,
+            error: null,
+            debug: {
+              checkedBase: apiBase,
+              checkedUrl: `${apiBase}/api/v1/jobs/${jobId}`,
+              fallbackBase: null,
+              fallbackUrl: null,
+              code: null,
+              message: null,
+            },
+          })
+        }
+        viewer.setError(`STEP bestand laden mislukt: ${err.message}`)
+      })
   }, [launchParams, pipeline, viewer])
 
   // Timer for live elapsed display

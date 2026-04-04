@@ -198,6 +198,40 @@ class TestJobEndpoints:
         response = self.client.get("/api/v1/stats")
         assert response.status_code == 200
 
+    def test_get_job_unfold_status_exposes_raw_segment_details(self):
+        from manufacturing_pipeline.api import routes as routes_module
+
+        job_id = f"unfold-{uuid.uuid4()}"
+        fake_job = MagicMock()
+        fake_job.job_id = job_id
+        fake_job.unfold_status = "completed"
+        fake_job.unfold_requested_at = None
+        fake_job.unfold_started_at = None
+        fake_job.unfold_completed_at = None
+        fake_job.unfold_error = None
+        fake_job.unfold_result = {
+            "success": True,
+            "flat_length": 120.0,
+            "flat_width": 80.0,
+            "fold_lines": 2,
+            "raw_fold_lines": 5,
+            "fold_details": [{"id": 1}, {"id": 2}],
+            "bends_logical": [{"id": 1}, {"id": 2}],
+            "bend_line_segments": [{"id": "seg-a"}, {"id": "seg-b"}],
+            "bend_line_groups": [{"segment_indices": [0, 1, 2]}, {"segment_indices": [3, 4]}],
+        }
+
+        with patch.object(routes_module.jobs, "get", return_value=fake_job):
+            response = self.client.get(f"/api/v1/jobs/{job_id}/unfold")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "completed"
+        assert payload["result"]["raw_fold_lines"] == 5
+        assert len(payload["result"]["fold_details"]) == 2
+        assert len(payload["result"]["bends_logical"]) == 2
+        assert len(payload["result"]["bend_line_segments"]) == 2
+
     def test_analyze_reuses_existing_identical_request(self, tmp_path):
         from manufacturing_pipeline.api import routes as routes_module
 

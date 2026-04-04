@@ -122,6 +122,9 @@ class UnfoldResult(BaseModel):
     flat_width: Optional[float] = None
     fold_lines: int = 0
     raw_fold_lines: Optional[int] = None
+    fold_details: list[dict] = Field(default_factory=list)
+    bends_logical: list[dict] = Field(default_factory=list)
+    bend_line_segments: list[dict] = Field(default_factory=list)
     bend_line_groups: list[dict] = Field(default_factory=list)
     flat_step_url: Optional[str] = None
     dxf_url: Optional[str] = None
