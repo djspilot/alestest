@@ -154,13 +154,20 @@ function StepGeometry({
       } catch (err) {
         if (!cancelled) {
           console.error('[ALES] STEP load error:', err)
+          const cause = err?.cause || null
+          const phase = cause?.phase ? ` [${cause.phase}]` : ''
+          const location =
+            cause?.filename
+              ? ` @ ${cause.filename}${cause?.lineno ? `:${cause.lineno}` : ''}${cause?.colno ? `:${cause.colno}` : ''}`
+              : ''
+          const errorMessage = `${err.message || String(err)}${phase}${location}`
           onDebug?.({
             source: 'step-model',
             stage: 'wasm_parse_error',
-            error: err.message || String(err),
-            cause: err?.cause || null,
+            error: errorMessage,
+            cause,
           })
-          onError?.(err.message || String(err))
+          onError?.(errorMessage)
         }
       }
     }

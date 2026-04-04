@@ -30,7 +30,10 @@ function ViewerCanvasFallback() {
 
 function AppContent() {
   const controlsRef = useRef()
-  const [leftPanelOpen, setLeftPanelOpen] = useState(true)
+  const launchParams = useMemo(() => new URLSearchParams(window.location.search), [])
+  const launchedFromJob = launchParams.has('job')
+  const launchApiBase = launchParams.get('api') || getDefaultPipelineApiBase()
+  const [leftPanelOpen, setLeftPanelOpen] = useState(() => !launchedFromJob)
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [debugPanelOpen, setDebugPanelOpen] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
@@ -51,11 +54,26 @@ function AppContent() {
     parseMode: selection.parseMode,
   })
 
+  useEffect(() => {
+    if (viewer.error) setDebugPanelOpen(true)
+  }, [viewer.error])
+
+  const latestErrorDebugEvent = useMemo(() => {
+    const events = viewer.debugEvents || []
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index]
+      if (['worker_error', 'worker_failure', 'worker_message_error', 'wasm_parse_error', 'model_error'].includes(event.stage)) {
+        return event
+      }
+    }
+    return null
+  }, [viewer.debugEvents])
+
   // Auto-load STEP file from URL parameter ?job=<id>[&api=<base>][&key=<apikey>]
   const jobAutoLoadRef = useRef(false)
   useEffect(() => {
     if (jobAutoLoadRef.current) return
-    const params = new URLSearchParams(window.location.search)
+    const params = launchParams
     const jobId = params.get('job')
     if (!jobId) return
     jobAutoLoadRef.current = true
@@ -63,6 +81,12 @@ function AppContent() {
     const apiBase = params.get('api') || pipeline.pipelineApiBase || getDefaultPipelineApiBase()
     const fileName = params.get('name') || 'part.step'
     const urlKey = params.get('key') || pipeline.pipelineApiKey
+    if (params.get('api')) {
+      pipeline.setPipelineApiBase(apiBase)
+    }
+    if (params.get('key')) {
+      pipeline.setPipelineApiKey(urlKey)
+    }
     viewer.setError(null)
 
     const headers = getApiKeyHeaders(urlKey)
@@ -82,6 +106,25 @@ function AppContent() {
         return response.json()
       })
       .then((job) => {
+        if (job?.status === 'completed') {
+          pipeline.setPipelineState({
+            ...EMPTY_PIPELINE_STATE,
+            status: 'completed',
+            jobId: job.job_id,
+            result: job.result || null,
+            events: job.timeline_events || [],
+            summary: job.timeline_summary || null,
+            error: null,
+            debug: {
+              checkedBase: apiBase,
+              checkedUrl: `${apiBase}/api/v1/jobs/${jobId}`,
+              fallbackBase: null,
+              fallbackUrl: null,
+              code: null,
+              message: null,
+            },
+          })
+        }
         if (!job?.source_step_available) {
           throw new Error('Bron STEP bestand is niet meer beschikbaar voor deze job.')
         }
@@ -91,9 +134,9 @@ function AppContent() {
           { headers },
         )
       })
-      .then((file) => viewer.handleFile(file))
+      .then((file) => viewer.handleFile(file, { skipPipelineStart: true }))
       .catch((err) => viewer.setError(`STEP bestand laden mislukt: ${err.message}`))
-  }, [])
+  }, [launchParams, pipeline, viewer])
 
   // Timer for live elapsed display
   useEffect(() => {
@@ -183,11 +226,20 @@ function AppContent() {
     }
   }, [pipeline.pipelineApiBase, pipeline.pipelineApiKey, viewer])
 
+  const handleBackToApi = useCallback(() => {
+    window.location.href = launchApiBase
+  }, [launchApiBase])
+
   return (
     <div className="app">
       <div className="header">
         <h1>ALES STEP Viewer</h1>
         <div className="header-actions">
+          {launchedFromJob && (
+            <button className="header-toggle-btn" onClick={handleBackToApi}>
+              Terug naar API
+            </button>
+          )}
           <button className="header-toggle-btn" onClick={() => setLeftPanelOpen((v) => !v)}>
             {leftPanelOpen ? 'Verberg links' : 'Toon links'}
           </button>
@@ -205,6 +257,22 @@ function AppContent() {
       {viewer.error && (
         <div className="error-banner">
           <strong>Fout:&nbsp;</strong>{viewer.error}
+          {latestErrorDebugEvent && (
+            <div style={{ width: '100%', marginTop: 8, fontSize: '0.82rem', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+              <div><strong>Debug stage:</strong> {latestErrorDebugEvent.stage}</div>
+              {latestErrorDebugEvent.error && <div><strong>Debug error:</strong> {latestErrorDebugEvent.error}</div>}
+              {latestErrorDebugEvent.cause && (
+                <div>
+                  <strong>Cause:</strong> {JSON.stringify(latestErrorDebugEvent.cause)}
+                </div>
+              )}
+              {latestErrorDebugEvent.errorDetail && (
+                <div>
+                  <strong>Error detail:</strong> {JSON.stringify(latestErrorDebugEvent.errorDetail)}
+                </div>
+              )}
+            </div>
+          )}
           <button className="toolbar-btn" style={{ marginLeft: 'auto' }} onClick={() => viewer.setError(null)}>✕</button>
         </div>
       )}

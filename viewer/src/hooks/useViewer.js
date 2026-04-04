@@ -32,7 +32,8 @@ export function useViewer({ startPipeline, pipelineEnabled, pipelineState, activ
   }, [activeMesh, pushDebugEvent])
 
   const handleFile = useCallback(
-    (file) => {
+    (file, options = {}) => {
+      const { skipPipelineStart = false } = options
       const ext = file.name.split('.').pop().toLowerCase()
       if (!['step', 'stp'].includes(ext)) {
         setError('Ongeldig bestandstype. Alleen .step/.stp bestanden.')
@@ -60,7 +61,7 @@ export function useViewer({ startPipeline, pipelineEnabled, pipelineState, activ
         pipelineEnabled,
       })
 
-      if (pipelineEnabled) {
+      if (pipelineEnabled && !skipPipelineStart) {
         void readFileAsArrayBuffer(file)
           .then((result) => {
             setFileBuffer(result)
