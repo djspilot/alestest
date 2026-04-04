@@ -622,6 +622,7 @@
     const apiBase = `${window.location.protocol}//${window.location.host}`;
     const params = new URLSearchParams({ job: jobId, api: apiBase });
     if (fileName) params.set('name', fileName);
+    if (apiKey) params.set('key', apiKey);
     return `${VIEWER_BASE_URL}?${params}`;
   }
 

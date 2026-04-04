@@ -51,6 +51,29 @@ function AppContent() {
     parseMode: selection.parseMode,
   })
 
+  // Auto-load STEP file from URL parameter ?job=<id>[&api=<base>][&key=<apikey>]
+  const jobAutoLoadRef = useRef(false)
+  useEffect(() => {
+    if (jobAutoLoadRef.current) return
+    const params = new URLSearchParams(window.location.search)
+    const jobId = params.get('job')
+    if (!jobId) return
+    jobAutoLoadRef.current = true
+
+    const apiBase = params.get('api') || pipeline.pipelineApiBase || getDefaultPipelineApiBase()
+    const fileName = params.get('name') || 'part.step'
+    const urlKey = params.get('key') || pipeline.pipelineApiKey
+    viewer.setError(null)
+
+    fetchFileAsBrowserFile(
+      `${apiBase}/api/v1/jobs/${jobId}/step`,
+      fileName,
+      { headers: getApiKeyHeaders(urlKey) },
+    )
+      .then((file) => viewer.handleFile(file))
+      .catch((err) => viewer.setError(`STEP bestand laden mislukt: ${err.message}`))
+  }, [])
+
   // Timer for live elapsed display
   useEffect(() => {
     if (pipeline.pipelineState?.status !== 'processing') return undefined
