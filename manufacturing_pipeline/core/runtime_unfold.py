@@ -1518,6 +1518,12 @@ def _run_direct_python_worker_attempt(step_file, output_dir, part_name, sys_conf
             "worker_transport_error": True,
         }
 
+    # If worker ran but made 0 attempts, its internal routing failed (e.g. it
+    # re-launched FreeCADCmd as a subprocess which can't find manufacturing_pipeline).
+    # Treat this as a transport error so the caller falls back to the embedded script.
+    if not payload.get("success") and (payload.get("attempts") or 0) == 0:
+        payload["worker_transport_error"] = True
+
     payload.setdefault("runtime_source", "direct-freecad-python")
     payload["worker_mode"] = "persistent"
     return payload
