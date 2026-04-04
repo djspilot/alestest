@@ -282,10 +282,15 @@
         </details>`
       : '';
 
+    const viewerBtn = job.status === 'completed'
+      ? `<a class="mini-btn" href="${escapeHtml(buildViewerUrl(job.job_id, job.file_name || job.result?.file))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🔬 Viewer</a>`
+      : '';
+
     return `
       <div class="action-stack">
         <div class="action-row">
           ${statusBadge}
+          ${viewerBtn}
           <button class="mini-btn" onclick="requestUnfold('${escapeHtml(job.job_id)}')" ${canQueue ? '' : 'disabled'}>
             ${unfoldStatus === 'completed' ? 'Opnieuw unfolden' : 'Unfold'}
           </button>
