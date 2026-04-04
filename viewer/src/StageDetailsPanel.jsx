@@ -415,19 +415,6 @@ export default function StageDetailsPanel({
     }
   }
 
-  if (!selectedStage) {
-    return (
-      <div className="details-panel">
-        {pipelineResult?.is_assembly && (
-          <AssemblyPanel pipelineResult={pipelineResult} />
-        )}
-        {!pipelineResult?.is_assembly && (
-          <div className="details-placeholder">Kies links een afgeronde pipeline-stap om hier de details te zien.</div>
-        )}
-      </div>
-    )
-  }
-
   const stageMeta = getStageMeta(selectedStage, summary, liveActiveElapsed, pipelineStatus)
   const previousSelectableIndex = groupedStages
     .slice(0, selectedStageIndex)
@@ -446,8 +433,9 @@ export default function StageDetailsPanel({
     }))
     .find((item) => item.selectable)?.index
 
-  // Compact stage list for quick navigation
-  const stageList = useMemo(() => {
+  // Compute stage list without useMemo to avoid circular deps with onSelectStageIndex
+  const renderStageList = () => {
+    if (!groupedStages.length) return null
     return groupedStages.map((group, index) => {
       const meta = getStageMeta(group, summary, liveActiveElapsed, pipelineStatus)
       const isActive = index === selectedStageIndex
@@ -472,17 +460,34 @@ export default function StageDetailsPanel({
         </button>
       )
     })
-  }, [groupedStages, summary, liveActiveElapsed, pipelineStatus, selectedStageIndex, onSelectStageIndex])
+  }
+
+  if (!selectedStage) {
+    return (
+      <div className="details-panel">
+        {pipelineResult?.is_assembly && (
+          <AssemblyPanel pipelineResult={pipelineResult} />
+        )}
+        {renderStageList() && (
+          <div className="timeline-stage-list" style={{ maxHeight: '40vh', overflowY: 'auto', marginBottom: 8 }}>
+            {renderStageList()}
+          </div>
+        )}
+        {!pipelineResult?.is_assembly && (
+          <div className="details-placeholder">Kies een afgeronde pipeline-stap om hier de details te zien.</div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="details-panel">
       {pipelineResult?.is_assembly && (
         <AssemblyPanel pipelineResult={pipelineResult} />
       )}
-      {/* Compact stage navigation list */}
-      {groupedStages.length > 0 && (
+      {renderStageList() && (
         <div className="timeline-stage-list" style={{ maxHeight: '40vh', overflowY: 'auto', marginBottom: 8 }}>
-          {stageList}
+          {renderStageList()}
         </div>
       )}
       <div className="timeline-detail-card">
