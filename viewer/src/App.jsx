@@ -30,7 +30,11 @@ function ViewerCanvasFallback() {
 
 function AppContent() {
   const controlsRef = useRef()
-  const launchParams = useMemo(() => new URLSearchParams(window.location.search), [])
+  const launchParamsRef = useRef(null)
+  if (!launchParamsRef.current) {
+    launchParamsRef.current = new URLSearchParams(window.location.search)
+  }
+  const launchParams = launchParamsRef.current
   const launchedFromJob = launchParams.has('job')
   const launchApiBase = launchParams.get('api') || getDefaultPipelineApiBase()
   const [leftPanelOpen, setLeftPanelOpen] = useState(() => !launchedFromJob)
