@@ -446,10 +446,44 @@ export default function StageDetailsPanel({
     }))
     .find((item) => item.selectable)?.index
 
+  // Compact stage list for quick navigation
+  const stageList = useMemo(() => {
+    return groupedStages.map((group, index) => {
+      const meta = getStageMeta(group, summary, liveActiveElapsed, pipelineStatus)
+      const isActive = index === selectedStageIndex
+      return (
+        <button
+          key={`${group.stage}-${index}`}
+          className={`timeline-stage-button ${isActive ? 'is-active' : ''}`}
+          onClick={() => {
+            if (!meta.isSelectable) return
+            onSelectStageIndex(index)
+          }}
+          disabled={!meta.isSelectable}
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', padding: '4px 8px' }}
+        >
+          <span style={{ display: 'flex', flexDirection: 'column', textAlign: 'left' }}>
+            <span style={{ fontWeight: isActive ? 600 : 400, fontSize: '0.82rem' }}>{group.stage}</span>
+          </span>
+          <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+            <span style={{ fontSize: '0.75rem', color: '#888' }}>{meta.stateLabel}</span>
+            <span style={{ fontSize: '0.7rem', color: '#aaa' }}>{formatDuration(meta.elapsed)}</span>
+          </span>
+        </button>
+      )
+    })
+  }, [groupedStages, summary, liveActiveElapsed, pipelineStatus, selectedStageIndex, onSelectStageIndex])
+
   return (
     <div className="details-panel">
       {pipelineResult?.is_assembly && (
         <AssemblyPanel pipelineResult={pipelineResult} />
+      )}
+      {/* Compact stage navigation list */}
+      {groupedStages.length > 0 && (
+        <div className="timeline-stage-list" style={{ maxHeight: '40vh', overflowY: 'auto', marginBottom: 8 }}>
+          {stageList}
+        </div>
       )}
       <div className="timeline-detail-card">
         <div className="timeline-detail-head">
