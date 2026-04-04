@@ -3,7 +3,7 @@ FROM node:20-alpine AS viewer-build
 
 WORKDIR /viewer
 COPY viewer/package*.json ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 COPY viewer ./
 
