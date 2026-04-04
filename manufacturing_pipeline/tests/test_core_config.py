@@ -75,7 +75,13 @@ def test_diagnose_freecad_setup_reports_missing_paths(monkeypatch):
     monkeypatch.setenv("FREECAD_PATH", "/missing/freecad")
     monkeypatch.delenv("FREECAD_PYTHON", raising=False)
     monkeypatch.delenv("FREECAD_CMD", raising=False)
+    monkeypatch.delenv("FREECAD_RUNTIME_ROOT", raising=False)
     monkeypatch.setenv("FREECAD_AUTO_INSTALL", "0")
+    # Suppress all FreeCAD discovery — hardcoded candidates, default path, managed runtime
+    import manufacturing_pipeline.core.config as _cfg
+    monkeypatch.setattr(_cfg, "_freecad_root_candidates", lambda platform=None: ["/missing/freecad"])
+    monkeypatch.setattr(_cfg, "_default_freecad_path", lambda platform=None: "/missing/freecad")
+    monkeypatch.setattr(_cfg.SystemConfig, "_managed_runtime_value", lambda self, key: "")
 
     info = diagnose_freecad_setup(platform="darwin")
 

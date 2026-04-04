@@ -389,6 +389,7 @@ def test_run_unfold_to_step_can_skip_host_direct_mode(monkeypatch, tmp_path) -> 
         return {"success": True, "runtime_source": "direct-freecad-python"}
 
     monkeypatch.setenv("FREECAD_UNFOLD_MODE", "direct-python")
+    monkeypatch.setenv("FREECAD_PERSISTENT_WORKER", "0")  # force subprocess path
     monkeypatch.setattr(runtime_unfold, "_run_direct_unfold_attempt", fake_host_direct)
     monkeypatch.setattr(runtime_unfold, "_run_unfold_subprocess_attempt", fake_python_runtime)
 

@@ -238,15 +238,23 @@ class _PersistentFreeCADWorkerClient:
             env=env,
             bufsize=1,
         )
-        ready_line = self._process.stdout.readline().strip() if self._process.stdout else ""
-        if not ready_line:
+        # FreeCAD may print non-JSON startup messages (e.g. "Sheet Metal workbench loaded")
+        # before the JSON ready handshake — skip them.
+        ready = None
+        for _ in range(50):
+            raw = self._process.stdout.readline() if self._process.stdout else ""
+            line = raw.strip()
+            if not line:
+                break
+            try:
+                msg = json.loads(line)
+                if msg.get("type") == "ready":
+                    ready = msg
+                    break
+            except Exception:
+                continue
+        if ready is None:
             raise RuntimeError("FreeCAD worker gaf geen startup handshake terug")
-        try:
-            ready = json.loads(ready_line)
-        except Exception as exc:
-            raise RuntimeError(f"Ongeldige worker handshake: {ready_line}") from exc
-        if ready.get("type") != "ready":
-            raise RuntimeError(f"Onverwachte worker handshake: {ready_line}")
         self._reader_thread = threading.Thread(target=self._read_stdout_loop, daemon=True)
         self._reader_thread.start()
 
