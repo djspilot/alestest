@@ -158,6 +158,7 @@ function StepGeometry({
             source: 'step-model',
             stage: 'wasm_parse_error',
             error: err.message || String(err),
+            cause: err?.cause || null,
           })
           onError?.(err.message || String(err))
         }

@@ -10,13 +10,21 @@ function emitDebug(onDebug, stage, detail = {}) {
   })
 }
 
+function formatWorkerCrashMessage(event) {
+  const message = event?.message || 'STEP worker crashte'
+  const location = event?.filename
+    ? ` @ ${event.filename}${event?.lineno ? `:${event.lineno}` : ''}${event?.colno ? `:${event.colno}` : ''}`
+    : ''
+  return `${message}${location}`
+}
+
 function getWorker(onDebug) {
   if (workerInstance) return workerInstance
 
   workerInstance = new Worker('/step-worker.js')
   emitDebug(onDebug, 'worker_created', { script: '/step-worker.js' })
   workerInstance.onmessage = (event) => {
-    const { id, success, error, ...payload } = event.data || {}
+    const { id, success, error, errorDetail, ...payload } = event.data || {}
     const request = pendingRequests.get(id)
     if (!request) return
 
@@ -32,16 +40,37 @@ function getWorker(onDebug) {
     emitDebug(request.onDebug, 'worker_failure', {
       requestId: id,
       error: error || 'STEP parsing mislukt',
+      errorDetail: errorDetail || null,
     })
-    request.reject(new Error(error || 'STEP parsing mislukt'))
+    const failure = new Error(error || 'STEP parsing mislukt')
+    if (errorDetail) failure.cause = errorDetail
+    request.reject(failure)
   }
   workerInstance.onerror = (event) => {
-    const message = event?.message || 'STEP worker crashte'
+    const message = formatWorkerCrashMessage(event)
     pendingRequests.forEach(({ reject, onDebug }) => {
-      emitDebug(onDebug, 'worker_error', { error: message })
+      emitDebug(onDebug, 'worker_error', {
+        error: message,
+        filename: event?.filename || null,
+        lineno: event?.lineno || null,
+        colno: event?.colno || null,
+      })
       reject(new Error(message))
     })
     pendingRequests.clear()
+    workerInstance.terminate()
+    workerInstance = null
+  }
+  workerInstance.onmessageerror = () => {
+    pendingRequests.forEach(({ reject, onDebug }) => {
+      emitDebug(onDebug, 'worker_message_error', {
+        error: 'Worker response kon niet worden gelezen',
+      })
+      reject(new Error('Worker response kon niet worden gelezen'))
+    })
+    pendingRequests.clear()
+    workerInstance.terminate()
+    workerInstance = null
   }
 
   return workerInstance

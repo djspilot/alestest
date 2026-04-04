@@ -2,6 +2,26 @@ const STEP_HEADER = 'ISO-10303-21;'
 const STEP_HEADER_BYTES = new TextEncoder().encode(STEP_HEADER)
 
 let occtInstancePromise = null
+let currentRequestId = null
+
+function serializeError(error, phase, extra = {}) {
+  return {
+    phase,
+    message: error?.message || String(error),
+    name: error?.name || 'Error',
+    stack: error?.stack || null,
+    ...extra,
+  }
+}
+
+function postFailure(id, errorDetail) {
+  self.postMessage({
+    id,
+    success: false,
+    error: `${errorDetail.phase}: ${errorDetail.message}`,
+    errorDetail,
+  })
+}
 
 function normalizeStepBuffer(buffer) {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
@@ -48,10 +68,14 @@ async function initOcct() {
 
 self.onmessage = async (event) => {
   const { id, buffer } = event.data || {}
+  currentRequestId = id
+  let phase = 'init_occt'
 
   try {
     const occt = await initOcct()
+    phase = 'normalize_step_buffer'
     const fileBuffer = normalizeStepBuffer(buffer)
+    phase = 'read_step_file'
     const result = occt.ReadStepFile(fileBuffer, null)
 
     if (!result?.success) {
@@ -63,6 +87,7 @@ self.onmessage = async (event) => {
       throw new Error('Geen geometrie gevonden in STEP bestand')
     }
 
+    phase = 'convert_meshes'
     let totalVertices = 0
     let totalTriangles = 0
     const transferables = []
@@ -89,6 +114,7 @@ self.onmessage = async (event) => {
       }
     })
 
+    phase = 'post_meshes'
     self.postMessage({
       id,
       success: true,
@@ -98,10 +124,30 @@ self.onmessage = async (event) => {
       meshCount: meshes.length,
     }, transferables)
   } catch (error) {
-    self.postMessage({
-      id,
-      success: false,
-      error: error?.message || String(error),
-    })
+    postFailure(id, serializeError(error, phase || 'unknown'))
+  } finally {
+    currentRequestId = null
   }
 }
+
+self.addEventListener('error', (event) => {
+  if (currentRequestId == null) return
+  postFailure(
+    currentRequestId,
+    serializeError(
+      event?.error || new Error(event?.message || 'Onverwachte worker fout'),
+      'worker_error',
+      {
+        filename: event?.filename || null,
+        lineno: event?.lineno || null,
+        colno: event?.colno || null,
+      },
+    ),
+  )
+})
+
+self.addEventListener('unhandledrejection', (event) => {
+  if (currentRequestId == null) return
+  const reason = event?.reason instanceof Error ? event.reason : new Error(String(event?.reason || 'Promise rejection'))
+  postFailure(currentRequestId, serializeError(reason, 'unhandled_rejection'))
+})
