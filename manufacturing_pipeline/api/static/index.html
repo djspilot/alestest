@@ -196,17 +196,27 @@
 
   async function downloadArtifact(event, url, filename) {
     event.preventDefault();
+    const errEl = document.getElementById('errorMsg');
     try {
       const r = await fetch(url, { headers: headers() });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (r.status === 401) throw new Error('401 — Vul een geldige API key in.');
+      if (!r.ok) {
+        let detail = `HTTP ${r.status}`;
+        try { detail = (await r.json()).detail || detail; } catch {}
+        throw new Error(detail);
+      }
       const blob = await r.blob();
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = filename;
+      a.style.display = 'none';
+      document.body.appendChild(a);
       a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 10000);
+      errEl.style.display = 'none';
     } catch (e) {
-      document.getElementById('errorMsg').textContent = `Download mislukt: ${e.message}`;
+      errEl.style.display = '';
+      errEl.textContent = `Download mislukt: ${e.message}`;
     }
   }
 
