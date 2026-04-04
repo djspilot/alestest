@@ -4,12 +4,148 @@ This module exports analysis results to XML format compatible with
 ALES ERP system and Spaceclaim/AutoPOL format.
 """
 
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 import os
 import sys
 import re
+
+
+# ---------------------------------------------------------------------------
+# Pure-Python XML builder — no pyexpat / _elementtree dependency.
+# Provides the same Element/SubElement/tostring/indent API used below.
+# ---------------------------------------------------------------------------
+class _Elem:
+    """Minimal ET.Element work-alike that serialises without pyexpat."""
+    __slots__ = ("tag", "text", "tail", "attrib", "_children")
+
+    def __init__(self, tag: str, attrib: dict | None = None):
+        self.tag = tag
+        self.text: str | None = None
+        self.tail: str | None = None
+        self.attrib: dict = attrib or {}
+        self._children: list["_Elem"] = []
+
+    def append(self, child: "_Elem") -> None:
+        self._children.append(child)
+
+    def __iter__(self):
+        return iter(self._children)
+
+    def __len__(self):
+        return len(self._children)
+
+    def find(self, tag: str) -> "_Elem | None":
+        for c in self._children:
+            if c.tag == tag:
+                return c
+        return None
+
+    def findall(self, tag: str) -> "list[_Elem]":
+        return [c for c in self._children if c.tag == tag]
+
+    def findtext(self, tag: str, default: str = "") -> str:
+        child = self.find(tag)
+        return child.text if child is not None and child.text is not None else default
+
+    def get(self, key: str, default=None):
+        return self.attrib.get(key, default)
+
+    def getroot(self) -> "_Elem":
+        return self
+
+
+def _xml_escape(s: str) -> str:
+    return (str(s)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
+def _serialize(elem: _Elem, indent: str, level: int) -> list[str]:
+    pad = indent * level
+    parts: list[str] = [pad, "<", elem.tag]
+    for k, v in elem.attrib.items():
+        parts += [" ", k, '="', _xml_escape(v), '"']
+    if not elem._children and not elem.text:
+        parts.append(" />")
+    else:
+        parts.append(">")
+        if elem._children:
+            parts.append("\n")
+            for child in elem._children:
+                parts.extend(_serialize(child, indent, level + 1))
+            parts += [pad, "</", elem.tag, ">"]
+        else:
+            parts += [_xml_escape(elem.text or ""), "</", elem.tag, ">"]
+    parts.append("\n")
+    return parts
+
+
+class _ET:
+    """Drop-in namespace for xml.etree.ElementTree usage in this module."""
+    Element = _Elem
+
+    @staticmethod
+    def SubElement(parent: _Elem, tag: str, attrib: dict | None = None) -> _Elem:
+        child = _Elem(tag, attrib)
+        parent.append(child)
+        return child
+
+    @staticmethod
+    def indent(elem: _Elem, space: str = "  ", level: int = 0) -> None:
+        pass  # handled inside _serialize
+
+    @staticmethod
+    def tostring(elem: _Elem, encoding: str = "unicode") -> str:
+        return "".join(_serialize(elem, "  ", 0))
+
+    @staticmethod
+    def parse(path) -> _Elem:
+        """Minimal XML parser using regex — no pyexpat needed."""
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+        root: _Elem | None = None
+        stack: list[_Elem] = []
+        # Match opening tags, self-closing tags, closing tags, and text
+        for m in re.finditer(
+            r'<\?[^>]*\?>|<!--.*?-->|<(/?)([A-Za-z_][\w.-]*)([^>]*)(/?)>|([^<]+)',
+            text, re.DOTALL
+        ):
+            pi, closing, tag, attrs_raw, self_close, text_node = (
+                m.group(0).startswith("<?"),
+                m.group(1),
+                m.group(2),
+                m.group(3),
+                m.group(4),
+                m.group(5),
+            )
+            if pi or m.group(0).startswith("<!--"):
+                continue
+            if text_node is not None:
+                if stack and text_node.strip():
+                    stack[-1].text = (stack[-1].text or "") + text_node
+                continue
+            if closing:
+                if stack:
+                    stack.pop()
+                continue
+            # Opening tag
+            attrib: dict[str, str] = {}
+            for am in re.finditer(r'([\w.-]+)\s*=\s*"([^"]*)"', attrs_raw or ""):
+                attrib[am.group(1)] = am.group(2)
+            elem = _Elem(tag, attrib)
+            if stack:
+                stack[-1].append(elem)
+            else:
+                root = elem
+            if not self_close:
+                stack.append(elem)
+        return root or _Elem("root")  # type: ignore[return-value]
+
+
+ET = _ET()
+# ---------------------------------------------------------------------------
 
 # Add manufacturing_pipeline to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
