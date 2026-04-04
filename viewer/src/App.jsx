@@ -65,11 +65,32 @@ function AppContent() {
     const urlKey = params.get('key') || pipeline.pipelineApiKey
     viewer.setError(null)
 
-    fetchFileAsBrowserFile(
-      `${apiBase}/api/v1/jobs/${jobId}/step`,
-      fileName,
-      { headers: getApiKeyHeaders(urlKey) },
-    )
+    const headers = getApiKeyHeaders(urlKey)
+
+    fetch(`${apiBase}/api/v1/jobs/${jobId}`, { headers })
+      .then(async (response) => {
+        if (!response.ok) {
+          let detail = ''
+          try {
+            const payload = await response.json()
+            detail = payload?.detail || ''
+          } catch {
+            detail = await response.text()
+          }
+          throw new Error(detail || `${response.status} ${response.statusText}`)
+        }
+        return response.json()
+      })
+      .then((job) => {
+        if (!job?.source_step_available) {
+          throw new Error('Bron STEP bestand is niet meer beschikbaar voor deze job.')
+        }
+        return fetchFileAsBrowserFile(
+          `${apiBase}/api/v1/jobs/${jobId}/step`,
+          fileName,
+          { headers },
+        )
+      })
       .then((file) => viewer.handleFile(file))
       .catch((err) => viewer.setError(`STEP bestand laden mislukt: ${err.message}`))
   }, [])

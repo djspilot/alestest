@@ -12,7 +12,8 @@ UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "/tmp/manufacturing-uploads")
 MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "100"))
 
 # Taakinstellingen
-JOB_TTL_SECONDS = int(os.environ.get("JOB_TTL_SECONDS", "3600"))
+# Default to one year so uploaded sources and hot job cache remain reusable long-term.
+JOB_TTL_SECONDS = int(os.environ.get("JOB_TTL_SECONDS", "31536000"))
 
 # Databasepad voor persistente taakhistorie
 DB_PATH = os.environ.get("DB_PATH", os.path.join(

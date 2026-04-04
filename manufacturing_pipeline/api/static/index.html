@@ -681,9 +681,11 @@
     }
     if (job.error) html += detailItem('Fout', job.error);
     html += '</div>';
-    if (job.status === 'completed') {
+    if (job.status === 'completed' && job.source_step_available) {
       const viewerUrl = buildViewerUrl(job.job_id, res.file);
       html += `<a class="viewer-btn" href="${escapeHtml(viewerUrl)}" target="_blank" rel="noopener">🔬 Bekijk in 3D Viewer</a>`;
+    } else if (job.status === 'completed') {
+      html += '<div class="detail-muted">3D Viewer niet beschikbaar: bron STEP bestand ontbreekt.</div>';
     }
     html += '</div>';
 

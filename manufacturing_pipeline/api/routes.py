@@ -3,6 +3,7 @@
 import csv
 import collections
 import hashlib
+import json
 import io
 import logging
 import os
@@ -124,6 +125,20 @@ def _build_unfold_status(job) -> UnfoldStatus:
         error=getattr(job, "unfold_error", None),
         result=UnfoldResult(**unfold_payload) if unfold_payload else None,
     )
+
+
+def _source_step_available(job) -> bool:
+    return bool(getattr(job, "file_path", None)) and os.path.exists(job.file_path)
+
+
+def _build_request_fingerprint(file_hash: str, use_aag: bool, disable_stages: set[str]) -> str:
+    payload = {
+        "file_hash": file_hash,
+        "aag": bool(use_aag),
+        "disable_stages": sorted(disable_stages),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _safe_download_stem(value: str | None, fallback: str = "result") -> str:
@@ -294,6 +309,17 @@ async def analyze(
             status_code=413, detail=f"File too large. Maximum: {MAX_FILE_SIZE_MB}MB"
         )
 
+    file_hash = hashlib.md5(content).hexdigest()
+    request_fingerprint = _build_request_fingerprint(file_hash, aag, merged_disable_stages)
+    reusable_job = jobs.find_reusable_job(request_fingerprint)
+    if reusable_job:
+        return JobCreated(
+            job_id=reusable_job.job_id,
+            status=reusable_job.status,
+            reused_existing=True,
+            created_at=reusable_job.created_at,
+        )
+
     # Save file to upload directory
     job_id = str(uuid.uuid4())
     job_dir = os.path.join(UPLOAD_DIR, job_id)
@@ -304,14 +330,14 @@ async def analyze(
         f.write(content)
 
     # Create job and queue analysis
-    file_hash = hashlib.md5(content).hexdigest()
     job = jobs.create(job_id, step_path,
                       file_name=file.filename or "upload.step",
                       file_hash=file_hash,
+                      request_fingerprint=request_fingerprint,
                       file_size_bytes=len(content))
     background_tasks.add_task(_run_analysis_job, job_id, step_path, aag, merged_disable_stages)
 
-    return JobCreated(job_id=job_id, created_at=job.created_at)
+    return JobCreated(job_id=job_id, status=job.status, created_at=job.created_at)
 
 
 @router.get("/jobs", response_model=JobListResponse)
@@ -360,6 +386,7 @@ async def get_job(
         created_at=job.created_at,
         started_at=job.started_at,
         completed_at=job.completed_at,
+        source_step_available=_source_step_available(job),
         timeline_summary=TimelineSummary(**summary_raw) if summary_raw else None,
         timeline_events=[TimelineEvent(**e) for e in timeline_raw],
         error=job.error,
@@ -475,6 +502,21 @@ async def download_job_bundle(job_id: str, bundle_name: str):
         return _build_unfold_zip(job)
 
     raise HTTPException(status_code=404, detail="Unknown download bundle")
+
+
+@router.get("/jobs/{job_id}/step")
+async def get_job_step_file(job_id: str):
+    """Download the original uploaded STEP file for a job."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not job.file_path or not os.path.exists(job.file_path):
+        raise HTTPException(status_code=404, detail="Source STEP file is no longer available")
+    return FileResponse(
+        job.file_path,
+        filename=job.file_name or f"{job_id}.step",
+        media_type="application/step",
+    )
 
 
 @router.get("/health", response_model=HealthResponse)

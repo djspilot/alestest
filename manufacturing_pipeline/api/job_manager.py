@@ -19,12 +19,14 @@ from manufacturing_pipeline.api.config import JOB_TTL_SECONDS, DB_PATH
 class Job:
     __slots__ = ("job_id", "status", "created_at", "started_at", "completed_at",
                  "result", "error", "file_path", "file_name", "file_hash",
+                 "request_fingerprint",
                  "file_size_bytes", "progress_events", "progress_summary",
                  "unfold_status", "unfold_requested_at", "unfold_started_at",
                  "unfold_completed_at", "unfold_result", "unfold_error")
 
     def __init__(self, job_id: str, file_path: str, file_name: str = "",
-                 file_hash: str = "", file_size_bytes: int = 0):
+                 file_hash: str = "", request_fingerprint: str = "",
+                 file_size_bytes: int = 0):
         self.job_id = job_id
         self.status = "queued"
         self.created_at = datetime.now(timezone.utc)
@@ -35,6 +37,7 @@ class Job:
         self.file_path = file_path
         self.file_name = file_name or os.path.basename(file_path)
         self.file_hash = file_hash
+        self.request_fingerprint = request_fingerprint
         self.file_size_bytes = file_size_bytes
         self.progress_events: list[dict] = []
         self.progress_summary: Optional[dict] = None
@@ -69,6 +72,7 @@ class JobManager:
                     file_path TEXT,
                     file_name TEXT NOT NULL,
                     file_hash TEXT,
+                    request_fingerprint TEXT,
                     file_size_bytes INTEGER,
                     status TEXT NOT NULL DEFAULT 'queued',
                     created_at TEXT NOT NULL,
@@ -92,6 +96,8 @@ class JobManager:
                 conn.execute("ALTER TABLE api_jobs ADD COLUMN unfold_status TEXT NOT NULL DEFAULT 'idle'")
             if "file_path" not in existing_columns:
                 conn.execute("ALTER TABLE api_jobs ADD COLUMN file_path TEXT")
+            if "request_fingerprint" not in existing_columns:
+                conn.execute("ALTER TABLE api_jobs ADD COLUMN request_fingerprint TEXT")
             if "unfold_requested_at" not in existing_columns:
                 conn.execute("ALTER TABLE api_jobs ADD COLUMN unfold_requested_at TEXT")
             if "unfold_started_at" not in existing_columns:
@@ -111,6 +117,8 @@ class JobManager:
                     ON api_jobs(created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_api_jobs_file_hash
                     ON api_jobs(file_hash);
+                CREATE INDEX IF NOT EXISTS idx_api_jobs_request_fingerprint
+                    ON api_jobs(request_fingerprint);
             """)
             conn.commit()
         finally:
@@ -149,6 +157,7 @@ class JobManager:
         job.job_id = row["job_id"]
         job.file_name = row["file_name"] or ""
         job.file_hash = row["file_hash"] or ""
+        job.request_fingerprint = row["request_fingerprint"] or ""
         job.file_size_bytes = row["file_size_bytes"] or 0
         job.status = row["status"]
         job.created_at = self._str_to_dt(row["created_at"])
@@ -174,24 +183,53 @@ class JobManager:
     # ------------------------------------------------------------------
 
     def create(self, job_id: str, file_path: str, file_name: str = "",
-               file_hash: str = "", file_size_bytes: int = 0) -> Job:
-        job = Job(job_id, file_path, file_name, file_hash, file_size_bytes)
+               file_hash: str = "", request_fingerprint: str = "",
+               file_size_bytes: int = 0) -> Job:
+        job = Job(job_id, file_path, file_name, file_hash, request_fingerprint, file_size_bytes)
         with self._lock:
             self._jobs[job_id] = job
         conn = self._get_conn()
         try:
             conn.execute(
                 """INSERT INTO api_jobs
-                   (job_id, file_path, file_name, file_hash, file_size_bytes, status, created_at,
+                   (job_id, file_path, file_name, file_hash, request_fingerprint, file_size_bytes, status, created_at,
                     unfold_status)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (job_id, file_path, job.file_name, file_hash, file_size_bytes,
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (job_id, file_path, job.file_name, file_hash, request_fingerprint, file_size_bytes,
                  "queued", self._dt_to_str(job.created_at), "idle")
             )
             conn.commit()
         finally:
             conn.close()
         return job
+
+    def find_reusable_job(self, request_fingerprint: str) -> Optional[Job]:
+        """Return the latest reusable job for an identical request."""
+        if not request_fingerprint:
+            return None
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                """SELECT *
+                   FROM api_jobs
+                   WHERE request_fingerprint = ?
+                     AND status IN ('queued', 'processing', 'completed')
+                   ORDER BY
+                     CASE status
+                       WHEN 'completed' THEN 0
+                       WHEN 'processing' THEN 1
+                       WHEN 'queued' THEN 2
+                       ELSE 3
+                     END,
+                     created_at DESC
+                   LIMIT 1""",
+                (request_fingerprint,),
+            ).fetchone()
+            if not row:
+                return None
+            return self._row_to_job(row)
+        finally:
+            conn.close()
 
     def get(self, job_id: str) -> Optional[Job]:
         """Get job: check in-memory first, fall back to SQLite."""
@@ -360,6 +398,7 @@ class JobManager:
                     "file_hash": row["file_hash"],
                     "file_size_bytes": row["file_size_bytes"],
                     "status": row["status"],
+                    "source_step_available": bool(row["file_path"]) and os.path.exists(row["file_path"]),
                     "created_at": row["created_at"],
                     "started_at": row["started_at"],
                     "completed_at": row["completed_at"],

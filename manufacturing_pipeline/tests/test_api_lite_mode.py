@@ -4,6 +4,7 @@ Verifieert dat de API correct en graceful werkt op de VPS zonder FreeCAD.
 """
 
 import os
+import uuid
 import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
@@ -196,3 +197,93 @@ class TestJobEndpoints:
     def test_stats_endpoint_returns_200(self):
         response = self.client.get("/api/v1/stats")
         assert response.status_code == 200
+
+    def test_analyze_reuses_existing_identical_request(self, tmp_path):
+        from manufacturing_pipeline.api import routes as routes_module
+
+        content = f"ISO-10303-21; duplicate-test {uuid.uuid4()}".encode("utf-8")
+        call_counter = {"count": 0}
+
+        def fake_run_step_analysis(step_path, use_aag, progress_callback, disable_stages):
+            call_counter["count"] += 1
+            return {
+                "file": os.path.basename(step_path),
+                "success": True,
+                "category": "plaatwerk",
+            }
+
+        with patch.object(routes_module, "UPLOAD_DIR", str(tmp_path)):
+            with patch.object(routes_module, "run_step_analysis", side_effect=fake_run_step_analysis):
+                first = self.client.post(
+                    "/api/v1/analyze",
+                    files={"file": ("dedupe.step", content, "application/step")},
+                )
+                second = self.client.post(
+                    "/api/v1/analyze",
+                    files={"file": ("dedupe.step", content, "application/step")},
+                )
+
+        assert first.status_code == 202
+        assert second.status_code == 202
+
+        first_payload = first.json()
+        second_payload = second.json()
+        assert first_payload["reused_existing"] is False
+        assert second_payload["reused_existing"] is True
+        assert second_payload["job_id"] == first_payload["job_id"]
+        assert second_payload["status"] == "completed"
+        assert call_counter["count"] == 1
+
+    def test_analyze_does_not_reuse_when_analysis_options_differ(self, tmp_path):
+        from manufacturing_pipeline.api import routes as routes_module
+
+        content = f"ISO-10303-21; options-test {uuid.uuid4()}".encode("utf-8")
+
+        def fake_run_step_analysis(step_path, use_aag, progress_callback, disable_stages):
+            return {
+                "file": os.path.basename(step_path),
+                "success": True,
+                "category": "plaatwerk",
+                "used_aag": use_aag,
+                "disabled_stages": sorted(disable_stages),
+            }
+
+        with patch.object(routes_module, "UPLOAD_DIR", str(tmp_path)):
+            with patch.object(routes_module, "run_step_analysis", side_effect=fake_run_step_analysis):
+                first = self.client.post(
+                    "/api/v1/analyze",
+                    files={"file": ("options.step", content, "application/step")},
+                    params={"aag": "true"},
+                )
+                second = self.client.post(
+                    "/api/v1/analyze",
+                    files={"file": ("options.step", content, "application/step")},
+                    params={"aag": "false"},
+                )
+
+        assert first.status_code == 202
+        assert second.status_code == 202
+
+        first_payload = first.json()
+        second_payload = second.json()
+        assert first_payload["job_id"] != second_payload["job_id"]
+        assert first_payload["reused_existing"] is False
+        assert second_payload["reused_existing"] is False
+
+    def test_job_status_reports_source_step_available(self, tmp_path):
+        from manufacturing_pipeline.api.job_manager import jobs
+
+        step_path = tmp_path / "viewer-source.step"
+        step_path.write_text("ISO-10303-21;", encoding="utf-8")
+        job_id = f"test-job-{uuid.uuid4()}"
+        jobs.create(job_id, str(step_path), file_name="viewer-source.step")
+
+        response = self.client.get(f"/api/v1/jobs/{job_id}")
+        assert response.status_code == 200
+        assert response.json()["source_step_available"] is True
+
+        step_path.unlink()
+
+        response = self.client.get(f"/api/v1/jobs/{job_id}")
+        assert response.status_code == 200
+        assert response.json()["source_step_available"] is False

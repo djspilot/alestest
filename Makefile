@@ -88,7 +88,7 @@ setup-vps: _check-env
 	@echo "→ VPS inrichten..."
 	$(SSH) "bash -s" < deploy/scripts/vps-setup.sh
 	@echo "→ .env uploaden naar VPS..."
-	@printf "API_KEYS=$(API_KEY)\nMAX_FILE_SIZE_MB=100\nJOB_TTL_SECONDS=3600\nDISABLE_STAGES=unfold\n" | \
+	@printf "API_KEYS=$(API_KEY)\nMAX_FILE_SIZE_MB=100\nJOB_TTL_SECONDS=31536000\nDISABLE_STAGES=unfold\n" | \
 		$(SSH) "cat > /srv/alestest/.env"
 	@echo "→ docker-compose.prod.yml uploaden..."
 	$(SCP) docker-compose.prod.yml $(VPS_USER)@$(VPS_IP):/srv/alestest/docker-compose.prod.yml
@@ -156,7 +156,7 @@ restart: _check-env
 .PHONY: update-config
 update-config: _check-env
 	@echo "→ .env uploaden..."
-	@printf "API_KEYS=$(API_KEY)\nMAX_FILE_SIZE_MB=100\nJOB_TTL_SECONDS=3600\nDISABLE_STAGES=unfold\n" | \
+	@printf "API_KEYS=$(API_KEY)\nMAX_FILE_SIZE_MB=100\nJOB_TTL_SECONDS=31536000\nDISABLE_STAGES=unfold\n" | \
 		$(SSH) "cat > /srv/alestest/.env"
 	$(SSH) "$(COMPOSE) restart"
 	@echo "✓ Config bijgewerkt"

@@ -138,7 +138,8 @@ class UnfoldStatus(BaseModel):
 
 class JobCreated(BaseModel):
     job_id: str
-    status: Literal["queued"] = "queued"
+    status: Literal["queued", "processing", "completed", "failed"] = "queued"
+    reused_existing: bool = False
     created_at: datetime
 
 
@@ -148,6 +149,7 @@ class JobStatus(BaseModel):
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    source_step_available: bool = False
     timeline_summary: Optional[TimelineSummary] = None
     timeline_events: list[TimelineEvent] = Field(default_factory=list)
     result: Optional[AnalysisResult] = None
@@ -186,6 +188,7 @@ class JobListItem(BaseModel):
     file_hash: Optional[str] = None
     file_size_bytes: Optional[int] = None
     status: str
+    source_step_available: bool = False
     created_at: Optional[str] = None
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
