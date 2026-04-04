@@ -1343,7 +1343,9 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                     f.write(f"  Tegenzettingen (Down): {down_count}\n")
                     f.write("  Bend Sequence:\n")
                     for i, b in enumerate(bends):
-                        f.write(f"    {i+1}. {b['type'].upper()} {b['angle']:.1f}° (R={b['radius']:.1f}mm)\n")
+                        angle_str = f"{b['angle']:.1f}" if b.get('angle') is not None else "?"
+                        radius_str = f"{b['radius']:.1f}" if b.get('radius') is not None else "?"
+                        f.write(f"    {i+1}. {b.get('type', '?').upper()} {angle_str}° (R={radius_str}mm)\n")
 
                 if unfold_result.get('fold_details'):
                     f.write("  Fold Lines (Center X, Y, Z | Length):\n")

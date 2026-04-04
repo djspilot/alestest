@@ -240,9 +240,11 @@ function AppContent() {
               Terug naar API
             </button>
           )}
-          <button className="header-toggle-btn" onClick={() => setLeftPanelOpen((v) => !v)}>
-            {leftPanelOpen ? 'Verberg links' : 'Toon links'}
-          </button>
+          {!launchedFromJob && (
+            <button className="header-toggle-btn" onClick={() => setLeftPanelOpen((v) => !v)}>
+              {leftPanelOpen ? 'Verberg links' : 'Toon links'}
+            </button>
+          )}
           <button className="header-toggle-btn" onClick={() => setRightPanelOpen((v) => !v)}>
             {rightPanelOpen ? 'Verberg rechts' : 'Toon rechts'}
           </button>

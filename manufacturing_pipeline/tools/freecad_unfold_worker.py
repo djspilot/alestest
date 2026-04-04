@@ -143,6 +143,75 @@ def _run_new_unfolder(step_path: str, output_dir: str, part_name: str, k_factor:
             )
             dims = freecad_unfold._measure_flat_pattern_dimensions(unfolded_shape)
 
+            # Build fold_details and bends_logical from merged groups for viewer
+            fold_details = []
+            bends_logical = []
+            for grp in bend_line_groups:
+                gid = grp.get("id", len(fold_details) + 1)
+                members = grp.get("segment_indices", [])
+                axis = str(grp.get("axis", "X")).lower()
+                # Compute merged span from segments
+                span_min = None
+                span_max = None
+                center_x, center_y = 0.0, 0.0
+                n_segs = 0
+                for seg in bend_line_segments:
+                    if seg.get("index") in members:
+                        s_span = seg.get("axis_span")
+                        if s_span and len(s_span) >= 2:
+                            lo, hi = float(min(s_span[0], s_span[1])), float(max(s_span[0], s_span[1]))
+                            if span_min is None or lo < span_min:
+                                span_min = lo
+                            if span_max is None or hi > span_max:
+                                span_max = hi
+                        c = seg.get("center")
+                        if c and len(c) >= 2:
+                            center_x += float(c[0])
+                            center_y += float(c[1])
+                            n_segs += 1
+                if span_min is None:
+                    span_min = 0.0
+                if span_max is None:
+                    span_max = 0.0
+                if n_segs > 0:
+                    center_x /= n_segs
+                    center_y /= n_segs
+
+                # Calculate merged line length
+                if axis == "x":
+                    start = (span_min, center_y, 0.0)
+                    end = (span_max, center_y, 0.0)
+                else:
+                    start = (center_x, span_min, 0.0)
+                    end = (center_x, span_max, 0.0)
+                import math as _math
+                line_length = _math.dist(start, end)
+                center = ((start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0, 0.0)
+
+                fold_details.append({
+                    "id": gid,
+                    "length": round(line_length, 2),
+                    "center": center,
+                    "axis": axis,
+                    "axis_span": (span_min, span_max),
+                    "start": start,
+                    "end": end,
+                    "segment_indices": [idx + 1 for idx in members],
+                })
+
+                # Merged angles/radii are indexed by group number, not by segment index
+                group_idx = gid - 1  # gid is 1-based
+                angle = float(bend_angles[group_idx]) if group_idx >= 0 and group_idx < len(bend_angles) else None
+                radius = float(bend_radii[group_idx]) if group_idx >= 0 and group_idx < len(bend_radii) else None
+                bends_logical.append({
+                    "id": gid,
+                    "type": "up" if angle is not None and angle >= 0 else "down",
+                    "angle": abs(angle) if angle is not None else None,
+                    "radius": radius,
+                })
+
+            fold_lines_count = len(bend_line_groups) if bend_line_groups else len(fold_edges)
+
             return {
                 "success": True,
                 "error": None,
@@ -157,6 +226,9 @@ def _run_new_unfolder(step_path: str, output_dir: str, part_name: str, k_factor:
                 "bend_line_segments": bend_line_segments,
                 "bend_line_groups": bend_line_groups,
                 "raw_fold_lines": len(fold_edges),
+                "fold_lines": fold_lines_count,
+                "fold_details": fold_details,
+                "bends_logical": bends_logical,
                 "used_face_idx": face_idx,
                 "flat_step_path": flat_step_path,
                 "unfolder_variant": "new",
@@ -216,6 +288,88 @@ def _run_old_unfolder(step_path: str, output_dir: str, part_name: str, k_factor:
         "unfolder_variant": "old",
         "sheetmetal_source": result.get("sheetmetal_source"),
     }
+
+    # Build fold_details and bends_logical from old unfolder results for viewer
+    old_groups = result.get("bend_line_groups", [])
+    old_angles = result.get("bend_angles", [])
+    old_radii = result.get("bend_radii", [])
+    old_segments = result.get("bend_line_segments", [])
+    if old_groups:
+        fold_details = []
+        bends_logical = []
+        for grp in old_groups:
+            gid = grp.get("id", len(fold_details) + 1)
+            members = grp.get("segment_indices", [])
+            axis = str(grp.get("axis", "X")).lower()
+            # Compute merged span from segments
+            span_min = None
+            span_max = None
+            center_x, center_y = 0.0, 0.0
+            n_segs = 0
+            for seg in old_segments:
+                if seg.get("index") in members:
+                    s_span = seg.get("axis_span")
+                    if s_span and len(s_span) >= 2:
+                        lo, hi = float(min(s_span[0], s_span[1])), float(max(s_span[0], s_span[1]))
+                        if span_min is None or lo < span_min:
+                            span_min = lo
+                        if span_max is None or hi > span_max:
+                            span_max = hi
+                    c = seg.get("center")
+                    if c and len(c) >= 2:
+                        center_x += float(c[0])
+                        center_y += float(c[1])
+                        n_segs += 1
+            if span_min is None:
+                span_min = 0.0
+            if span_max is None:
+                span_max = 0.0
+            if n_segs > 0:
+                center_x /= n_segs
+                center_y /= n_segs
+
+            if axis == "x":
+                start = (span_min, center_y, 0.0)
+                end = (span_max, center_y, 0.0)
+            else:
+                start = (center_x, span_min, 0.0)
+                end = (center_x, span_max, 0.0)
+            import math as _math
+            line_length = _math.dist(start, end)
+            center = ((start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0, 0.0)
+
+            fold_details.append({
+                "id": gid,
+                "length": round(line_length, 2),
+                "center": center,
+                "axis": axis,
+                "axis_span": (span_min, span_max),
+                "start": start,
+                "end": end,
+                "segment_indices": [idx + 1 for idx in members],
+            })
+
+            # Merged angles/radii are indexed by group number, not by segment index
+            group_idx = gid - 1  # gid is 1-based
+            angle = float(old_angles[group_idx]) if group_idx >= 0 and group_idx < len(old_angles) else None
+            radius = float(old_radii[group_idx]) if group_idx >= 0 and group_idx < len(old_radii) else None
+            bends_logical.append({
+                "id": gid,
+                "type": "up" if angle is not None and angle >= 0 else "down",
+                "angle": abs(angle) if angle is not None else None,
+                "radius": radius,
+            })
+
+        payload["fold_lines"] = len(old_groups)
+        payload["fold_details"] = fold_details
+        payload["bends_logical"] = bends_logical
+    elif result.get("success") and old_angles:
+        # No groups but have angles — use raw bend count
+        payload["fold_lines"] = len(old_angles)
+        payload["bends_logical"] = [
+            {"id": i + 1, "type": "up" if a >= 0 else "down", "angle": abs(a), "radius": old_radii[i] if i < len(old_radii) else None}
+            for i, a in enumerate(old_angles)
+        ]
 
     flat_shape = result.get("flat_shape")
     if result.get("success") and flat_shape is not None:
