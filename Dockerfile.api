@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 USER $MAMBA_USER
 
-RUN micromamba create -y -n ales -c conda-forge python=3.11 pip && \
+RUN micromamba create -y -n ales -c conda-forge python=3.11 pip libexpat && \
     micromamba run -n ales pip install --no-cache-dir -r /app/requirements.txt && \
     micromamba run -n ales pip install --no-cache-dir uvicorn && \
     micromamba clean --all --yes
