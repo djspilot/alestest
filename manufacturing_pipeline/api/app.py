@@ -96,6 +96,33 @@ _static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_static_dir):
     app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
+# Serve embedded 3D viewer SPA at /viewer/
+_viewer_dir = os.path.join(os.path.dirname(__file__), "..", "..", "viewer-dist")
+_viewer_dir = os.path.normpath(_viewer_dir)
+
+
+@app.get("/viewer/{path:path}")
+async def viewer_spa(path: str):
+    """Serve the 3D viewer SPA (catch-all for client-side routing)."""
+    if not os.path.isdir(_viewer_dir):
+        return JSONResponse(status_code=404, content={"detail": "Viewer not built"})
+    # Try to serve the requested file
+    file_path = os.path.join(_viewer_dir, path)
+    if path and os.path.isfile(file_path):
+        return FileResponse(file_path)
+    # Fall back to index.html (SPA routing)
+    index = os.path.join(_viewer_dir, "index.html")
+    if os.path.exists(index):
+        return FileResponse(index)
+    return JSONResponse(status_code=404, content={"detail": "Viewer not found"})
+
+
+@app.get("/viewer")
+async def viewer_redirect():
+    """Redirect /viewer to /viewer/."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/viewer/")
+
 
 @app.get("/")
 async def root():

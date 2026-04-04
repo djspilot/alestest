@@ -1,3 +1,18 @@
+## ── Stage 0: Build viewer SPA ─────────────────────────────────────────────────
+FROM node:20-alpine AS viewer-build
+
+WORKDIR /viewer
+COPY viewer/package*.json /viewer/
+RUN npm ci
+
+COPY viewer /viewer
+
+ARG VITE_PIPELINE_API_BASE_URL
+ENV VITE_PIPELINE_API_BASE_URL=$VITE_PIPELINE_API_BASE_URL
+
+RUN npm run build
+
+## ── Stage 1: API runtime ──────────────────────────────────────────────────────
 FROM mambaorg/micromamba:1.5.10
 
 WORKDIR /app
@@ -22,6 +37,9 @@ RUN micromamba create -y -n freecad -c conda-forge freecad && \
     micromamba clean --all --yes
 
 COPY --chown=$MAMBA_USER:$MAMBA_USER . /app
+
+# Copy built viewer SPA into the API static directory
+COPY --from=viewer-build --chown=$MAMBA_USER:$MAMBA_USER /viewer/dist /app/viewer-dist
 
 ENV PYTHONUNBUFFERED=1
 ENV API_HOST=0.0.0.0
