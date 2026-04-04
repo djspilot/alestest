@@ -172,10 +172,10 @@
       : '';
     const links = [];
     if (unfoldResult?.flat_step_url) {
-      links.push(`<a class="artifact-link" href="${escapeHtml(unfoldResult.flat_step_url)}">Flat STEP</a>`);
+      links.push(`<a class="artifact-link" href="#" onclick="downloadArtifact(event,'${escapeHtml(unfoldResult.flat_step_url)}','flat.step')">Flat STEP</a>`);
     }
     if (unfoldResult?.dxf_url) {
-      links.push(`<a class="artifact-link" href="${escapeHtml(unfoldResult.dxf_url)}">DXF</a>`);
+      links.push(`<a class="artifact-link" href="#" onclick="downloadArtifact(event,'${escapeHtml(unfoldResult.dxf_url)}','flat.dxf')">DXF</a>`);
     }
 
     return `
@@ -191,6 +191,22 @@
         ${unfoldError}
       </div>
     `;
+  }
+
+  async function downloadArtifact(event, url, filename) {
+    event.preventDefault();
+    try {
+      const r = await fetch(url, { headers: headers() });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    } catch (e) {
+      document.getElementById('errorMsg').textContent = `Download mislukt: ${e.message}`;
+    }
   }
 
   async function requestUnfold(jobId) {
