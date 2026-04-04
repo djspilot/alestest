@@ -153,6 +153,45 @@ def _build_timeline(result: dict, analysis, total_holes: int, timing_data: dict 
             }
         )
 
+    # geometry_classified — mirrors the live profiler.emit() in runtime_analysis.py
+    # so the viewer's enrichment (event.type === 'geometry_classified') works on
+    # replay (job auto-load) as well as live polling.
+    classification_visuals = getattr(analysis, "classification_visuals", None)
+    if classification_visuals or result.get("category"):
+        events.append(
+            {
+                "type": "geometry_classified",
+                "stage": "Classify geometry",
+                "timestamp_ms": current_ms,
+                "status": "OK",
+                "payload": {
+                    **(classification_visuals or {}),
+                    "category": result.get("category"),
+                    "part_type": result.get("part_type"),
+                    "length": round(float(result.get("dimensions", {}).get("length", 0) or 0), 3),
+                    "width": round(float(result.get("dimensions", {}).get("width", 0) or 0), 3),
+                    "height": round(float(result.get("dimensions", {}).get("height", 0) or 0), 3),
+                    "bends_total": result.get("production", {}).get("bends_total", 0),
+                },
+            }
+        )
+
+    # holes_detected_pre_unfold — mirrors live profiler.emit() so the viewer's
+    # pre-unfold hole panel works on replay.
+    pre_unfold_visuals = getattr(analysis, "detected_hole_visuals_pre_unfold", None)
+    if pre_unfold_visuals:
+        events.append(
+            {
+                "type": "holes_detected_pre_unfold",
+                "stage": "Detect holes (pre-unfold)",
+                "timestamp_ms": current_ms,
+                "status": "OK",
+                "payload": {
+                    **pre_unfold_visuals,
+                },
+            }
+        )
+
     events.append(
         {
             "type": "holes_detected",
@@ -182,18 +221,43 @@ def _build_timeline(result: dict, analysis, total_holes: int, timing_data: dict 
     unfold_result = getattr(analysis, "unfold_result", None)
     if unfold_result:
         success = bool(unfold_result.get("success"))
+        # Use 'unfold_result' to match the live profiler's profiler.emit() type
+        # and the viewer's enrichment check (event.type === 'unfold_result').
         events.append(
             {
-                "type": "unfold_succeeded" if success else "unfold_failed",
+                "type": "unfold_result",
                 "stage": "Unfold",
                 "timestamp_ms": current_ms,
                 "status": "OK" if success else "FAIL",
                 "payload": {
+                    "success": success,
                     "flat_length": unfold_result.get("flat_length"),
                     "flat_width": unfold_result.get("flat_width"),
                     "fold_lines": unfold_result.get("fold_lines"),
+                    "fold_details": unfold_result.get("fold_details", []),
+                    "bends_logical": unfold_result.get("bends_logical", []),
                     "error": unfold_result.get("error"),
                     "error_details": unfold_result.get("error_details"),
+                    "skipped": unfold_result.get("skipped", False),
+                    "reason": unfold_result.get("reason"),
+                },
+            }
+        )
+    elif getattr(analysis, "is_sheet_metal", False) or (unfold_result is None and any(
+        s.get("name") == "Unfold" and s.get("status", "").upper() != "SKIP"
+        for s in steps
+    )):
+        # Emit an unfold_result event even when unfold_result is absent but the
+        # step ran (e.g. exception during unfold).
+        events.append(
+            {
+                "type": "unfold_result",
+                "stage": "Unfold",
+                "timestamp_ms": current_ms,
+                "status": "FAIL",
+                "payload": {
+                    "success": False,
+                    "error": "Unfold result not available",
                 },
             }
         )

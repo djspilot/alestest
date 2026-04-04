@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <title>STEP Loader Test</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #111; color: #0f0; }
+    #log { white-space: pre-wrap; margin-top: 16px; }
+    .ok { color: #0f0; }
+    .err { color: #f44; }
+    .info { color: #8af; }
+    input { margin: 12px 0; }
+  </style>
+</head>
+<body>
+  <h2>STEP Loader Debug Test</h2>
+  <p>1. Test of occt-import-js WASM laadt</p>
+  <p>2. Test of een STEP file geparsed kan worden</p>
+  <hr>
+  <button id="testWasm">Test 1: WASM laden</button>
+  <br>
+  <input type="file" id="stepFile" accept=".step,.stp,.STEP,.STP">
+  <button id="testParse" disabled>Test 2: STEP parsen</button>
+  <div id="log"></div>
+
+  <script>
+    const log = document.getElementById('log')
+    function logMsg(msg, cls = 'info') {
+      log.innerHTML += `<span class="${cls}">${new Date().toISOString().slice(11,23)} ${msg}</span>\n`
+    }
+
+    let occtInstance = null
+
+    document.getElementById('testWasm').onclick = async () => {
+      logMsg('--- Test 1: WASM laden ---')
+      try {
+        logMsg('occt-import-js script laden vanaf CDN...')
+
+        // The real test: can we initialize the WASM?
+        logMsg('Loading WASM binary from /occt-import-js.wasm ...')
+        const wasmResponse = await fetch('/occt-import-js.wasm')
+        if (!wasmResponse.ok) {
+          logMsg('WASM bestand NIET gevonden op /occt-import-js.wasm', 'err')
+          logMsg('Zorg dat public/occt-import-js.wasm bestaat', 'err')
+          return
+        }
+        const wasmSize = (await wasmResponse.clone().arrayBuffer()).byteLength
+        logMsg(`WASM bestand gevonden: ${(wasmSize / 1024 / 1024).toFixed(1)} MB`, 'ok')
+
+        logMsg('Initializing OpenCascade WASM engine...')
+
+        const moduleScript = document.createElement('script')
+        moduleScript.src = 'https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/occt-import-js.js'
+
+        await new Promise((resolve, reject) => {
+          moduleScript.onload = resolve
+          moduleScript.onerror = reject
+          document.head.appendChild(moduleScript)
+        })
+
+        logMsg('Script geladen, type van occtimportjs: ' + typeof globalThis.occtimportjs)
+
+        if (typeof globalThis.occtimportjs === 'function') {
+          occtInstance = await globalThis.occtimportjs({
+            locateFile: (name) => {
+              if (name.endsWith('.wasm')) return '/occt-import-js.wasm'
+              return name
+            }
+          })
+          logMsg('OpenCascade WASM GEINITIALISEERD!', 'ok')
+          logMsg('ReadStepFile beschikbaar: ' + (typeof occtInstance.ReadStepFile === 'function'), 'ok')
+          document.getElementById('testParse').disabled = false
+        } else {
+          logMsg('occtimportjs is niet een function: ' + typeof occtimportjs, 'err')
+        }
+      } catch (err) {
+        logMsg('FOUT: ' + err.message, 'err')
+        console.error(err)
+      }
+    }
+
+    let selectedFile = null
+    document.getElementById('stepFile').onchange = (e) => {
+      selectedFile = e.target.files[0]
+      if (selectedFile) logMsg('Bestand geselecteerd: ' + selectedFile.name + ' (' + (selectedFile.size / 1024).toFixed(1) + ' KB)')
+    }
+
+    document.getElementById('testParse').onclick = async () => {
+      if (!occtInstance) { logMsg('Eerst WASM laden!', 'err'); return }
+      if (!selectedFile) { logMsg('Eerst een STEP bestand selecteren!', 'err'); return }
+
+      logMsg('--- Test 2: STEP parsen ---')
+      try {
+        logMsg('Bestand lezen als ArrayBuffer...')
+        const buffer = await selectedFile.arrayBuffer()
+        logMsg(`Buffer grootte: ${buffer.byteLength} bytes`)
+
+        const fileBuffer = new Uint8Array(buffer)
+        logMsg('Uint8Array aangemaakt, eerste bytes: ' + Array.from(fileBuffer.slice(0, 20)).map(b => String.fromCharCode(b)).join(''))
+
+        logMsg('ReadStepFile aanroepen...')
+        const t0 = performance.now()
+        const result = occtInstance.ReadStepFile(fileBuffer, null)
+        const dt = performance.now() - t0
+
+        logMsg(`Parsing duurde: ${dt.toFixed(0)} ms`)
+        logMsg('Success: ' + result.success, result.success ? 'ok' : 'err')
+
+        if (result.success) {
+          logMsg('Aantal meshes: ' + result.meshes.length, 'ok')
+          let totalVerts = 0, totalTris = 0
+          result.meshes.forEach((m, i) => {
+            const verts = m.attributes.position.array.length / 3
+            const tris = m.index.array.length / 3
+            totalVerts += verts
+            totalTris += tris
+            const colorStr = m.color ? `rgb(${m.color.map(c => Math.round(c * 255)).join(',')})` : 'geen'
+            logMsg(`  Mesh ${i}: "${m.name || '?'}" — ${verts} vertices, ${tris} driehoeken, kleur: ${colorStr}`)
+          })
+          logMsg(`TOTAAL: ${totalVerts} vertices, ${totalTris} driehoeken`, 'ok')
+          logMsg('STEP PARSING GESLAAGD!', 'ok')
+        } else {
+          logMsg('STEP parsing MISLUKT', 'err')
+        }
+      } catch (err) {
+        logMsg('FOUT: ' + err.message, 'err')
+        console.error(err)
+      }
+    }
+  </script>
+</body>
+</html>

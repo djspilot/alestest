@@ -83,6 +83,7 @@ export function formatDeviation(value) {
 
 export function normalizeStageName(stage) {
   if (stage === 'Profile Router') return 'Classify geometry'
+  if (isPreUnfoldStageName(stage)) return PRE_UNFOLD_HOLES_STAGE
   if (stage === 'Detect holes' || stage === 'Unfold') return MERGED_HOLES_STAGE
   return stage || 'Onbekende stap'
 }

@@ -301,8 +301,14 @@ export function usePipeline() {
       if (isPreUnfoldStageName(event.stage) && event.type === 'holes_detected_pre_unfold') {
         visuals.holes_pre_unfold = { ...(visuals.holes_pre_unfold || {}), ...event.payload }
       }
-      if (event.stage === 'Unfold' && event.type === 'unfold_result') {
+      // Accept both 'unfold_result' (live profiler) and 'unfold_succeeded'/'unfold_failed'
+      // (older _build_timeline) so the viewer works in both live and replay paths.
+      if (event.stage === 'Unfold' && (event.type === 'unfold_result' || event.type === 'unfold_succeeded' || event.type === 'unfold_failed')) {
         visuals.unfold = { ...(visuals.unfold || {}), ...event.payload }
+      }
+      // bends_detected enriches classification with bend counts
+      if (event.stage === 'Classify geometry' && event.type === 'bends_detected') {
+        visuals.classification = { ...(visuals.classification || {}), bends: event.payload }
       }
     }
     return visuals
