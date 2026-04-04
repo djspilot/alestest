@@ -4,7 +4,7 @@ import {
   isPreUnfoldStageName,
   MERGED_HOLES_STAGE,
 } from '../pipelineUi'
-import { normalizeFoldId, isHiddenHoleCandidate } from '../lib/holes'
+import { getFoldSegmentId, normalizeFoldId, isHiddenHoleCandidate } from '../lib/holes'
 
 export function useSelection({ pipelineVisuals, flatMesh, backendMesh, groupedStages, pipelineEnabled, pipelineState }) {
   // Selection state
@@ -80,6 +80,7 @@ export function useSelection({ pipelineVisuals, flatMesh, backendMesh, groupedSt
       [
         ...(pipelineVisuals?.unfold?.fold_details || []).map((fold, idx) => normalizeFoldId(fold?.id ?? idx + 1)),
         ...(pipelineVisuals?.unfold?.bends_logical || []).map((bend, idx) => normalizeFoldId(bend?.id ?? idx + 1)),
+        ...(pipelineVisuals?.unfold?.bend_line_segments || []).map((segment, idx) => getFoldSegmentId(segment, idx)),
       ].filter((id) => id != null),
     )
     if (selectedFoldId != null && !foldIds.has(normalizeFoldId(selectedFoldId))) {

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react'
 import { formatDetailValue } from '../pipelineUi'
-import { normalizeFoldId } from '../lib/holes'
+import { getFoldSegmentId, normalizeFoldId } from '../lib/holes'
 
 export default function UnfoldPanel({ unfoldVisuals, selectedFoldId, onFoldSelect }) {
   const foldRows = useMemo(() => {
@@ -26,8 +26,32 @@ export default function UnfoldPanel({ unfoldVisuals, selectedFoldId, onFoldSelec
     })
   }, [unfoldVisuals])
 
+  const segmentRows = useMemo(() => {
+    const segments = unfoldVisuals?.bend_line_segments || []
+    const folds = unfoldVisuals?.fold_details || []
+    const bends = unfoldVisuals?.bends_logical || []
+    return segments.map((segment, index) => {
+      const segmentIndex = (Number(segment.index) || index) + 1
+      const detail = folds.find((fold) => (fold.segment_indices || []).includes(segmentIndex)) || {}
+      const logical = bends.find((bend) => normalizeFoldId(bend.id) === normalizeFoldId(detail.id)) || {}
+      return {
+        id: getFoldSegmentId(segment, index),
+        segmentIndex,
+        direction: logical.type || '–',
+        angle: logical.angle ?? null,
+        radius: logical.radius ?? null,
+        length: segment.length ?? detail.length ?? null,
+        center: segment.center ?? detail.center ?? null,
+        axis: String(segment.axis || detail.axis || '').toLowerCase() || null,
+        start: segment.start ?? detail.start ?? null,
+        end: segment.end ?? detail.end ?? null,
+        logicalFoldId: normalizeFoldId(detail.id || logical.id || null),
+      }
+    })
+  }, [unfoldVisuals])
+
   const normalizedSelectedFoldId = normalizeFoldId(selectedFoldId)
-  const selectedFold = foldRows.find((row) => row.id === normalizedSelectedFoldId) || null
+  const selectedFold = segmentRows.find((row) => row.id === normalizedSelectedFoldId) || foldRows.find((row) => row.id === normalizedSelectedFoldId) || null
 
   return (
     <div className="visual-stage-card">

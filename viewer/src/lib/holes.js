@@ -9,6 +9,12 @@ export function normalizeFoldId(value) {
   return Number.isFinite(numeric) ? numeric : String(value)
 }
 
+export function getFoldSegmentId(segment, fallbackIndex = 0) {
+  const rawIndex = Number(segment?.index)
+  const segmentIndex = Number.isFinite(rawIndex) ? rawIndex + 1 : fallbackIndex + 1
+  return `segment-${segmentIndex}`
+}
+
 export function isIrregularHole(hole) {
   const type = String(hole?.type || '').toLowerCase()
   const label = String(hole?.label || '').toLowerCase()
