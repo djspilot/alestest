@@ -229,14 +229,20 @@ class _PersistentFreeCADWorkerClient:
         env = _build_freecad_subprocess_env(self._sys_config)
         env["FREECAD_UNFOLD_MODE"] = "direct"
         env["FREECAD_UNFOLDER_VARIANT"] = _unfolder_variant_mode()
-        self._process = subprocess.Popen(
-            [freecad_python, "-m", "manufacturing_pipeline.tools.freecad_unfold_worker"],
+        popen_kwargs: dict = dict(
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             env=env,
             bufsize=1,
+        )
+        if sys.platform == "win32":
+            # Suppress the console window that Windows would otherwise open
+            popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+        self._process = subprocess.Popen(
+            [freecad_python, "-m", "manufacturing_pipeline.tools.freecad_unfold_worker"],
+            **popen_kwargs,
         )
         # FreeCAD may print non-JSON startup messages (e.g. "Sheet Metal workbench loaded")
         # before the JSON ready handshake — skip them.
@@ -554,6 +560,8 @@ unfolder_variant_mode = os.environ.get("FREECAD_UNFOLDER_VARIANT", "auto").strip
 
 if platform.system() == "Darwin":
     freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
+elif platform.system() == "Windows":
+    freecad_user_mod = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "FreeCAD", "Mod")
 else:
     freecad_user_mod = os.path.expanduser("~/.local/share/FreeCAD/Mod")
 

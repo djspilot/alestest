@@ -18,7 +18,7 @@ def _install_runtime_paths() -> None:
     for path in (
         os.environ.get("FREECAD_LIB", ""),
         os.environ.get("FREECAD_MOD", ""),
-        os.path.expanduser("~/Library/Application Support/FreeCAD/Mod") if sys.platform == "darwin" else os.path.expanduser("~/.local/share/FreeCAD/Mod"),
+        os.path.expanduser("~/Library/Application Support/FreeCAD/Mod") if sys.platform == "darwin" else (os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "FreeCAD", "Mod") if sys.platform == "win32" else os.path.expanduser("~/.local/share/FreeCAD/Mod")),
         VENDOR_ROOT,
         PIPELINE_ROOT,
     ):
