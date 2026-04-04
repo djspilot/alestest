@@ -384,6 +384,9 @@ class JobManager:
                             "thickness": full.get("thickness"),
                             "dimensions": full.get("dimensions"),
                             "production": full.get("production"),
+                            "is_assembly": full.get("is_assembly"),
+                            "solid_count": full.get("solid_count"),
+                            "parts": full.get("parts"),
                         }
                     except Exception:
                         pass

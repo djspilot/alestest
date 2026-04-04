@@ -174,6 +174,9 @@ class ResultSummary(BaseModel):
     thickness: Optional[float] = None
     dimensions: Optional[dict] = None
     production: Optional[dict] = None
+    is_assembly: Optional[bool] = None
+    solid_count: Optional[int] = None
+    parts: Optional[list[dict]] = None
 
 
 class JobListItem(BaseModel):
