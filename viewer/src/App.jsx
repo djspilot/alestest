@@ -407,6 +407,7 @@ function AppContent({
 
   // Handle part selection changes: update URL and trigger unfold reload
   const handlePartSelectionChange = useCallback((partIndex) => {
+    viewer.setModelInfo(null)
     setSelectedPartIndex(partIndex)
     selection.setFocusedStage(null)
     selection.setSelectedHoleId(null)

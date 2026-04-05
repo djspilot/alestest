@@ -4,7 +4,7 @@ import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import StepModel from './StepModel'
-import { isPreUnfoldStageName, MERGED_HOLES_STAGE, PRE_UNFOLD_HOLES_STAGE } from './pipelineUi'
+import { isDetectHolesStageName, isPreUnfoldStageName, isUnfoldStageName } from './pipelineUi'
 import { getFoldSegmentId, normalizeFoldId, isIrregularHole, isHiddenHoleCandidate } from './lib/holes'
 
 function axisVectorForKey(key) {
@@ -1367,6 +1367,8 @@ function BendLineOverlay({ bend, center, isSelected, onSelect }) {
 }
 
 function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSelect, drawPlate = false }) {
+  if (!modelInfo?.center) return null
+
   const length = Math.max(Number(unfoldVisuals?.flat_length) || 0, 40)
   const width = Math.max(Number(unfoldVisuals?.flat_width) || 0, 20)
   const bends = unfoldVisuals?.bends_logical || []
@@ -1592,7 +1594,7 @@ function StageOverlays({
   const center = modelInfo?.center
   if (!center || !visuals || !focusedStage) return null
 
-  const isHoleStage = focusedStage === MERGED_HOLES_STAGE || isPreUnfoldStageName(focusedStage)
+  const isHoleStage = isDetectHolesStageName(focusedStage) || isPreUnfoldStageName(focusedStage)
   const holeItems = holeVisuals?.items || []
   const visibleHoleVisuals = showHiddenHoles ? holeItems : holeItems.filter((hole) => !isHiddenHoleCandidate(hole))
   const hiddenHoleVisuals = holeItems.filter(
@@ -1686,7 +1688,7 @@ function StageOverlays({
         <ManualProbeOverlay probe={selectedProbe} center={center} modelInfo={modelInfo} />
       )}
 
-      {focusedStage === MERGED_HOLES_STAGE &&
+      {isUnfoldStageName(focusedStage) &&
         !useFlatView &&
         bend3dItems.map((bend) => (
           <BendLineOverlay
@@ -1823,7 +1825,7 @@ export default function ViewerCanvas({
         materialPreset={materialPreset}
       />
 
-      {useFlatView && focusedStage === MERGED_HOLES_STAGE && backendVisuals?.unfold?.success && (
+      {useFlatView && isUnfoldStageName(focusedStage) && backendVisuals?.unfold?.success && modelInfo?.center && (
         <UnfoldFoldOverlay
           unfoldVisuals={backendVisuals.unfold}
           modelInfo={modelInfo || null}
