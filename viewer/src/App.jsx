@@ -1,7 +1,6 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Dropzone from './Dropzone'
 import DebugPanel from './DebugPanel'
-import Sidebar from './Sidebar'
 import StageDetailsPanel from './StageDetailsPanel'
 import { PipelineProvider, usePipelineContext } from './context/PipelineContext'
 import { SelectionProvider, useSelectionContext } from './context/SelectionContext'
@@ -60,7 +59,6 @@ function AppContent() {
   const launchParams = launchParamsRef.current
   const launchedFromJob = launchParams.has('job')
   const launchApiBase = launchParams.get('api') || getDefaultPipelineApiBase()
-  const [leftPanelOpen, setLeftPanelOpen] = useState(() => !launchedFromJob)
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [debugPanelOpen, setDebugPanelOpen] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
@@ -324,10 +322,19 @@ function AppContent() {
               Terug naar API
             </button>
           )}
-          {!launchedFromJob && (
-            <button className="header-toggle-btn" onClick={() => setLeftPanelOpen((v) => !v)}>
-              {leftPanelOpen ? 'Verberg links' : 'Toon links'}
-            </button>
+          {viewer.fileName && (
+            <select
+              className="header-toggle-btn"
+              value={materialPreset}
+              onChange={(event) => setMaterialPreset(event.target.value)}
+              title="Materiaalweergave"
+            >
+              {materialOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           )}
           <button className="header-toggle-btn" onClick={() => setRightPanelOpen((v) => !v)}>
             {rightPanelOpen ? 'Verberg rechts' : 'Toon rechts'}
@@ -364,45 +371,6 @@ function AppContent() {
       )}
 
       <div className="main-content">
-        {leftPanelOpen && (
-          <Sidebar
-            modelInfo={viewer.modelInfo}
-            fileName={viewer.fileName}
-            onReset={resetViewer}
-            pipelineEnabled={pipeline.pipelineEnabled}
-            onPipelineToggle={pipeline.setPipelineEnabled}
-            aagFallbackEnabled={pipeline.aagFallbackEnabled}
-            onAagFallbackToggle={pipeline.handleAagFallbackToggle}
-            disabledStages={pipeline.disabledStages}
-            onStageToggle={pipeline.handleStageToggle}
-            pipelineApiBase={pipeline.pipelineApiBase}
-            onPipelineApiBaseChange={pipeline.setPipelineApiBase}
-            pipelineApiKey={pipeline.pipelineApiKey}
-            onPipelineApiKeyChange={pipeline.setPipelineApiKey}
-            pipelineState={pipeline.pipelineState}
-            groupedStages={pipeline.groupedStages}
-            summary={pipeline.summary}
-            pipelineResult={pipeline.pipelineState?.result}
-            totalStepsHint={totalStepsHint}
-            completedStepCount={completedStepCount}
-            liveTotalElapsed={liveTotalElapsed}
-            liveActiveElapsed={liveActiveElapsed}
-            selectedStageIndex={selection.selectedStageIndex}
-            onSelectStageIndex={selection.handleSelectStageIndex}
-            onRetryPipeline={() => {
-              if (!viewer.sourceFile) return
-              pipeline.setPipelineState(EMPTY_PIPELINE_STATE)
-              void pipeline.startPipeline(viewer.sourceFile)
-            }}
-            pipelineStatus={pipeline.pipelineState.status}
-            pipelineDebug={pipeline.pipelineState.debug || null}
-            onResetPipelineApiBase={() => pipeline.setPipelineApiBase(getDefaultPipelineApiBase())}
-            materialPreset={materialPreset}
-            materialOptions={materialOptions}
-            onMaterialPresetChange={setMaterialPreset}
-          />
-        )}
-
         <div className="viewer-container">
           {!viewer.fileBuffer && !selection.activeMesh && !viewer.loading && (
             <Dropzone
