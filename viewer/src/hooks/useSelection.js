@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  isDetectHolesStageName,
   isMergedHolesStageName,
   isPreUnfoldStageName,
   MERGED_HOLES_STAGE,
@@ -29,7 +30,7 @@ export function useSelection({ pipelineVisuals, flatMesh, backendMesh, groupedSt
   const selectedFeature = selectedHole || selectedProbe
   const selectedHoleSource = selectedFeature?.source || null
   const useFlatView =
-    focusedStage === MERGED_HOLES_STAGE &&
+    isMergedHolesStageName(focusedStage) &&
     (unfoldSuccess || selectedHoleSource === 'flat' || (!selectedHoleSource && holeSource === 'flat')) &&
     Boolean(flatMesh)
   const activeMesh = useFlatView ? flatMesh : backendMesh
@@ -39,7 +40,7 @@ export function useSelection({ pipelineVisuals, flatMesh, backendMesh, groupedSt
     !null &&
     ['checking', 'queued', 'processing'].includes(pipelineState.status)
   const parseMode = shouldWaitForBackendMesh ? 'backend-only' : 'auto'
-  const canUseProbeMode = focusedStage === MERGED_HOLES_STAGE
+  const canUseProbeMode = isDetectHolesStageName(focusedStage)
 
   // Effects to clamp indices
   useEffect(() => {

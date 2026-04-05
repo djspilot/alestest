@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { getPartTimelineEvents } from '../pipelineUi'
+import { getPartTimelineEvents, isDetectHolesStageName, isUnfoldStageName } from '../pipelineUi'
 
 describe('getPartTimelineEvents', () => {
   it('prefers timeline_events when present', () => {
@@ -18,5 +18,19 @@ describe('getPartTimelineEvents', () => {
 
   it('returns an empty list when no timeline is available', () => {
     expect(getPartTimelineEvents({})).toEqual([])
+  })
+})
+
+describe('stage helpers', () => {
+  it('recognizes raw detect holes stages', () => {
+    expect(isDetectHolesStageName('Detect holes')).toBe(true)
+    expect(isDetectHolesStageName('Unfold / Detect holes')).toBe(true)
+    expect(isDetectHolesStageName('Unfold')).toBe(false)
+  })
+
+  it('recognizes raw unfold stages', () => {
+    expect(isUnfoldStageName('Unfold')).toBe(true)
+    expect(isUnfoldStageName('Unfold / Detect holes')).toBe(true)
+    expect(isUnfoldStageName('Detect holes')).toBe(false)
   })
 })

@@ -28,6 +28,16 @@ export function isMergedHolesStageName(stage) {
   )
 }
 
+export function isDetectHolesStageName(stage) {
+  const normalized = String(stage || '').toLowerCase()
+  return stage === MERGED_HOLES_STAGE || normalized === 'detect holes' || normalized === 'unfold / detect holes'
+}
+
+export function isUnfoldStageName(stage) {
+  const normalized = String(stage || '').toLowerCase()
+  return stage === MERGED_HOLES_STAGE || normalized === 'unfold' || normalized === 'unfold / detect holes'
+}
+
 export function summarizePayload(payload) {
   if (!payload || typeof payload !== 'object') return ''
 

@@ -3,10 +3,10 @@ import Dropzone from './Dropzone'
 import DebugPanel from './DebugPanel'
 import StageDetailsPanel from './StageDetailsPanel'
 import { PipelineProvider, usePipelineContext } from './context/PipelineContext'
-import { SelectionProvider, useSelectionContext } from './context/SelectionContext'
+import { useSelection } from './hooks/useSelection'
 import { useViewer } from './hooks/useViewer'
 import { fetchFileAsBrowserFile } from './lib/files'
-import { normalizeStageName, MERGED_HOLES_STAGE, getPartTimelineEvents } from './pipelineUi'
+import { normalizeStageName, MERGED_HOLES_STAGE, getPartTimelineEvents, groupEventsByStage } from './pipelineUi'
 import { getApiKeyHeaders, getDefaultPipelineApiBase } from './pipelineClient'
 import { getViewerMaterialPresets, getViewerRenderModes } from './StepModel'
 
@@ -37,6 +37,32 @@ function mergeJobWithUnfoldResult(job, unfoldStatus) {
           visuals,
         }
       : job.result,
+  }
+}
+
+function mergePartWithUnfoldResult(result, partIndex, unfoldStatus) {
+  const unfoldResult = normalizeUnfoldVisuals(unfoldStatus?.result)
+  if (!result?.is_assembly || partIndex == null || !unfoldResult) return result
+
+  const parts = [...(result.parts || [])]
+  const currentPart = parts[partIndex]
+  if (!currentPart) return result
+
+  parts[partIndex] = {
+    ...currentPart,
+    unfold: unfoldStatus,
+    visuals: {
+      ...(currentPart.visuals || {}),
+      unfold: {
+        ...(currentPart.visuals?.unfold || {}),
+        ...unfoldResult,
+      },
+    },
+  }
+
+  return {
+    ...result,
+    parts,
   }
 }
 
@@ -82,7 +108,15 @@ function ViewerCanvasFallback() {
   )
 }
 
-function AppContent() {
+function AppContent({
+  selectedPartIndex,
+  setSelectedPartIndex,
+  effectivePipelineVisuals,
+  effectiveGroupedStages,
+  effectiveSummary,
+  effectiveBackendMesh,
+  effectiveFlatMesh,
+}) {
   const controlsRef = useRef()
   const launchParamsRef = useRef(null)
   if (!launchParamsRef.current) {
@@ -132,9 +166,14 @@ function AppContent() {
 
   // Pipeline hook manages all pipeline state + API communication
   const pipeline = usePipelineContext()
-
-  // Selection hook manages hole/fold/probe/stage selection
-  const selection = useSelectionContext()
+  const selection = useSelection({
+    pipelineVisuals: effectivePipelineVisuals,
+    flatMesh: effectiveFlatMesh,
+    backendMesh: effectiveBackendMesh,
+    groupedStages: effectiveGroupedStages,
+    pipelineEnabled: pipeline.pipelineEnabled,
+    pipelineState: pipeline.pipelineState,
+  })
 
   // Viewer hook manages file buffer, loading, error, model info
   const viewer = useViewer({
@@ -332,13 +371,13 @@ function AppContent() {
   const liveTotalElapsed =
     pipeline.pipelineState?.status === 'processing' && pipeline.analysisStartedMs
       ? Math.max(0, (nowMs - pipeline.analysisStartedMs) / 1000)
-      : pipeline.summary?.total_elapsed_seconds
+      : effectiveSummary?.total_elapsed_seconds
   const liveActiveElapsed =
-    pipeline.pipelineState?.status === 'processing' && pipeline.summary?.active_stage && pipeline.activeStageStartedMs
+    pipeline.pipelineState?.status === 'processing' && effectiveSummary?.active_stage && pipeline.activeStageStartedMs
       ? Math.max(0, (nowMs - pipeline.activeStageStartedMs) / 1000)
-      : pipeline.summary?.active_stage_elapsed_seconds
-  const totalStepsHint = pipeline.summary?.total_steps_hint || pipeline.summary?.step_count || pipeline.groupedStages.length
-  const completedStepCount = pipeline.summary?.completed_step_count || 0
+      : effectiveSummary?.active_stage_elapsed_seconds
+  const totalStepsHint = effectiveSummary?.total_steps_hint || effectiveSummary?.step_count || effectiveGroupedStages.length
+  const completedStepCount = effectiveSummary?.completed_step_count || 0
   const useFlatView = selection.useFlatView
 
   const resetViewer = useCallback(() => {
@@ -367,6 +406,19 @@ function AppContent() {
 
   // Handle part selection changes: update URL and trigger unfold reload
   const handlePartSelectionChange = useCallback((partIndex) => {
+    setSelectedPartIndex(partIndex)
+    selection.setFocusedStage(null)
+    selection.setSelectedHoleId(null)
+    selection.setSelectedFoldId(null)
+    selection.setSelectedProbe(null)
+    selection.setProbeMode(false)
+    selection.setSelectedStageIndex(0)
+    selection.setSelectedEventIndex(0)
+
+    const parts = pipeline.pipelineState?.result?.parts || []
+    const selectedPart = partIndex != null ? parts[partIndex] || null : null
+    const solidIndex = Number.isInteger(selectedPart?.solid_index) ? selectedPart.solid_index : partIndex
+
     if (partIndex == null) {
       // Clear part selection from URL
       const params = new URLSearchParams(window.location.search)
@@ -376,36 +428,34 @@ function AppContent() {
     } else {
       // Update URL with part index
       const params = new URLSearchParams(window.location.search)
-      params.set('part', String(partIndex))
+      params.set('part', String(solidIndex))
       const newUrl = `${window.location.pathname}?${params.toString()}`
       window.history.replaceState({}, '', newUrl)
-      
-      // Reload unfold for this specific part
+
       const apiBase = launchApiBase || pipeline.pipelineApiBase || getDefaultPipelineApiBase()
       const jobId = launchParams.get('job')
-      if (jobId) {
+      const fileName = selectedPart?.file || selectedPart?.solid_name || `part_${partIndex + 1}.step`
+      if (jobId && selectedPart) {
         const headers = getApiKeyHeaders(pipeline.pipelineApiKey)
-        const unfoldUrl = `${apiBase}/api/v1/jobs/${jobId}/parts/${partIndex}/unfold`
+        const unfoldUrl = `${apiBase}/api/v1/jobs/${jobId}/parts/${solidIndex}/unfold`
+        const stepUrl = `${apiBase}/api/v1/jobs/${jobId}/parts/${solidIndex}/step`
+
+        fetchFileAsBrowserFile(stepUrl, fileName, { headers })
+          .then((file) => viewer.handleFile(file, { skipPipelineStart: true }))
+          .catch((err) => console.warn('Failed to load STEP for part:', err))
+
         fetch(unfoldUrl, { headers })
           .then(r => r.json())
           .then(unfoldStatus => {
-            // Merge unfold result into pipeline state
-            const job = pipeline.pipelineState
-            if (job && job.result) {
-              const mergedJob = mergeJobWithUnfoldResult(
-                { ...job, result: job.result },
-                unfoldStatus
-              )
-              pipeline.setPipelineState({
-                ...pipeline.pipelineState,
-                result: mergedJob.result,
-              })
-            }
+            pipeline.setPipelineState((prev) => ({
+              ...prev,
+              result: mergePartWithUnfoldResult(prev.result, partIndex, unfoldStatus),
+            }))
           })
           .catch(err => console.warn('Failed to load unfold for part:', err))
       }
     }
-  }, [launchParams, launchApiBase, pipeline, pipeline.pipelineApiKey])
+  }, [launchParams, launchApiBase, pipeline, pipeline.pipelineApiKey, selection, setSelectedPartIndex, viewer])
 
   const handleLoadDefaultStep = useCallback(async () => {
     setLoadingDefaultStep(true)
@@ -574,7 +624,7 @@ function AppContent() {
                 onDebug={viewer.pushDebugEvent}
                 parseMode={selection.parseMode}
                 modelInfo={viewer.modelInfo}
-                backendVisuals={pipeline.pipelineVisuals}
+                backendVisuals={effectivePipelineVisuals}
                 activeHoleVisuals={selection.activeHoleVisuals}
                 focusedStage={selection.focusedStage}
                 selectedHole={selection.selectedFeature}
@@ -598,10 +648,10 @@ function AppContent() {
 
         {rightPanelOpen && (
           <StageDetailsPanel
-            pipelineVisuals={pipeline.pipelineVisuals}
+            pipelineVisuals={effectivePipelineVisuals}
             pipelineResult={pipeline.pipelineState?.result}
-            groupedStages={pipeline.groupedStages}
-            summary={pipeline.summary}
+            groupedStages={effectiveGroupedStages}
+            summary={effectiveSummary}
             liveActiveElapsed={liveActiveElapsed}
             selectedStageIndex={selection.selectedStageIndex}
             selectedEventIndex={selection.selectedEventIndex}
@@ -617,8 +667,8 @@ function AppContent() {
             onShowHiddenHolesChange={selection.setShowHiddenHoles}
             highlightHiddenHoleLocations={selection.highlightHiddenHoleLocations}
             onHighlightHiddenHoleLocationsChange={selection.setHighlightHiddenHoleLocations}
-            onSelectPart={handlePartSelectionChange}
-            launchedPartIndex={launchedPartIndex}
+            selectedPartIndex={selectedPartIndex}
+            onSelectPartIndex={handlePartSelectionChange}
           />
         )}
 
@@ -637,18 +687,60 @@ function AppContent() {
 
 function AppWithSelectionProvider() {
   const pipeline = usePipelineContext()
+  const launchParams = useMemo(() => new URLSearchParams(window.location.search), [])
+  const launchedPartIndex = useMemo(() => {
+    const raw = launchParams.get('part')
+    if (raw == null || raw === '') return null
+    const value = Number.parseInt(raw, 10)
+    return Number.isFinite(value) ? value : null
+  }, [launchParams])
+  const [selectedPartIndex, setSelectedPartIndex] = useState(null)
+
+  const pipelineResult = pipeline.pipelineState?.result
+  const parts = pipelineResult?.parts || []
+
+  useEffect(() => {
+    if (!pipelineResult?.is_assembly) {
+      setSelectedPartIndex(null)
+      return
+    }
+
+    if (parts.length === 0) {
+      setSelectedPartIndex(null)
+      return
+    }
+
+    setSelectedPartIndex((current) => {
+      if (current != null && parts[current]) return current
+      if (launchedPartIndex != null) {
+        const resolvedIndex = parts.findIndex((part, index) => {
+          const solidIndex = Number.isInteger(part?.solid_index) ? part.solid_index : index
+          return solidIndex === launchedPartIndex
+        })
+        if (resolvedIndex >= 0) return resolvedIndex
+      }
+      return 0
+    })
+  }, [launchedPartIndex, parts, pipelineResult])
+
+  const selectedPart = pipelineResult?.is_assembly && selectedPartIndex != null ? parts[selectedPartIndex] || null : null
+  const effectiveEvents = selectedPart ? getPartTimelineEvents(selectedPart) : pipeline.pipelineState?.events || []
+  const effectiveGroupedStages = useMemo(() => groupEventsByStage(effectiveEvents), [effectiveEvents])
+  const effectivePipelineVisuals = selectedPart?.visuals || pipeline.pipelineVisuals
+  const effectiveSummary = selectedPart?.timeline_summary || pipeline.summary
+  const effectiveBackendMesh = selectedPart?.mesh || pipeline.backendMesh
+  const effectiveFlatMesh = effectivePipelineVisuals?.unfold?.flat_mesh || null
 
   return (
-    <SelectionProvider
-      pipelineVisuals={pipeline.pipelineVisuals}
-      flatMesh={pipeline.flatMesh}
-      backendMesh={pipeline.backendMesh}
-      groupedStages={pipeline.groupedStages}
-      pipelineEnabled={pipeline.pipelineEnabled}
-      pipelineState={pipeline.pipelineState}
-    >
-      <AppContent />
-    </SelectionProvider>
+    <AppContent
+      selectedPartIndex={selectedPartIndex}
+      setSelectedPartIndex={setSelectedPartIndex}
+      effectivePipelineVisuals={effectivePipelineVisuals}
+      effectiveGroupedStages={effectiveGroupedStages}
+      effectiveSummary={effectiveSummary}
+      effectiveBackendMesh={effectiveBackendMesh}
+      effectiveFlatMesh={effectiveFlatMesh}
+    />
   )
 }
 

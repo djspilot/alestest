@@ -6,7 +6,9 @@ import {
   formatLabel,
   getStageMeta,
   getPartTimelineEvents,
+  isDetectHolesStageName,
   isPreUnfoldStageName,
+  isUnfoldStageName,
   MERGED_HOLES_STAGE,
   PRE_UNFOLD_HOLES_STAGE,
   summarizePayload,
@@ -122,8 +124,8 @@ export default function StageDetailsPanel({
   onShowHiddenHolesChange,
   highlightHiddenHoleLocations,
   onHighlightHiddenHoleLocationsChange,
-  onSelectPart,
-  launchedPartIndex,
+  selectedPartIndex,
+  onSelectPartIndex,
 }) {
   const [holeFilter, setHoleFilter] = useState('all')
   const [activeHoleMethod, setActiveHoleMethod] = useState('all')
@@ -133,26 +135,6 @@ export default function StageDetailsPanel({
   const [showStageExtraOptions, setShowStageExtraOptions] = useState(false)
   const [showHoleExtraOptions, setShowHoleExtraOptions] = useState(false)
   const [showUnfoldExtraOptions, setShowUnfoldExtraOptions] = useState(false)
-  const [selectedPartIndex, setSelectedPartIndex] = useState(null)
-
-  useEffect(() => {
-    if (!pipelineResult?.is_assembly) {
-      setSelectedPartIndex(null)
-      return
-    }
-
-    if (launchedPartIndex == null) return
-    const parts = pipelineResult.parts || []
-    const resolvedIndex = parts.findIndex((part, index) => {
-      const solidIndex = Number.isInteger(part?.solid_index) ? part.solid_index : index
-      return solidIndex === launchedPartIndex
-    })
-    if (resolvedIndex >= 0) {
-      setSelectedPartIndex(resolvedIndex)
-      onSelectStageIndex(0)
-      onSelectEventIndex(0)
-    }
-  }, [launchedPartIndex, onSelectEventIndex, onSelectStageIndex, pipelineResult])
   const selectedPart =
     pipelineResult?.is_assembly && selectedPartIndex != null
       ? (pipelineResult.parts || [])[selectedPartIndex] || null
@@ -195,7 +177,8 @@ export default function StageDetailsPanel({
   const step0Review = classificationVisuals?.step0_review || null
   const legacyClassification = classificationVisuals?.legacy_classification || null
   const isPreUnfoldHoleStage = isPreUnfoldStageName(selectedStage?.stage)
-  const isMergedHoleStage = selectedStage?.stage === MERGED_HOLES_STAGE
+  const isDetectHolesStage = isDetectHolesStageName(selectedStage?.stage)
+  const isUnfoldStage = isUnfoldStageName(selectedStage?.stage)
   const holeVisuals = isPreUnfoldHoleStage
     ? pipelineVisuals?.holes_pre_unfold || pipelineVisuals?.holes || null
     : pipelineVisuals?.holes || null
@@ -547,12 +530,7 @@ export default function StageDetailsPanel({
           <AssemblyPanel 
             pipelineResult={pipelineResult} 
             selectedPartIndex={selectedPartIndex}
-            onSelectPartIndex={(partIndex) => {
-              setSelectedPartIndex(partIndex)
-              onSelectStageIndex(0)
-              onSelectEventIndex(0)
-              onSelectPart?.(partIndex)
-            }}
+            onSelectPartIndex={onSelectPartIndex}
           />
         )}
         {partTimelineStatus && (
@@ -581,12 +559,7 @@ export default function StageDetailsPanel({
         <AssemblyPanel 
           pipelineResult={pipelineResult} 
           selectedPartIndex={selectedPartIndex}
-          onSelectPartIndex={(partIndex) => {
-            setSelectedPartIndex(partIndex)
-            onSelectStageIndex(0)
-            onSelectEventIndex(0)
-            onSelectPart?.(partIndex)
-          }}
+          onSelectPartIndex={onSelectPartIndex}
         />
       )}
       {partTimelineStatus && (
@@ -634,7 +607,7 @@ export default function StageDetailsPanel({
 
         {selectedEvent && (
           <div className="timeline-payload">
-            {(isMergedHoleStage || isPreUnfoldHoleStage) && holeVisuals && (
+            {(isDetectHolesStage || isPreUnfoldHoleStage) && holeVisuals && (
               <div className="visual-stage-card" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none' }}>
                 <div className="timeline-title">Hole Overlay</div>
                 <div className="hole-summary-grid">
@@ -1299,7 +1272,7 @@ export default function StageDetailsPanel({
               </div>
             )}
 
-            {selectedStage.stage === MERGED_HOLES_STAGE && (
+            {isUnfoldStage && (
               <div className="visual-stage-card">
                 <div className="timeline-title">Unfold data</div>
                 <div className="hole-filter-row" style={{ marginTop: 8 }}>
