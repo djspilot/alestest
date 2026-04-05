@@ -65,6 +65,7 @@ function AppContent() {
   const [loadingDefaultStep, setLoadingDefaultStep] = useState(false)
   const [materialPreset, setMaterialPreset] = useState(() => window.localStorage.getItem('ales-viewer-material-preset') || 'technical_steel')
   const [renderMode, setRenderMode] = useState(() => window.localStorage.getItem('ales-viewer-render-mode') || 'studio')
+  const [lightMode, setLightMode] = useState(() => window.localStorage.getItem('ales-viewer-light-mode') || 'bright')
   const materialOptions = useMemo(
     () =>
       Object.entries(getViewerMaterialPresets()).map(([value, config]) => ({
@@ -74,6 +75,14 @@ function AppContent() {
     [],
   )
   const renderModeOptions = useMemo(() => getViewerRenderModes(), [])
+  const lightModeOptions = useMemo(
+    () => [
+      { value: 'bright', label: 'Licht: Helder' },
+      { value: 'soft', label: 'Licht: Zacht' },
+      { value: 'contrast', label: 'Licht: Contrast' },
+    ],
+    [],
+  )
 
   // Pipeline hook manages all pipeline state + API communication
   const pipeline = usePipelineContext()
@@ -101,6 +110,10 @@ function AppContent() {
   useEffect(() => {
     window.localStorage.setItem('ales-viewer-render-mode', renderMode)
   }, [renderMode])
+
+  useEffect(() => {
+    window.localStorage.setItem('ales-viewer-light-mode', lightMode)
+  }, [lightMode])
 
   const latestErrorDebugEvent = useMemo(() => {
     const events = viewer.debugEvents || []
@@ -356,6 +369,20 @@ function AppContent() {
               ))}
             </select>
           )}
+          {viewer.fileName && (
+            <select
+              className="header-toggle-btn"
+              value={lightMode}
+              onChange={(event) => setLightMode(event.target.value)}
+              title="Licht mode"
+            >
+              {lightModeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          )}
           <button className="header-toggle-btn" onClick={() => setRightPanelOpen((v) => !v)}>
             {rightPanelOpen ? 'Verberg rechts' : 'Toon rechts'}
           </button>
@@ -464,6 +491,7 @@ function AppContent() {
                 highlightHiddenHoleLocations={selection.highlightHiddenHoleLocations}
                 materialPreset={materialPreset}
                 renderMode={renderMode}
+                lightMode={lightMode}
               />
             </Suspense>
           )}

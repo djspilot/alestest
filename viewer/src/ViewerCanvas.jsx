@@ -105,16 +105,26 @@ function StudioEnvironment({ renderMode }) {
   const { gl, scene } = useThree()
 
   useEffect(() => {
+    const previousToneMapping = gl.toneMapping
+    const previousToneMappingExposure = gl.toneMappingExposure
+    const previousOutputColorSpace = gl.outputColorSpace
+    gl.toneMapping = THREE.ACESFilmicToneMapping
+    gl.toneMappingExposure = renderMode === 'studio' ? 1.45 : renderMode === 'xray' ? 1.28 : 1.2
+    gl.outputColorSpace = THREE.SRGBColorSpace
+
     const pmrem = new THREE.PMREMGenerator(gl)
     const envTexture = pmrem.fromScene(new RoomEnvironment(), 0.05).texture
     const previousEnvironment = scene.environment
     scene.environment = envTexture
     return () => {
       scene.environment = previousEnvironment || null
+      gl.toneMapping = previousToneMapping
+      gl.toneMappingExposure = previousToneMappingExposure
+      gl.outputColorSpace = previousOutputColorSpace
       envTexture.dispose?.()
       pmrem.dispose()
     }
-  }, [gl, scene])
+  }, [gl, renderMode, scene])
 
   useEffect(() => {
     if (renderMode === 'xray') {
@@ -1642,6 +1652,7 @@ export default function ViewerCanvas({
   highlightHiddenHoleLocations = false,
   materialPreset = 'technical_steel',
   renderMode = 'studio',
+  lightMode = 'bright',
 }) {
   const holeItems = activeHoleVisuals?.items || backendVisuals?.holes?.items || []
   const visibleHoleItems = showHiddenHoles ? holeItems : holeItems.filter((hole) => !isHiddenHoleCandidate(hole))
@@ -1669,6 +1680,34 @@ export default function ViewerCanvas({
     [activeMesh, modelInfo, onSurfaceProbe, probeMode, visibleHoleItems],
   )
 
+  const lighting = useMemo(() => {
+    if (lightMode === 'soft') {
+      return {
+        ambient: 0.42 * Math.PI,
+        hemi: 0.75,
+        key: 0.95,
+        fill: 0.42,
+        rim: 0.22,
+      }
+    }
+    if (lightMode === 'contrast') {
+      return {
+        ambient: 0.24 * Math.PI,
+        hemi: 0.5,
+        key: 1.35,
+        fill: 0.68,
+        rim: 0.42,
+      }
+    }
+    return {
+      ambient: 0.5 * Math.PI,
+      hemi: 0.95,
+      key: 1.55,
+      fill: 0.85,
+      rim: 0.5,
+    }
+  }, [lightMode])
+
   return (
     <Canvas
       frameloop="demand"
@@ -1679,11 +1718,12 @@ export default function ViewerCanvas({
       style={{ background: renderMode === 'analysis' ? '#eef2f7' : '#e8eef5' }}
     >
       <StudioEnvironment renderMode={renderMode} />
-      <ambientLight intensity={0.35 * Math.PI} />
-      <hemisphereLight args={['#ffffff', '#b7c2cf', renderMode === 'xray' ? 0.95 : 0.65]} />
-      <directionalLight position={[140, 180, 120]} intensity={1.15} />
-      <directionalLight position={[-110, 60, -80]} intensity={0.55} color="#dbeafe" />
-      <directionalLight position={[0, -120, 80]} intensity={0.3} color="#fff7ed" />
+      <ambientLight intensity={lighting.ambient} />
+      <hemisphereLight args={['#ffffff', '#b7c2cf', renderMode === 'xray' ? Math.max(lighting.hemi, 1.05) : lighting.hemi]} />
+      <directionalLight position={[140, 180, 120]} intensity={lighting.key} />
+      <directionalLight position={[-110, 60, -80]} intensity={lighting.fill} color="#dbeafe" />
+      <directionalLight position={[0, -120, 80]} intensity={lighting.rim} color="#fff7ed" />
+      <pointLight position={[0, 0, 220]} intensity={lightMode === 'bright' ? 55 : lightMode === 'contrast' ? 35 : 24} distance={1400} decay={2} color="#ffffff" />
 
       <StepModel
         buffer={fileBuffer}
