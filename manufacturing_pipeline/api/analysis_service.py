@@ -6,6 +6,7 @@ Wraps process_single_file() and enriches the result with AAG details.
 import os
 import shutil
 import json
+from types import SimpleNamespace
 
 from manufacturing_pipeline.core.runtime_analysis import run_analysis
 from manufacturing_pipeline.core.file_utils import get_output_dir
@@ -323,6 +324,27 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
                 )
                 part_result["solid_name"] = solid_info["name"]
                 part_result["solid_index"] = solid_info["index"]
+                
+                # Extract per-solid timeline events from timing JSON if available
+                output_dir, _ = get_output_dir(solid_info["path"])
+                timing_data = _load_timing_json(output_dir, solid_info["path"])
+                if timing_data:
+                    analysis_stub_part = SimpleNamespace(
+                        route_result=None,
+                        classification_visuals=None,
+                        detected_hole_visuals_pre_unfold=None,
+                        unfold_result=None,
+                        reasoning=None,
+                    )
+                    events, summary = _build_timeline(
+                        part_result, 
+                        analysis_stub_part, 
+                        len(part_result.get("production", {}).get("holes", [])),
+                        timing_data
+                    )
+                    part_result["timeline_events"] = events
+                    part_result["timeline_summary"] = summary
+                
                 parts.append(part_result)
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)

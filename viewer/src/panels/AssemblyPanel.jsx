@@ -68,11 +68,12 @@ function PartRow({ part, index }) {
   )
 }
 
-export default function AssemblyPanel({ pipelineResult }) {
+export default function AssemblyPanel({ pipelineResult, selectedPartIndex, onSelectPartIndex }) {
   if (!pipelineResult?.is_assembly) return null
 
   const parts = pipelineResult.parts || []
   const solidCount = pipelineResult.solid_count || parts.length
+  const selectedPart = parts[selectedPartIndex] || null
 
   return (
     <div className="visual-stage-card">
@@ -82,13 +83,39 @@ export default function AssemblyPanel({ pipelineResult }) {
       </div>
       <div className="timeline-text" style={{ marginBottom: 10 }}>
         Dit STEP bestand bevat {solidCount} losse solids. Elk is afzonderlijk geanalyseerd.
-        Klik op een onderdeel voor de details.
+        Selecteer een onderdeel om de pipeline-stages per onderdeel te zien.
       </div>
-      <div>
+      <div style={{ marginBottom: 12 }}>
         {parts.map((part, i) => (
-          <PartRow key={part.solid_name || i} part={part} index={i} />
+          <button
+            key={part.solid_name || i}
+            onClick={() => onSelectPartIndex(i)}
+            style={{
+              background: selectedPartIndex === i ? '#e5e7eb' : '#ffffff',
+              border: selectedPartIndex === i ? '2px solid #3b82f6' : '1px solid #d1d5db',
+              color: '#0f172a',
+              padding: '8px 12px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '0.9rem',
+              fontWeight: selectedPartIndex === i ? '600' : '500',
+              marginBottom: '6px',
+              width: '100%',
+              textAlign: 'left',
+            }}
+          >
+            {i + 1}. {part.solid_name || part.file || `Onderdeel ${i + 1}`}
+            <span style={{ float: 'right', fontSize: '0.75rem', color: '#666' }}>
+              {part.category || part.part_type || '–'}
+            </span>
+          </button>
         ))}
       </div>
+      {selectedPart && (
+        <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 10 }}>
+          <PartRow part={selectedPart} index={selectedPartIndex} />
+        </div>
+      )}
     </div>
   )
 }

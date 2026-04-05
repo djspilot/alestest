@@ -130,7 +130,28 @@ export default function StageDetailsPanel({
   const [showStageExtraOptions, setShowStageExtraOptions] = useState(false)
   const [showHoleExtraOptions, setShowHoleExtraOptions] = useState(false)
   const [showUnfoldExtraOptions, setShowUnfoldExtraOptions] = useState(false)
-  const selectedStage = groupedStages[selectedStageIndex] || null
+  const [selectedPartIndex, setSelectedPartIndex] = useState(null)
+  const effectiveGroupedStages = useMemo(() => {
+    if (pipelineResult?.is_assembly && selectedPartIndex != null) {
+      const parts = pipelineResult.parts || []
+      const selectedPart = parts[selectedPartIndex]
+      if (selectedPart?.timeline_events) {
+        // Convert part timeline events to grouped stages format
+        const stageMap = new Map()
+        selectedPart.timeline_events.forEach((event) => {
+          const stageName = event.stage || 'Unknown'
+          if (!stageMap.has(stageName)) {
+            stageMap.set(stageName, { stage: stageName, events: [] })
+          }
+          stageMap.get(stageName).events.push(event)
+        })
+        return Array.from(stageMap.values())
+      }
+    }
+    return groupedStages
+  }, [groupedStages, pipelineResult, selectedPartIndex])
+
+  const selectedStage = effectiveGroupedStages[selectedStageIndex] || null
   const selectedEvent = selectedStage?.events?.[selectedEventIndex] || null
   const selectedPayloadEntries = Object.entries(selectedEvent?.payload || {}).filter(([, value]) => value !== undefined)
 
@@ -197,8 +218,8 @@ export default function StageDetailsPanel({
   const selectedFold = segmentRows.find((row) => row.id === normalizedSelectedFoldId) || foldRows.find((row) => row.id === normalizedSelectedFoldId) || null
   const selectedInspection = selectedHole || selectedProbe
   const preUnfoldGroup = useMemo(
-    () => groupedStages.find((group) => isPreUnfoldStageName(group?.stage)) || null,
-    [groupedStages],
+    () => effectiveGroupedStages.find((group) => isPreUnfoldStageName(group?.stage)) || null,
+    [effectiveGroupedStages],
   )
   const preUnfoldEvents = preUnfoldGroup?.events || []
   const preUnfoldDebugPayload = useMemo(() => {
@@ -439,7 +460,7 @@ export default function StageDetailsPanel({
   }
 
   const stageMeta = getStageMeta(selectedStage, summary, liveActiveElapsed, pipelineStatus)
-  const previousSelectableIndex = groupedStages
+  const previousSelectableIndex = effectiveGroupedStages
     .slice(0, selectedStageIndex)
     .map((group, index) => ({
       index,
@@ -448,7 +469,7 @@ export default function StageDetailsPanel({
     .filter((item) => item.selectable)
     .map((item) => item.index)
     .pop()
-  const nextSelectableIndex = groupedStages
+  const nextSelectableIndex = effectiveGroupedStages
     .slice(selectedStageIndex + 1)
     .map((group, offset) => ({
       index: selectedStageIndex + offset + 1,
@@ -458,8 +479,8 @@ export default function StageDetailsPanel({
 
   // Compute stage list without useMemo to avoid circular deps with onSelectStageIndex
   const renderStageList = () => {
-    if (!groupedStages.length) return null
-    return groupedStages.map((group, index) => {
+    if (!effectiveGroupedStages.length) return null
+    return effectiveGroupedStages.map((group, index) => {
       const meta = getStageMeta(group, summary, liveActiveElapsed, pipelineStatus)
       const isActive = index === selectedStageIndex
       return (
@@ -489,7 +510,11 @@ export default function StageDetailsPanel({
     return (
       <div className="details-panel">
         {pipelineResult?.is_assembly && (
-          <AssemblyPanel pipelineResult={pipelineResult} />
+          <AssemblyPanel 
+            pipelineResult={pipelineResult} 
+            selectedPartIndex={selectedPartIndex}
+            onSelectPartIndex={setSelectedPartIndex}
+          />
         )}
         {renderStageList() && (
           <div className="timeline-stage-list" style={{ maxHeight: '40vh', overflowY: 'auto', marginBottom: 8 }}>
@@ -499,6 +524,9 @@ export default function StageDetailsPanel({
         {!pipelineResult?.is_assembly && (
           <div className="details-placeholder">Kies een afgeronde pipeline-stap om hier de details te zien.</div>
         )}
+        {pipelineResult?.is_assembly && selectedPartIndex != null && !renderStageList() && (
+          <div className="details-placeholder">Dit onderdeel heeft geen beschikbare stages.</div>
+        )}
       </div>
     )
   }
@@ -506,7 +534,11 @@ export default function StageDetailsPanel({
   return (
     <div className="details-panel">
       {pipelineResult?.is_assembly && (
-        <AssemblyPanel pipelineResult={pipelineResult} />
+        <AssemblyPanel 
+          pipelineResult={pipelineResult} 
+          selectedPartIndex={selectedPartIndex}
+          onSelectPartIndex={setSelectedPartIndex}
+        />
       )}
       {renderStageList() && (
         <div className="timeline-stage-list" style={{ maxHeight: '40vh', overflowY: 'auto', marginBottom: 8 }}>
@@ -518,7 +550,7 @@ export default function StageDetailsPanel({
           <div>
             <div className="timeline-title">{selectedStage.stage}</div>
             <div className="timeline-text">
-              Stap {selectedStageIndex + 1} van {groupedStages.length}
+              Stap {selectedStageIndex + 1} van {effectiveGroupedStages.length}
             </div>
             <div className="timeline-text">{`${stageMeta.stateLabel} · ${formatDuration(stageMeta.elapsed)}`}</div>
           </div>
