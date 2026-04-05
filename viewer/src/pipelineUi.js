@@ -43,6 +43,10 @@ export function summarizePayload(payload) {
     .join(' | ')
 }
 
+export function getPartTimelineEvents(part) {
+  return Array.isArray(part?.timeline_events) ? part.timeline_events : Array.isArray(part?.timeline) ? part.timeline : []
+}
+
 export function parseIsoToMs(value) {
   if (!value) return null
   const parsed = Date.parse(value)

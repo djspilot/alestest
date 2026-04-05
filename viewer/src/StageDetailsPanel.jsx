@@ -5,6 +5,7 @@ import {
   formatDuration,
   formatLabel,
   getStageMeta,
+  getPartTimelineEvents,
   isPreUnfoldStageName,
   MERGED_HOLES_STAGE,
   PRE_UNFOLD_HOLES_STAGE,
@@ -156,7 +157,7 @@ export default function StageDetailsPanel({
     pipelineResult?.is_assembly && selectedPartIndex != null
       ? (pipelineResult.parts || [])[selectedPartIndex] || null
       : null
-  const selectedPartTimelineEvents = Array.isArray(selectedPart?.timeline_events) ? selectedPart.timeline_events : []
+  const selectedPartTimelineEvents = getPartTimelineEvents(selectedPart)
   const partTimelineStatus =
     pipelineResult?.is_assembly && selectedPartIndex != null
       ? (selectedPartTimelineEvents.length > 0
@@ -167,10 +168,11 @@ export default function StageDetailsPanel({
     if (pipelineResult?.is_assembly && selectedPartIndex != null) {
       const parts = pipelineResult.parts || []
       const selectedPart = parts[selectedPartIndex]
-      if (selectedPart?.timeline_events) {
+      const partTimelineEvents = getPartTimelineEvents(selectedPart)
+      if (partTimelineEvents.length > 0) {
         // Convert part timeline events to grouped stages format
         const stageMap = new Map()
-        selectedPart.timeline_events.forEach((event) => {
+        partTimelineEvents.forEach((event) => {
           const stageName = event.stage || 'Unknown'
           if (!stageMap.has(stageName)) {
             stageMap.set(stageName, { stage: stageName, events: [] })

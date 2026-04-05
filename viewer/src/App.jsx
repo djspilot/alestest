@@ -6,7 +6,7 @@ import { PipelineProvider, usePipelineContext } from './context/PipelineContext'
 import { SelectionProvider, useSelectionContext } from './context/SelectionContext'
 import { useViewer } from './hooks/useViewer'
 import { fetchFileAsBrowserFile } from './lib/files'
-import { normalizeStageName, MERGED_HOLES_STAGE } from './pipelineUi'
+import { normalizeStageName, MERGED_HOLES_STAGE, getPartTimelineEvents } from './pipelineUi'
 import { getApiKeyHeaders, getDefaultPipelineApiBase } from './pipelineClient'
 import { getViewerMaterialPresets, getViewerRenderModes } from './StepModel'
 
@@ -54,7 +54,7 @@ function resolvePartFromJob(job, partIndex) {
 function getTimelineForJobView(job, partIndex) {
   const part = resolvePartFromJob(job, partIndex)
   if (part) {
-    const partEvents = Array.isArray(part.timeline_events) ? part.timeline_events : []
+    const partEvents = getPartTimelineEvents(part)
     if (partEvents.length > 0) {
       return {
         events: partEvents,
