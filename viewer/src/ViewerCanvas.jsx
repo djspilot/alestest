@@ -109,7 +109,7 @@ function StudioEnvironment({ renderMode }) {
     const previousToneMappingExposure = gl.toneMappingExposure
     const previousOutputColorSpace = gl.outputColorSpace
     gl.toneMapping = THREE.ACESFilmicToneMapping
-    gl.toneMappingExposure = renderMode === 'studio' ? 1.45 : renderMode === 'xray' ? 1.28 : 1.2
+    gl.toneMappingExposure = renderMode === 'studio' ? 1.62 : renderMode === 'xray' ? 1.34 : 1.4
     gl.outputColorSpace = THREE.SRGBColorSpace
 
     const pmrem = new THREE.PMREMGenerator(gl)
@@ -134,12 +134,12 @@ function StudioEnvironment({ renderMode }) {
       }
     }
     if (renderMode === 'analysis') {
-      scene.background = new THREE.Color('#eef2f7')
+      scene.background = new THREE.Color('#f4f7fb')
       return () => {
         scene.background = null
       }
     }
-    scene.background = new THREE.Color('#e8eef5')
+    scene.background = new THREE.Color('#edf3fa')
     return () => {
       scene.background = null
     }
@@ -159,13 +159,13 @@ function CameraRigLights({ modelInfo, lightMode, renderMode }) {
   const lighting = useMemo(() => {
     if (lightMode === 'soft') {
       return {
-        ambient: 0.42 * Math.PI,
-        hemi: 0.75,
-        key: 0.95,
-        fill: 0.42,
-        rim: 0.22,
-        point: 24,
-        head: 1.1,
+        ambient: 0.48 * Math.PI,
+        hemi: 0.88,
+        key: 1.05,
+        fill: 0.58,
+        rim: 0.3,
+        point: 30,
+        head: 1.25,
       }
     }
     if (lightMode === 'contrast') {
@@ -180,13 +180,13 @@ function CameraRigLights({ modelInfo, lightMode, renderMode }) {
       }
     }
     return {
-      ambient: 0.5 * Math.PI,
-      hemi: 0.95,
-      key: 1.55,
-      fill: 0.85,
-      rim: 0.5,
-      point: 55,
-      head: 1.75,
+      ambient: 0.62 * Math.PI,
+      hemi: 1.12,
+      key: 1.78,
+      fill: 1.12,
+      rim: 0.72,
+      point: 72,
+      head: 2.15,
     }
   }, [lightMode])
 

@@ -66,9 +66,18 @@
   .action-cell { min-width: 210px; }
 
   .assembly-parts { display: none; background: #f8fafc; }
-  .assembly-parts.open { display: table-row-group; }
-  .assembly-part-row td { padding: 6px 12px 6px 32px; border-bottom: 1px solid #e5e7eb; color: #475569; font-size: 11px; }
-  .assembly-part-row td.part-name { color: #0f172a; font-weight: 500; }
+  .assembly-parts.open { display: table-row; }
+  .assembly-parts-cell { padding: 0 !important; background: #f8fafc; }
+  .assembly-parts-panel { padding: 14px 16px 16px; border-top: 1px solid #e2e8f0; }
+  .assembly-parts-grid { display: grid; gap: 10px; }
+  .assembly-part-card { border: 1px solid #dbe4f0; border-radius: 12px; background: #fff; padding: 12px; display: grid; gap: 10px; }
+  .assembly-part-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .assembly-part-title { font-size: 13px; font-weight: 700; color: #0f172a; }
+  .assembly-part-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px 12px; }
+  .assembly-part-meta-item { display: grid; gap: 2px; }
+  .assembly-part-meta-label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: #64748b; font-weight: 600; }
+  .assembly-part-meta-value { font-size: 12px; color: #0f172a; }
+  .assembly-part-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .expand-btn { background: #ffffff; border: 1px solid #cbd5e1; color: #334155; padding: 2px 8px; border-radius: 3px; cursor: pointer; font-family: inherit; font-size: 11px; }
   .expand-btn:hover { border-color: #94a3b8; color: #0f172a; }
   .action-stack { display: flex; flex-direction: column; gap: 6px; }
@@ -262,6 +271,14 @@
       downloadItems.push(
         `<a class="download-item" href="#" onclick="downloadArtifact(event,'/api/v1/jobs/${escapeHtml(job.job_id)}/downloads/part-xmls','${fileStem}_xml.zip')">Losse XML's (.zip)</a>`,
       );
+      if (job.result?.is_assembly) {
+        downloadItems.push(
+          `<a class="download-item" href="#" onclick="downloadArtifact(event,'/api/v1/jobs/${escapeHtml(job.job_id)}/downloads/part-steps','${fileStem}_parts_step.zip')">Losse STEP's (.zip)</a>`,
+        );
+        downloadItems.push(
+          `<a class="download-item" href="#" onclick="downloadArtifact(event,'/api/v1/jobs/${escapeHtml(job.job_id)}/downloads/part-unfolds','${fileStem}_parts_unfold.zip')">Losse unfolds (.zip)</a>`,
+        );
+      }
       if (unfoldStatus === 'completed') {
         downloadItems.push(
           `<a class="download-item" href="#" onclick="downloadArtifact(event,'/api/v1/jobs/${escapeHtml(job.job_id)}/downloads/unfold-files','${fileStem}_unfold.zip')">Unfold map (.zip)</a>`,
@@ -435,26 +452,15 @@
           const rowId = `parts-${escapeHtml(job.job_id)}`;
           expandBtn = `<button class="expand-btn" onclick="toggleParts('${rowId}')">▶ Onderdelen</button>`;
 
-          partRows = `<tr class="assembly-parts" id="${rowId}"><td colspan="11" style="padding:0">
-            <table style="width:100%">
-              ${parts.map((p, i) => {
-                const pd = p.dimensions || {};
-                const pp = p.production || {};
-                const pdim = pd.length ? `${+pd.length.toFixed(1)} × ${+pd.width.toFixed(1)} × ${+pd.height.toFixed(1)}` : '—';
-                const pcat = escapeHtml(p.category || p.part_type || '—');
-                const pthick = p.thickness ? `${p.thickness} mm` : '—';
-                return `<tr class="assembly-part-row">
-                  <td class="part-name">${escapeHtml(p.solid_name || `Onderdeel ${i+1}`)}</td>
-                  <td>${pcat}</td>
-                  <td class="mono">${pthick}</td>
-                  <td class="mono">${pdim}</td>
-                  <td class="mono">${pp.holes_total ?? '—'} gaten</td>
-                  <td class="mono">${pp.bends_total ?? '—'} zett.</td>
-                  <td colspan="5"></td>
-                </tr>`;
-              }).join('')}
-            </table>
-          </td></tr>`;
+          partRows = `<tr class="assembly-parts" id="${rowId}">
+            <td class="assembly-parts-cell" colspan="11">
+              <div class="assembly-parts-panel">
+                <div class="assembly-parts-grid">
+                  ${parts.map((p, i) => renderAssemblyPartCard(job, p, Number.isInteger(p.solid_index) ? p.solid_index : i)).join('')}
+                </div>
+              </div>
+            </td>
+          </tr>`;
         } else {
           dimStr = dims.length
             ? `${+dims.length.toFixed(1)} × ${+dims.width.toFixed(1)} × ${+dims.height.toFixed(1)}`
@@ -618,12 +624,58 @@
     return `${window.location.protocol}//${window.location.host}/viewer/`;
   })();
 
-  function buildViewerUrl(jobId, fileName) {
+  function buildViewerUrl(jobId, fileName, partIndex) {
     const apiBase = `${window.location.protocol}//${window.location.host}`;
     const params = new URLSearchParams({ job: jobId, api: apiBase });
     if (fileName) params.set('name', fileName);
+    if (partIndex != null) params.set('part', String(partIndex));
     if (apiKey) params.set('key', apiKey);
     return `${VIEWER_BASE_URL}?${params}`;
+  }
+
+  function renderAssemblyPartCard(job, part, partIndex) {
+    const dims = part.dimensions || {};
+    const prod = part.production || {};
+    const dimStr = dims.length
+      ? `${+dims.length.toFixed(1)} × ${+dims.width.toFixed(1)} × ${+dims.height.toFixed(1)}`
+      : '—';
+    const partName = part.solid_name || part.file || `Onderdeel ${partIndex + 1}`;
+    const fileStem = escapeHtml((part.file || partName).replace(/\.[^.]+$/, ''));
+    return `
+      <div class="assembly-part-card">
+        <div class="assembly-part-head">
+          <div class="assembly-part-title">${escapeHtml(partName)}</div>
+          <div class="assembly-part-actions">
+            <a class="mini-btn" href="${escapeHtml(buildViewerUrl(job.job_id, part.file || partName, partIndex))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🔬 Viewer</a>
+            <a class="mini-btn" href="#" onclick="downloadArtifact(event,'/api/v1/jobs/${escapeHtml(job.job_id)}/parts/${partIndex}/step','${fileStem}.step')">STEP</a>
+            <a class="mini-btn" href="#" onclick="downloadArtifact(event,'/api/v1/jobs/${escapeHtml(job.job_id)}/parts/${partIndex}/unfold/artifacts/flat-step','${fileStem}_flat.step')">Flat STEP</a>
+            <a class="mini-btn" href="#" onclick="downloadArtifact(event,'/api/v1/jobs/${escapeHtml(job.job_id)}/parts/${partIndex}/unfold/artifacts/dxf','${fileStem}_flat.dxf')">DXF</a>
+          </div>
+        </div>
+        <div class="assembly-part-meta">
+          <div class="assembly-part-meta-item">
+            <span class="assembly-part-meta-label">Categorie</span>
+            <span class="assembly-part-meta-value">${escapeHtml(part.category || part.part_type || '—')}</span>
+          </div>
+          <div class="assembly-part-meta-item">
+            <span class="assembly-part-meta-label">Dikte</span>
+            <span class="assembly-part-meta-value mono">${part.thickness ? `${escapeHtml(part.thickness)} mm` : '—'}</span>
+          </div>
+          <div class="assembly-part-meta-item">
+            <span class="assembly-part-meta-label">Afmetingen</span>
+            <span class="assembly-part-meta-value mono">${escapeHtml(dimStr)}</span>
+          </div>
+          <div class="assembly-part-meta-item">
+            <span class="assembly-part-meta-label">Gaten</span>
+            <span class="assembly-part-meta-value mono">${escapeHtml(prod.holes_total ?? '—')}</span>
+          </div>
+          <div class="assembly-part-meta-item">
+            <span class="assembly-part-meta-label">Zettingen</span>
+            <span class="assembly-part-meta-value mono">${escapeHtml(prod.bends_total ?? '—')}</span>
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   // ── Detail panel ──
@@ -817,6 +869,8 @@
       res.parts.forEach((p, i) => {
         const pd = p.dimensions || {};
         const pp = p.production || {};
+        const partIndex = Number.isInteger(p.solid_index) ? p.solid_index : i;
+        const fileStem = escapeHtml((p.file || p.solid_name || `onderdeel_${i+1}`).replace(/\.[^.]+$/, ''));
         html += '<div class="detail-part-card">';
         html += `<h4>${escapeHtml(p.solid_name || `Onderdeel ${i+1}`)}</h4>`;
         html += '<div class="detail-grid cols-3">';
@@ -825,7 +879,13 @@
         if (pd.length) html += detailItem('L×B×H', `${+pd.length.toFixed(1)} × ${+pd.width.toFixed(1)} × ${+pd.height.toFixed(1)}`, true);
         html += detailItem('Gaten', pp.holes_total ?? '—');
         html += detailItem('Zettingen', pp.bends_total ?? '—');
-        html += '</div></div>';
+        html += '</div>';
+        html += `<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <a class="mini-btn" href="${escapeHtml(buildViewerUrl(job.job_id, p.file || p.solid_name || `Onderdeel ${i+1}`, partIndex))}" target="_blank" rel="noopener">🔬 Viewer</a>
+          <a class="mini-btn" href="#" onclick="downloadArtifact(event,'/api/v1/jobs/${escapeHtml(job.job_id)}/parts/${partIndex}/step','${fileStem}.step')">STEP</a>
+          <a class="mini-btn" href="#" onclick="downloadArtifact(event,'/api/v1/jobs/${escapeHtml(job.job_id)}/parts/${partIndex}/unfold/artifacts/flat-step','${fileStem}_flat.step')">Flat STEP</a>
+          <a class="mini-btn" href="#" onclick="downloadArtifact(event,'/api/v1/jobs/${escapeHtml(job.job_id)}/parts/${partIndex}/unfold/artifacts/dxf','${fileStem}_flat.dxf')">DXF</a>
+        </div></div>`;
       });
       html += '</div></div>';
     }

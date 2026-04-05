@@ -130,3 +130,106 @@ def test_unfold_status_derives_merged_lines_from_groups(tmp_path, monkeypatch):
     assert payload["raw_fold_lines"] == 5
     assert len(payload["fold_details"]) == 2
     assert payload["fold_details"][0]["segment_indices"] == [1, 2, 3]
+
+
+def test_assembly_part_routes_expose_step_and_unfold_artifacts(tmp_path, monkeypatch):
+    db_path = tmp_path / "api.db"
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+
+    test_jobs = JobManager(str(db_path))
+    monkeypatch.setattr(routes_module, "jobs", test_jobs)
+    monkeypatch.setattr(routes_module, "UPLOAD_DIR", str(upload_dir))
+
+    assembly_path = upload_dir / "job-3" / "assembly.step"
+    assembly_path.parent.mkdir(parents=True, exist_ok=True)
+    assembly_path.write_text("ISO-10303-21;")
+
+    job = test_jobs.create("job-3", str(assembly_path), file_name="assembly.step")
+    test_jobs.mark_completed(
+        job.job_id,
+        {
+            "file": "assembly.step",
+            "success": True,
+            "is_assembly": True,
+            "solid_count": 2,
+            "parts": [
+                {
+                    "file": "part_a.step",
+                    "success": True,
+                    "solid_name": "Part A",
+                    "solid_index": 0,
+                    "category": "PLAAT",
+                    "thickness": 2.0,
+                    "production": {"holes_total": 1, "bends_total": 2},
+                },
+                {
+                    "file": "part_b.step",
+                    "success": True,
+                    "solid_name": "Part B",
+                    "solid_index": 1,
+                    "category": "PLAAT",
+                    "thickness": 3.0,
+                    "production": {"holes_total": 0, "bends_total": 1},
+                },
+            ],
+        },
+    )
+
+    def fake_extract_solids_to_temp_files(_step_file):
+        tmp_dir = tmp_path / "split"
+        tmp_dir.mkdir(exist_ok=True)
+        part_a = tmp_dir / "Part_A.step"
+        part_b = tmp_dir / "Part_B.step"
+        part_a.write_text("part-a-step")
+        part_b.write_text("part-b-step")
+        return [
+            {"name": "Part A", "path": str(part_a), "index": 0, "tmp_dir": str(tmp_dir)},
+            {"name": "Part B", "path": str(part_b), "index": 1, "tmp_dir": str(tmp_dir)},
+        ]
+
+    def fake_run_unfold_to_step(step_file, output_dir, part_name, analysis):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        flat_step = output_path / f"{part_name}_flat.step"
+        dxf = output_path / f"{part_name}_flat.dxf"
+        flat_step.write_text(f"flat:{Path(step_file).name}")
+        dxf.write_text("flat-dxf")
+        return {
+            "success": True,
+            "flat_length": 42.0,
+            "flat_width": 24.0,
+            "fold_lines": analysis.bend_count_erp,
+            "raw_fold_lines": analysis.bend_count_erp,
+            "flat_step_path": str(flat_step),
+            "dxf_path": str(dxf),
+        }
+
+    monkeypatch.setattr(routes_module, "extract_solids_to_temp_files", fake_extract_solids_to_temp_files)
+    monkeypatch.setattr(routes_module, "run_unfold_to_step", fake_run_unfold_to_step)
+
+    client = TestClient(app)
+
+    part_response = client.get("/api/v1/jobs/job-3/parts/1")
+    assert part_response.status_code == 200
+    assert part_response.json()["result"]["solid_name"] == "Part B"
+
+    step_response = client.get("/api/v1/jobs/job-3/parts/1/step")
+    assert step_response.status_code == 200
+    assert step_response.content == b"part-b-step"
+
+    unfold_response = client.get("/api/v1/jobs/job-3/parts/1/unfold")
+    assert unfold_response.status_code == 200
+    unfold_payload = unfold_response.json()["result"]
+    assert unfold_payload["fold_lines"] == 1
+    assert unfold_payload["flat_step_url"].endswith("/api/v1/jobs/job-3/parts/1/unfold/artifacts/flat-step")
+
+    artifact_response = client.get("/api/v1/jobs/job-3/parts/1/unfold/artifacts/flat-step")
+    assert artifact_response.status_code == 200
+    assert artifact_response.content == b"flat:02_Part_B.step"
+
+    step_zip_response = client.get("/api/v1/jobs/job-3/downloads/part-steps")
+    assert step_zip_response.status_code == 200
+
+    unfold_zip_response = client.get("/api/v1/jobs/job-3/downloads/part-unfolds")
+    assert unfold_zip_response.status_code == 200

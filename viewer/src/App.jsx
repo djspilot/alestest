@@ -58,14 +58,28 @@ function AppContent() {
   }
   const launchParams = launchParamsRef.current
   const launchedFromJob = launchParams.has('job')
+  const launchedPartIndex = useMemo(() => {
+    const raw = launchParams.get('part')
+    if (raw == null || raw === '') return null
+    const value = Number.parseInt(raw, 10)
+    return Number.isFinite(value) ? value : null
+  }, [launchParams])
   const launchApiBase = launchParams.get('api') || getDefaultPipelineApiBase()
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [debugPanelOpen, setDebugPanelOpen] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [loadingDefaultStep, setLoadingDefaultStep] = useState(false)
   const [materialPreset, setMaterialPreset] = useState(() => window.localStorage.getItem('ales-viewer-material-preset') || 'technical_steel')
-  const [renderMode, setRenderMode] = useState(() => window.localStorage.getItem('ales-viewer-render-mode') || 'studio')
-  const [lightMode, setLightMode] = useState(() => window.localStorage.getItem('ales-viewer-light-mode') || 'bright')
+  const [renderMode, setRenderMode] = useState(() => {
+    const saved = window.localStorage.getItem('ales-viewer-render-mode')
+    if (!saved || saved === 'studio') return 'analysis'
+    return saved
+  })
+  const [lightMode, setLightMode] = useState(() => {
+    const saved = window.localStorage.getItem('ales-viewer-light-mode')
+    if (!saved || saved === 'soft') return 'bright'
+    return saved
+  })
   const materialOptions = useMemo(
     () =>
       Object.entries(getViewerMaterialPresets()).map(([value, config]) => ({
@@ -126,7 +140,7 @@ function AppContent() {
     return null
   }, [viewer.debugEvents])
 
-  // Auto-load STEP file from URL parameter ?job=<id>[&api=<base>][&key=<apikey>]
+  // Auto-load STEP file from URL parameter ?job=<id>[&part=<index>][&api=<base>][&key=<apikey>]
   const jobAutoLoadRef = useRef(false)
   useEffect(() => {
     if (jobAutoLoadRef.current) return
@@ -137,6 +151,7 @@ function AppContent() {
 
     const apiBase = params.get('api') || pipeline.pipelineApiBase || getDefaultPipelineApiBase()
     const fileName = params.get('name') || 'part.step'
+    const partIndex = launchedPartIndex
     const urlKey = params.get('key') || pipeline.pipelineApiKey
     if (params.get('api')) {
       pipeline.setPipelineApiBase(apiBase)
@@ -165,9 +180,26 @@ function AppContent() {
         return response.json()
       })
       .then((job) => {
-        hydratedJob = job
-        if (job?.status !== 'completed') return job
-        return fetch(`${apiBase}/api/v1/jobs/${jobId}/unfold`, { headers })
+        let baseJob = job
+        if (partIndex != null) {
+          const parts = job?.result?.parts || []
+          const partResult = parts.find((part, index) => {
+            const solidIndex = Number.isInteger(part?.solid_index) ? part.solid_index : index
+            return solidIndex === partIndex
+          }) || null
+          if (partResult) {
+            baseJob = {
+              ...job,
+              result: partResult,
+            }
+          }
+        }
+        hydratedJob = baseJob
+        if (baseJob?.status !== 'completed') return baseJob
+        const unfoldUrl = partIndex != null
+          ? `${apiBase}/api/v1/jobs/${jobId}/parts/${partIndex}/unfold`
+          : `${apiBase}/api/v1/jobs/${jobId}/unfold`
+        return fetch(unfoldUrl, { headers })
           .then(async (response) => {
             if (!response.ok) {
               let detail = ''
@@ -181,8 +213,10 @@ function AppContent() {
             }
             return response.json()
           })
-          .then((unfoldStatus) => mergeJobWithUnfoldResult(job, unfoldStatus))
-          .catch(() => job)
+          .then((unfoldStatus) => {
+            return mergeJobWithUnfoldResult(baseJob, unfoldStatus)
+          })
+          .catch(() => baseJob)
       })
       .then((job) => {
         hydratedJob = job
@@ -208,8 +242,11 @@ function AppContent() {
         if (!job?.source_step_available) {
           throw new Error('Bron STEP bestand is niet meer beschikbaar voor deze job.')
         }
+        const stepUrl = partIndex != null
+          ? `${apiBase}/api/v1/jobs/${jobId}/parts/${partIndex}/step`
+          : `${apiBase}/api/v1/jobs/${jobId}/step`
         return fetchFileAsBrowserFile(
-          `${apiBase}/api/v1/jobs/${jobId}/step`,
+          stepUrl,
           fileName,
           { headers },
         )
@@ -237,7 +274,7 @@ function AppContent() {
         }
         viewer.setError(`STEP bestand laden mislukt: ${err.message}`)
       })
-  }, [launchParams, pipeline, viewer])
+  }, [launchParams, launchedPartIndex, pipeline, viewer])
 
   // Timer for live elapsed display
   useEffect(() => {

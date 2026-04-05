@@ -7,6 +7,7 @@ import json
 import io
 import logging
 import os
+import shutil
 import uuid
 import zipfile
 from datetime import datetime, timezone
@@ -32,6 +33,7 @@ from manufacturing_pipeline.api.schemas import (
 from manufacturing_pipeline.api.job_manager import jobs
 from manufacturing_pipeline.api.analysis_service import run_step_analysis
 from manufacturing_pipeline.core.runtime_unfold import run_unfold_to_step
+from manufacturing_pipeline.analysis.io.step_file_io import extract_solids_to_temp_files
 from manufacturing_pipeline.reporting.xml_exporter import export_to_xml
 from pathlib import Path
 import tempfile
@@ -280,6 +282,190 @@ def _build_part_xml_zip(job) -> Response:
         for index, (part_name, part_result) in enumerate(parts, start=1):
             filename = f"{index:02d}_{_safe_download_stem(part_name, fallback=f'part_{index:02d}')}.xml"
             archive.writestr(f"{folder_name}/{filename}", _build_xml_bytes(part_result))
+
+    return Response(
+        content=bundle.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{folder_name}.zip"'},
+    )
+
+
+def _assembly_parts(job) -> list[dict]:
+    result = getattr(job, "result", None) or {}
+    if not result.get("is_assembly"):
+        return []
+    return result.get("parts") or []
+
+
+def _get_job_part(job, part_index: int) -> dict:
+    parts = _assembly_parts(job)
+    for fallback_index, part in enumerate(parts):
+        solid_index = part.get("solid_index", fallback_index)
+        try:
+            solid_index = int(solid_index)
+        except Exception:
+            solid_index = fallback_index
+        if solid_index == part_index:
+            return part
+    raise HTTPException(status_code=404, detail="Assembly onderdeel niet gevonden")
+
+
+def _part_storage_dir(job_id: str, part_index: int) -> str:
+    return os.path.join(UPLOAD_DIR, job_id, "parts", f"part_{part_index:03d}")
+
+
+def _part_step_filename(part: dict, part_index: int) -> str:
+    part_name = (
+        part.get("solid_name")
+        or part.get("file")
+        or f"part_{part_index + 1:02d}"
+    )
+    return f"{part_index + 1:02d}_{_safe_download_stem(part_name, fallback=f'part_{part_index + 1:02d}')}.step"
+
+
+def _part_download_stem(part: dict, part_index: int) -> str:
+    return Path(_part_step_filename(part, part_index)).stem
+
+
+def _ensure_part_step_file(job, part_index: int) -> tuple[dict, str]:
+    if not job.file_path or not os.path.exists(job.file_path):
+        raise HTTPException(status_code=404, detail="Bron STEP bestand is niet meer beschikbaar")
+
+    part = _get_job_part(job, part_index)
+    part_dir = _part_storage_dir(job.job_id, part_index)
+    os.makedirs(part_dir, exist_ok=True)
+    cached_path = os.path.join(part_dir, _part_step_filename(part, part_index))
+    if os.path.exists(cached_path):
+        return part, cached_path
+
+    extracted = extract_solids_to_temp_files(job.file_path)
+    if not extracted:
+        raise HTTPException(status_code=404, detail="Losse onderdeel STEP kon niet uit de samenstelling worden gehaald")
+
+    tmp_dir = extracted[0].get("tmp_dir")
+    try:
+        selected = None
+        for item in extracted:
+            if int(item.get("index", -1)) == int(part_index):
+                selected = item
+                break
+        if not selected:
+            raise HTTPException(status_code=404, detail="Assembly onderdeel STEP niet gevonden")
+        shutil.copyfile(selected["path"], cached_path)
+        return part, cached_path
+    finally:
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _build_part_unfold_result(job, part_index: int, result: dict | None, error: str | None = None) -> dict | None:
+    payload = _build_unfold_result(job.job_id, result, error)
+    if not payload:
+        return None
+    payload["flat_step_url"] = (
+        f"/api/v1/jobs/{job.job_id}/parts/{part_index}/unfold/artifacts/flat-step"
+        if payload.get("flat_step_path") and os.path.exists(payload["flat_step_path"])
+        else None
+    )
+    dxf_path = payload.get("dxf_path") or payload.get("output_dxf")
+    payload["dxf_url"] = (
+        f"/api/v1/jobs/{job.job_id}/parts/{part_index}/unfold/artifacts/dxf"
+        if dxf_path and os.path.exists(dxf_path)
+        else None
+    )
+    return payload
+
+
+def _part_unfold_result_path(job_id: str, part_index: int) -> str:
+    return os.path.join(_part_storage_dir(job_id, part_index), "unfold", "result.json")
+
+
+def _load_cached_part_unfold_result(job, part_index: int) -> dict | None:
+    result_path = _part_unfold_result_path(job.job_id, part_index)
+    if not os.path.exists(result_path):
+        return None
+    try:
+        payload = json.loads(Path(result_path).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return _build_part_unfold_result(job, part_index, payload)
+
+
+def _ensure_part_unfold_result(job, part_index: int) -> dict:
+    cached = _load_cached_part_unfold_result(job, part_index)
+    if cached:
+        return cached
+
+    part, part_step_path = _ensure_part_step_file(job, part_index)
+    output_dir = os.path.join(_part_storage_dir(job.job_id, part_index), "unfold")
+    os.makedirs(output_dir, exist_ok=True)
+    part_name = _part_download_stem(part, part_index)
+    from types import SimpleNamespace
+
+    analysis_stub = SimpleNamespace(
+        bend_count_erp=(part or {}).get("production", {}).get("bends_total", 0),
+        thickness=(part or {}).get("thickness") or 0.0,
+        is_sheet_metal=True,
+    )
+
+    try:
+        result = run_unfold_to_step(part_step_path, output_dir, part_name, analysis_stub)
+        result["dxf_path"] = os.path.join(output_dir, f"{part_name}_flat.dxf")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    payload = _build_part_unfold_result(job, part_index, result) or {"success": False, "error": "Unfold-resultaat ontbreekt"}
+    result_path = _part_unfold_result_path(job.job_id, part_index)
+    Path(result_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(result_path).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return payload
+
+
+def _build_part_step_zip(job) -> Response:
+    parts = _assembly_parts(job)
+    if not parts:
+        raise HTTPException(status_code=404, detail="Geen assembly onderdelen beschikbaar")
+
+    bundle = io.BytesIO()
+    base_name = _safe_download_stem(getattr(job, "file_name", None) or job.job_id, fallback=job.job_id)
+    folder_name = f"{base_name}_parts_step"
+    with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for fallback_index, part in enumerate(parts):
+            part_index = int(part.get("solid_index", fallback_index))
+            resolved_part, step_path = _ensure_part_step_file(job, part_index)
+            archive.write(step_path, arcname=f"{folder_name}/{_part_step_filename(resolved_part, part_index)}")
+
+    return Response(
+        content=bundle.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{folder_name}.zip"'},
+    )
+
+
+def _build_part_unfold_zip(job) -> Response:
+    parts = _assembly_parts(job)
+    if not parts:
+        raise HTTPException(status_code=404, detail="Geen assembly onderdelen beschikbaar")
+
+    bundle = io.BytesIO()
+    base_name = _safe_download_stem(getattr(job, "file_name", None) or job.job_id, fallback=job.job_id)
+    folder_name = f"{base_name}_parts_unfold"
+    written = 0
+    with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for fallback_index, part in enumerate(parts):
+            part_index = int(part.get("solid_index", fallback_index))
+            payload = _ensure_part_unfold_result(job, part_index)
+            artifacts = [
+                (payload.get("flat_step_path"), f"{folder_name}/{_part_download_stem(part, part_index)}_flat.step"),
+                (payload.get("dxf_path") or payload.get("output_dxf"), f"{folder_name}/{_part_download_stem(part, part_index)}_flat.dxf"),
+            ]
+            for artifact_path, archive_name in artifacts:
+                if artifact_path and os.path.exists(artifact_path):
+                    archive.write(artifact_path, arcname=archive_name)
+                    written += 1
+
+    if not written:
+        raise HTTPException(status_code=404, detail="Geen losse unfold-bestanden gevonden")
 
     return Response(
         content=bundle.getvalue(),
@@ -573,6 +759,10 @@ async def download_job_bundle(job_id: str, bundle_name: str):
         return _build_xml_response(job.result)
     if bundle_name == "part-xmls":
         return _build_part_xml_zip(job)
+    if bundle_name == "part-steps":
+        return _build_part_step_zip(job)
+    if bundle_name == "part-unfolds":
+        return _build_part_unfold_zip(job)
     if bundle_name == "unfold-files":
         return _build_unfold_zip(job)
 
@@ -592,6 +782,82 @@ async def get_job_step_file(job_id: str):
         filename=job.file_name or f"{job_id}.step",
         media_type="application/step",
     )
+
+
+@router.get("/jobs/{job_id}/parts/{part_index}")
+async def get_job_part(job_id: str, part_index: int):
+    """Get a single embedded assembly part result."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "completed" or not getattr(job, "result", None):
+        raise HTTPException(status_code=409, detail="Analysis job is not completed yet")
+    part = _get_job_part(job, part_index)
+    return {
+        "job_id": job.job_id,
+        "part_index": part_index,
+        "source_step_available": bool(job.file_path and os.path.exists(job.file_path)),
+        "result": part,
+    }
+
+
+@router.get("/jobs/{job_id}/parts/{part_index}/step")
+async def get_job_part_step_file(job_id: str, part_index: int):
+    """Download a single part STEP extracted from an assembly job."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "completed" or not getattr(job, "result", None):
+        raise HTTPException(status_code=409, detail="Analysis job is not completed yet")
+    part, step_path = _ensure_part_step_file(job, part_index)
+    return FileResponse(
+        step_path,
+        filename=_part_step_filename(part, part_index),
+        media_type="application/step",
+    )
+
+
+@router.get("/jobs/{job_id}/parts/{part_index}/unfold", response_model=UnfoldStatus)
+async def get_job_part_unfold_status(job_id: str, part_index: int):
+    """Build or return unfold results for a single assembly part."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "completed" or not getattr(job, "result", None):
+        raise HTTPException(status_code=409, detail="Analysis job is not completed yet")
+
+    payload = _ensure_part_unfold_result(job, part_index)
+    return UnfoldStatus(status="completed", result=UnfoldResult(**payload))
+
+
+@router.get("/jobs/{job_id}/parts/{part_index}/unfold/artifacts/{artifact_name}")
+async def get_job_part_unfold_artifact(job_id: str, part_index: int, artifact_name: str):
+    """Download unfold artifacts for a single assembly part."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "completed" or not getattr(job, "result", None):
+        raise HTTPException(status_code=409, detail="Analysis job is not completed yet")
+
+    payload = _ensure_part_unfold_result(job, part_index)
+    artifact_map = {
+        "flat-step": (
+            payload.get("flat_step_path"),
+            f"{_part_download_stem(_get_job_part(job, part_index), part_index)}_flat.step",
+            "application/step",
+        ),
+        "dxf": (
+            payload.get("dxf_path") or payload.get("output_dxf"),
+            f"{_part_download_stem(_get_job_part(job, part_index), part_index)}_flat.dxf",
+            "application/dxf",
+        ),
+    }
+    if artifact_name not in artifact_map:
+        raise HTTPException(status_code=404, detail="Unknown artifact")
+    artifact_path, download_name, media_type = artifact_map[artifact_name]
+    if not artifact_path or not os.path.exists(artifact_path):
+        raise HTTPException(status_code=404, detail="Artifact file not found")
+    return FileResponse(artifact_path, filename=download_name, media_type=media_type)
 
 
 @router.get("/health", response_model=HealthResponse)

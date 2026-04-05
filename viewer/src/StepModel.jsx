@@ -5,11 +5,11 @@ import { parseStepFile } from './stepLoader'
 const MATERIAL_PRESETS = {
   technical_steel: {
     label: 'Technisch staal',
-    color: '#c9d1d9',
-    roughness: 0.62,
-    metalness: 0.56,
+    color: '#d1d8df',
+    roughness: 0.36,
+    metalness: 0.82,
     edgeColor: '#223243',
-    envIntensity: 1.0,
+    envIntensity: 1.38,
   },
   s235jr_en10025: {
     label: 'S235JR (NEN-EN 10025-2)',
