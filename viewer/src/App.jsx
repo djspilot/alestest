@@ -212,18 +212,8 @@ function AppContent() {
         return response.json()
       })
       .then((job) => {
-        let baseJob = job
-        if (partIndex != null) {
-          const partResult = resolvePartFromJob(job, partIndex)
-          if (partResult) {
-            baseJob = {
-              ...job,
-              result: partResult,
-            }
-          }
-        }
-        hydratedJob = baseJob
-        if (baseJob?.status !== 'completed') return baseJob
+        hydratedJob = job
+        if (job?.status !== 'completed') return job
         const unfoldUrl = partIndex != null
           ? `${apiBase}/api/v1/jobs/${jobId}/parts/${partIndex}/unfold`
           : `${apiBase}/api/v1/jobs/${jobId}/unfold`
@@ -242,9 +232,9 @@ function AppContent() {
             return response.json()
           })
           .then((unfoldStatus) => {
-            return mergeJobWithUnfoldResult(baseJob, unfoldStatus)
+            return mergeJobWithUnfoldResult(job, unfoldStatus)
           })
-          .catch(() => baseJob)
+          .catch(() => job)
       })
       .then((job) => {
         hydratedJob = job
