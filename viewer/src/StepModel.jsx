@@ -49,6 +49,16 @@ export function getViewerMaterialPresets() {
   return MATERIAL_PRESETS
 }
 
+export function getViewerRenderModes() {
+  return [
+    { value: 'studio', label: 'Studio' },
+    { value: 'analysis', label: 'Analyse' },
+    { value: 'xray', label: 'X-ray' },
+    { value: 'wireframe', label: 'Wireframe' },
+    { value: 'edges', label: 'Edges only' },
+  ]
+}
+
 function edgeThresholdForMesh(vertexCount) {
   if (vertexCount > 250000) return 72
   if (vertexCount > 120000) return 58
@@ -147,11 +157,53 @@ function StepGeometry({
   onDebug,
   onSurfacePick,
   parseMode = 'auto',
-  renderMode = 'clean',
+  renderMode = 'studio',
   materialPreset = 'technical_steel',
 }) {
   const [meshData, setMeshData] = useState(null)
   const materialStyle = MATERIAL_PRESETS[materialPreset] || MATERIAL_PRESETS.technical_steel
+  const surfaceStyle = useMemo(() => {
+    if (renderMode === 'xray') {
+      return {
+        type: 'physical',
+        opacity: 0.16,
+        roughness: Math.min(materialStyle.roughness + 0.08, 1),
+        metalness: materialStyle.metalness,
+        transmission: 0.22,
+        thickness: 0.8,
+        clearcoat: 0.75,
+        reflectivity: 0.9,
+        edgeOpacity: 0.96,
+        edgeColor: '#0f1720',
+      }
+    }
+    if (renderMode === 'analysis') {
+      return {
+        type: 'physical',
+        opacity: 0.28,
+        roughness: Math.min(materialStyle.roughness + 0.04, 1),
+        metalness: materialStyle.metalness,
+        transmission: 0.0,
+        thickness: 0.0,
+        clearcoat: 0.95,
+        reflectivity: 1.0,
+        edgeOpacity: 1,
+        edgeColor: '#111827',
+      }
+    }
+    return {
+      type: 'physical',
+      opacity: 0.96,
+      roughness: materialStyle.roughness,
+      metalness: materialStyle.metalness,
+      transmission: 0.0,
+      thickness: 0.0,
+      clearcoat: 0.9,
+      reflectivity: 1.0,
+      edgeOpacity: renderMode === 'edges' ? 1 : 0.9,
+      edgeColor: materialStyle.edgeColor,
+    }
+  }, [materialStyle, renderMode])
 
   useEffect(() => {
     let cancelled = false
@@ -263,23 +315,41 @@ function StepGeometry({
                 )
               }}
             >
-              <meshStandardMaterial
-                color={materialStyle.color}
-                roughness={materialStyle.roughness}
-                metalness={materialStyle.metalness}
-                envMapIntensity={materialStyle.envIntensity}
-                transparent
-                opacity={renderMode === 'ghost' ? 0.09 : 0.34}
-                side={THREE.DoubleSide}
-                polygonOffset
-                polygonOffsetFactor={1}
-                polygonOffsetUnits={1}
-              />
+              {renderMode === 'wireframe' ? (
+                <meshBasicMaterial
+                  color={materialStyle.edgeColor}
+                  wireframe
+                  transparent
+                  opacity={0.92}
+                  side={THREE.DoubleSide}
+                />
+              ) : (
+                <meshPhysicalMaterial
+                  color={materialStyle.color}
+                  roughness={surfaceStyle.roughness}
+                  metalness={surfaceStyle.metalness}
+                  envMapIntensity={materialStyle.envIntensity}
+                  clearcoat={surfaceStyle.clearcoat}
+                  clearcoatRoughness={Math.max(surfaceStyle.roughness * 0.55, 0.08)}
+                  reflectivity={surfaceStyle.reflectivity}
+                  transmission={surfaceStyle.transmission}
+                  thickness={surfaceStyle.thickness}
+                  ior={1.5}
+                  transparent
+                  opacity={surfaceStyle.opacity}
+                  side={THREE.DoubleSide}
+                  polygonOffset
+                  polygonOffsetFactor={1}
+                  polygonOffsetUnits={1}
+                />
+              )}
             </mesh>
           )}
-          <lineSegments geometry={item.lineGeometry}>
-            <lineBasicMaterial color={materialStyle.edgeColor} transparent opacity={0.88} />
-          </lineSegments>
+          {renderMode !== 'wireframe' && (
+            <lineSegments geometry={item.lineGeometry}>
+              <lineBasicMaterial color={surfaceStyle.edgeColor} transparent opacity={surfaceStyle.edgeOpacity} />
+            </lineSegments>
+          )}
         </React.Fragment>
       ))}
     </group>

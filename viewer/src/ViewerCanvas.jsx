@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import StepModel from './StepModel'
 import { isPreUnfoldStageName, MERGED_HOLES_STAGE, PRE_UNFOLD_HOLES_STAGE } from './pipelineUi'
 import { getFoldSegmentId, normalizeFoldId, isIrregularHole, isHiddenHoleCandidate } from './lib/holes'
@@ -96,6 +97,43 @@ function CameraFitter({ modelInfo, controlsRef }) {
     controlsRef.current.saveState()
     invalidate()
   }, [camera, controlsRef, invalidate, modelInfo])
+
+  return null
+}
+
+function StudioEnvironment({ renderMode }) {
+  const { gl, scene } = useThree()
+
+  useEffect(() => {
+    const pmrem = new THREE.PMREMGenerator(gl)
+    const envTexture = pmrem.fromScene(new RoomEnvironment(), 0.05).texture
+    const previousEnvironment = scene.environment
+    scene.environment = envTexture
+    return () => {
+      scene.environment = previousEnvironment || null
+      envTexture.dispose?.()
+      pmrem.dispose()
+    }
+  }, [gl, scene])
+
+  useEffect(() => {
+    if (renderMode === 'xray') {
+      scene.background = new THREE.Color('#edf4fb')
+      return () => {
+        scene.background = null
+      }
+    }
+    if (renderMode === 'analysis') {
+      scene.background = new THREE.Color('#eef2f7')
+      return () => {
+        scene.background = null
+      }
+    }
+    scene.background = new THREE.Color('#e8eef5')
+    return () => {
+      scene.background = null
+    }
+  }, [renderMode, scene])
 
   return null
 }
@@ -1603,8 +1641,8 @@ export default function ViewerCanvas({
   showHiddenHoles = false,
   highlightHiddenHoleLocations = false,
   materialPreset = 'technical_steel',
+  renderMode = 'studio',
 }) {
-  const renderMode = 'clean'
   const holeItems = activeHoleVisuals?.items || backendVisuals?.holes?.items || []
   const visibleHoleItems = showHiddenHoles ? holeItems : holeItems.filter((hole) => !isHiddenHoleCandidate(hole))
   const bend3dItems = backendVisuals?.unfold?.bends_3d || []
@@ -1638,11 +1676,14 @@ export default function ViewerCanvas({
       camera={{ position: [150, 100, 150], fov: 40, near: 0.1, far: 10000 }}
       dpr={[1, 1.25]}
       gl={{ antialias: true, powerPreference: 'high-performance' }}
-      style={{ background: 'linear-gradient(180deg, #f0f4f8 0%, #e2e8f0 100%)' }}
+      style={{ background: renderMode === 'analysis' ? '#eef2f7' : '#e8eef5' }}
     >
-      <ambientLight intensity={0.55 * Math.PI} />
-      <hemisphereLight args={['#ffffff', '#cbd5e1', 0.75]} />
-      <directionalLight position={[100, 150, 100]} intensity={0.55} />
+      <StudioEnvironment renderMode={renderMode} />
+      <ambientLight intensity={0.35 * Math.PI} />
+      <hemisphereLight args={['#ffffff', '#b7c2cf', renderMode === 'xray' ? 0.95 : 0.65]} />
+      <directionalLight position={[140, 180, 120]} intensity={1.15} />
+      <directionalLight position={[-110, 60, -80]} intensity={0.55} color="#dbeafe" />
+      <directionalLight position={[0, -120, 80]} intensity={0.3} color="#fff7ed" />
 
       <StepModel
         buffer={fileBuffer}
@@ -1684,7 +1725,7 @@ export default function ViewerCanvas({
         showHiddenHoles={showHiddenHoles}
         highlightHiddenHoleLocations={highlightHiddenHoleLocations}
       />
-      {!useFlatView && <gridHelper args={[500, 18, '#d4d9e1', '#edf1f5']} />}
+      {!useFlatView && renderMode !== 'studio' && <gridHelper args={[500, 18, '#d4d9e1', '#edf1f5']} />}
       <SceneControls controlsRef={controlsRef} />
     </Canvas>
   )

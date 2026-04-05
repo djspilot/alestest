@@ -8,7 +8,7 @@ import { useViewer } from './hooks/useViewer'
 import { fetchFileAsBrowserFile } from './lib/files'
 import { normalizeStageName, MERGED_HOLES_STAGE } from './pipelineUi'
 import { getApiKeyHeaders, getDefaultPipelineApiBase } from './pipelineClient'
-import { getViewerMaterialPresets } from './StepModel'
+import { getViewerMaterialPresets, getViewerRenderModes } from './StepModel'
 
 import { normalizeFoldId, normalizeUnfoldVisuals } from './lib/holes'
 
@@ -64,6 +64,7 @@ function AppContent() {
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [loadingDefaultStep, setLoadingDefaultStep] = useState(false)
   const [materialPreset, setMaterialPreset] = useState(() => window.localStorage.getItem('ales-viewer-material-preset') || 'technical_steel')
+  const [renderMode, setRenderMode] = useState(() => window.localStorage.getItem('ales-viewer-render-mode') || 'studio')
   const materialOptions = useMemo(
     () =>
       Object.entries(getViewerMaterialPresets()).map(([value, config]) => ({
@@ -72,6 +73,7 @@ function AppContent() {
       })),
     [],
   )
+  const renderModeOptions = useMemo(() => getViewerRenderModes(), [])
 
   // Pipeline hook manages all pipeline state + API communication
   const pipeline = usePipelineContext()
@@ -95,6 +97,10 @@ function AppContent() {
   useEffect(() => {
     window.localStorage.setItem('ales-viewer-material-preset', materialPreset)
   }, [materialPreset])
+
+  useEffect(() => {
+    window.localStorage.setItem('ales-viewer-render-mode', renderMode)
+  }, [renderMode])
 
   const latestErrorDebugEvent = useMemo(() => {
     const events = viewer.debugEvents || []
@@ -336,6 +342,20 @@ function AppContent() {
               ))}
             </select>
           )}
+          {viewer.fileName && (
+            <select
+              className="header-toggle-btn"
+              value={renderMode}
+              onChange={(event) => setRenderMode(event.target.value)}
+              title="Render mode"
+            >
+              {renderModeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          )}
           <button className="header-toggle-btn" onClick={() => setRightPanelOpen((v) => !v)}>
             {rightPanelOpen ? 'Verberg rechts' : 'Toon rechts'}
           </button>
@@ -443,6 +463,7 @@ function AppContent() {
                 showHiddenHoles={selection.showHiddenHoles}
                 highlightHiddenHoleLocations={selection.highlightHiddenHoleLocations}
                 materialPreset={materialPreset}
+                renderMode={renderMode}
               />
             </Suspense>
           )}
