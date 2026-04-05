@@ -152,6 +152,17 @@ export default function StageDetailsPanel({
       onSelectEventIndex(0)
     }
   }, [launchedPartIndex, onSelectEventIndex, onSelectStageIndex, pipelineResult])
+  const selectedPart =
+    pipelineResult?.is_assembly && selectedPartIndex != null
+      ? (pipelineResult.parts || [])[selectedPartIndex] || null
+      : null
+  const selectedPartTimelineEvents = Array.isArray(selectedPart?.timeline_events) ? selectedPart.timeline_events : []
+  const partTimelineStatus =
+    pipelineResult?.is_assembly && selectedPartIndex != null
+      ? (selectedPartTimelineEvents.length > 0
+          ? `Part timeline actief (${selectedPartTimelineEvents.length} events)`
+          : 'Geen part timeline_events gevonden, job timeline fallback actief')
+      : null
   const effectiveGroupedStages = useMemo(() => {
     if (pipelineResult?.is_assembly && selectedPartIndex != null) {
       const parts = pipelineResult.parts || []
@@ -542,6 +553,11 @@ export default function StageDetailsPanel({
             }}
           />
         )}
+        {partTimelineStatus && (
+          <div className="timeline-text" style={{ marginBottom: 8, padding: '6px 8px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+            {partTimelineStatus}
+          </div>
+        )}
         {renderStageList() && (
           <div className="timeline-stage-list" style={{ maxHeight: '40vh', overflowY: 'auto', marginBottom: 8 }}>
             {renderStageList()}
@@ -570,6 +586,11 @@ export default function StageDetailsPanel({
             onSelectPart?.(partIndex)
           }}
         />
+      )}
+      {partTimelineStatus && (
+        <div className="timeline-text" style={{ marginBottom: 8, padding: '6px 8px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+          {partTimelineStatus}
+        </div>
       )}
       {renderStageList() && (
         <div className="timeline-stage-list" style={{ maxHeight: '40vh', overflowY: 'auto', marginBottom: 8 }}>
