@@ -10,7 +10,7 @@ import { fetchFileAsBrowserFile } from './lib/files'
 import { normalizeStageName, MERGED_HOLES_STAGE } from './pipelineUi'
 import { getApiKeyHeaders, getDefaultPipelineApiBase } from './pipelineClient'
 
-import { normalizeFoldId } from './lib/holes'
+import { normalizeFoldId, normalizeUnfoldVisuals } from './lib/holes'
 
 import { EMPTY_PIPELINE_STATE } from './hooks/usePipeline'
 
@@ -19,7 +19,7 @@ const ViewerCanvas = lazy(() => import('./ViewerCanvas'))
 const VIEWER_REVISION = '026734d'
 
 function mergeJobWithUnfoldResult(job, unfoldStatus) {
-  const unfoldResult = unfoldStatus?.result
+  const unfoldResult = normalizeUnfoldVisuals(unfoldStatus?.result)
   if (!job || !unfoldResult) return job
 
   const visuals = { ...(job.result?.visuals || {}) }

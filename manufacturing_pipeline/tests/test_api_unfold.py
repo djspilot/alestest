@@ -81,3 +81,52 @@ def test_unfold_flow_for_completed_job(tmp_path, monkeypatch):
     artifact_response = client.get("/api/v1/jobs/job-1/unfold/artifacts/flat-step")
     assert artifact_response.status_code == 200
     assert artifact_response.content == b"flat-step"
+
+
+def test_unfold_status_derives_merged_lines_from_groups(tmp_path, monkeypatch):
+    db_path = tmp_path / "api.db"
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+
+    test_jobs = JobManager(str(db_path))
+    monkeypatch.setattr(routes_module, "jobs", test_jobs)
+    monkeypatch.setattr(routes_module, "UPLOAD_DIR", str(upload_dir))
+
+    step_path = upload_dir / "job-2" / "part.step"
+    step_path.parent.mkdir(parents=True, exist_ok=True)
+    step_path.write_text("ISO-10303-21;")
+
+    job = test_jobs.create("job-2", str(step_path), file_name="part.step")
+    test_jobs.mark_completed(job.job_id, {"file": "part.step", "success": True})
+    test_jobs.mark_unfold_completed(
+        job.job_id,
+        {
+            "success": True,
+            "flat_length": 1903.0,
+            "flat_width": 199.16,
+            "fold_lines": 0,
+            "raw_fold_lines": None,
+            "fold_details": [],
+            "bends_logical": [],
+            "bend_line_segments": [
+                {"index": 0, "axis": "Y", "axis_span": [1733.0, 1968.0], "center": [-44.791, 1850.5, 5.0]},
+                {"index": 1, "axis": "Y", "axis_span": [65.0, 1453.0], "center": [-44.791, 759.0, 5.0]},
+                {"index": 2, "axis": "Y", "axis_span": [1483.0, 1703.0], "center": [-44.791, 1593.0, 5.0]},
+                {"index": 3, "axis": "Y", "axis_span": [979.0, 1968.0], "center": [44.791, 1473.5, 5.0]},
+                {"index": 4, "axis": "Y", "axis_span": [65.0, 902.5], "center": [44.791, 483.75, 5.0]},
+            ],
+            "bend_line_groups": [
+                {"id": 1, "axis": "Y", "segment_indices": [0, 1, 2]},
+                {"id": 2, "axis": "Y", "segment_indices": [3, 4]},
+            ],
+        },
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/v1/jobs/job-2/unfold")
+    assert response.status_code == 200
+    payload = response.json()["result"]
+    assert payload["fold_lines"] == 2
+    assert payload["raw_fold_lines"] == 5
+    assert len(payload["fold_details"]) == 2
+    assert payload["fold_details"][0]["segment_indices"] == [1, 2, 3]

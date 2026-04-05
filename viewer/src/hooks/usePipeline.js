@@ -7,7 +7,7 @@ import {
   normalizeStageName,
   parseIsoToMs,
 } from '../pipelineUi'
-import { normalizeFoldId } from '../lib/holes'
+import { normalizeFoldId, normalizeUnfoldVisuals } from '../lib/holes'
 
 const EMPTY_PIPELINE_STATE = {
   status: 'idle',
@@ -310,6 +310,9 @@ export function usePipeline() {
       if (event.stage === 'Classify geometry' && event.type === 'bends_detected') {
         visuals.classification = { ...(visuals.classification || {}), bends: event.payload }
       }
+    }
+    if (visuals.unfold) {
+      visuals.unfold = normalizeUnfoldVisuals(visuals.unfold)
     }
     return visuals
   }, [backendVisuals, pipelineState?.events])

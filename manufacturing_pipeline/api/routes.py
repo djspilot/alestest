@@ -53,6 +53,81 @@ logging.getLogger().addHandler(_buf_handler)
 DEFAULT_VIEWER_STEP = Path(__file__).resolve().parents[2] / "data" / "testfile" / "nieuwmodel.step"
 
 
+def _build_fold_detail_from_group(group: dict, segments: list[dict], index: int) -> dict | None:
+    member_indexes = [int(value) for value in (group.get("segment_indices") or []) if isinstance(value, (int, float))]
+    members = []
+    for member_index in member_indexes:
+        for fallback_index, segment in enumerate(segments):
+            segment_index = segment.get("index", fallback_index)
+            try:
+                segment_index = int(segment_index)
+            except Exception:
+                segment_index = fallback_index
+            if segment_index == member_index:
+                members.append(segment)
+                break
+    if not members:
+        return None
+
+    first = members[0]
+    center = first.get("center") or [0.0, 0.0, 0.0]
+    fixed_x = float(center[0]) if len(center) > 0 else 0.0
+    fixed_y = float(center[1]) if len(center) > 1 else 0.0
+    fixed_z = float(center[2]) if len(center) > 2 else 0.0
+    axis = str(group.get("axis") or first.get("axis") or "Y").upper()
+    span_values = []
+    for segment in members:
+        axis_span = segment.get("axis_span") or []
+        if len(axis_span) >= 2:
+          span_values.extend([float(axis_span[0]), float(axis_span[1])])
+    if not span_values:
+        return None
+
+    if axis == "X":
+        start = [min(span_values), fixed_y, fixed_z]
+        end = [max(span_values), fixed_y, fixed_z]
+    else:
+        start = [fixed_x, min(span_values), fixed_z]
+        end = [fixed_x, max(span_values), fixed_z]
+
+    return {
+        "id": int(group.get("id") or (index + 1)),
+        "axis": axis.lower(),
+        "center": [
+            (float(start[0]) + float(end[0])) / 2.0,
+            (float(start[1]) + float(end[1])) / 2.0,
+            (float(start[2]) + float(end[2])) / 2.0,
+        ],
+        "start": start,
+        "end": end,
+        "length": abs(float(end[0]) - float(start[0])) + abs(float(end[1]) - float(start[1])),
+        "segment_indices": [member_index + 1 for member_index in member_indexes],
+    }
+
+
+def _normalize_unfold_payload(result: dict | None) -> dict:
+    payload = dict(result or {})
+    segments = payload.get("bend_line_segments") or []
+    groups = payload.get("bend_line_groups") or []
+    fold_details = payload.get("fold_details") or []
+    bends_logical = payload.get("bends_logical") or []
+
+    if not fold_details and groups and segments:
+        fold_details = [
+            detail
+            for index, group in enumerate(groups)
+            if (detail := _build_fold_detail_from_group(group, segments, index)) is not None
+        ]
+        payload["fold_details"] = fold_details
+    if not bends_logical and fold_details:
+        payload["bends_logical"] = [{"id": detail.get("id")} for detail in fold_details]
+    if not payload.get("fold_lines") and fold_details:
+        payload["fold_lines"] = len(fold_details)
+    if payload.get("raw_fold_lines") is None and segments:
+        payload["raw_fold_lines"] = len(segments)
+    return payload
+
+
 def _refresh_live_summary(summary_raw: dict | None) -> dict | None:
     if not summary_raw:
         return None
@@ -98,7 +173,7 @@ def _build_unfold_result(job_id: str, result: dict | None, error: str | None = N
     if not result and not error:
         return None
 
-    payload = dict(result or {})
+    payload = _normalize_unfold_payload(result)
     payload.setdefault("success", False)
     payload["error"] = error or payload.get("error")
     payload["flat_step_url"] = (

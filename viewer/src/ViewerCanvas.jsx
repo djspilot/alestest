@@ -1115,31 +1115,45 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
     const normalVector = axisVectorForKey(thicknessAxis)
     const epsilon = Math.max((rankedAxes[2]?.size || 0) * 0.6, 0.2)
 
-    const segmentRows = bendSegments.length > 0
-      ? bendSegments.map((segment, idx) => {
-          const matchingDetail =
-            foldDetails.find((detail) => (detail.segment_indices || []).includes((Number(segment.index) || idx) + 1)) || {}
-          const logicalId = normalizeFoldId(matchingDetail.id || null)
-          const matchingLogical =
-            bends.find((bend) => normalizeFoldId(bend.id) === logicalId) || {}
-          return { detail: matchingDetail, logical: matchingLogical, segment, idx }
-        })
-      : Array.from({ length: foldCount }, (_, idx) => ({
-          detail: foldDetails[idx] || {},
-          logical: bends[idx] || {},
-          segment: bendSegments[idx] || {},
-          idx,
-        }))
+    let segmentRows
+    if (foldDetails.length > 0) {
+      segmentRows = foldDetails.map((detail, idx) => {
+        const logicalId = normalizeFoldId(detail.id || null)
+        const matchingLogical =
+          bends.find((bend) => normalizeFoldId(bend.id) === logicalId) || {}
+        return { detail, logical: matchingLogical, segment: null, idx }
+      })
+    } else if (bendSegments.length > 0) {
+      segmentRows = bendSegments.map((segment, idx) => {
+        const matchingDetail =
+          foldDetails.find((detail) => (detail.segment_indices || []).includes((Number(segment.index) || idx) + 1)) || {}
+        const logicalId = normalizeFoldId(matchingDetail.id || null)
+        const matchingLogical =
+          bends.find((bend) => normalizeFoldId(bend.id) === logicalId) || {}
+        return { detail: matchingDetail, logical: matchingLogical, segment, idx }
+      })
+    } else {
+      segmentRows = Array.from({ length: foldCount }, (_, idx) => ({
+        detail: foldDetails[idx] || {},
+        logical: bends[idx] || {},
+        segment: bendSegments[idx] || {},
+        idx,
+      }))
+    }
 
     return segmentRows.map(({ detail, logical, segment, idx }) => {
-      const id = bendSegments.length > 0 ? getFoldSegmentId(segment, idx) : normalizeFoldId(detail.id || logical.id || idx + 1)
+      const id = detail?.id != null
+        ? normalizeFoldId(detail.id)
+        : segment
+          ? getFoldSegmentId(segment, idx)
+          : normalizeFoldId(logical.id || idx + 1)
       const detailCenter =
-        Array.isArray(segment.center) && segment.center.length >= 3
+        Array.isArray(segment?.center) && segment.center.length >= 3
           ? segment.center
-          : Array.isArray(detail.center) && detail.center.length >= 3
+        : Array.isArray(detail.center) && detail.center.length >= 3
             ? detail.center
             : [0, 0, 0]
-      const segmentAxis = String(segment.axis || detail.axis || '').toLowerCase()
+      const segmentAxis = String(segment?.axis || detail.axis || '').toLowerCase()
       const lineAxis = inPlaneAxes.includes(segmentAxis) ? segmentAxis : inPlaneAxes[0]
       const varyingAxis = inPlaneAxes.find((axisKey) => axisKey !== lineAxis) || inPlaneAxes[1] || inPlaneAxes[0]
       const lineVector = axisVectorForKey(lineAxis)
@@ -1147,9 +1161,9 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
       const basis = new THREE.Matrix4().makeBasis(lineVector, varyingVector, normalVector)
       const quaternion = new THREE.Quaternion().setFromRotationMatrix(basis)
       const localStart = toLocalPoint(segment.start || detail.start, modelInfo?.center, normalVector, epsilon)
-      const localEnd = toLocalPoint(segment.end || detail.end, modelInfo?.center, normalVector, epsilon)
+      const localEnd = toLocalPoint(segment?.end || detail.end, modelInfo?.center, normalVector, epsilon)
       const requestedLength =
-        Number(segment.length || detail.length || logical.length) || Math.max(Math.min(length, width) * 0.9, 10)
+        Number(segment?.length || detail.length || logical.length) || Math.max(Math.min(length, width) * 0.9, 10)
       const shouldPreferPrimaryAxis = requestedLength > secondarySize * 1.35 && primarySize > secondarySize * 1.2
       const fallbackAxis = shouldPreferPrimaryAxis ? primaryAxis : lineAxis
       const fallbackQuaternion = new THREE.Quaternion().setFromUnitVectors(
@@ -1174,7 +1188,7 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
         lineLength: requestedLength,
         angle: logical.angle ?? null,
         direction: logical.type || null,
-        segmentIndex: Number.isFinite(Number(segment.index)) ? Number(segment.index) + 1 : idx + 1,
+        segmentIndex: Number.isFinite(Number(segment?.index)) ? Number(segment.index) + 1 : idx + 1,
         logicalFoldId: normalizeFoldId(detail.id || logical.id || null),
       }
     })
