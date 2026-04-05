@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo } from 'react'
-import { Canvas, useThree } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
@@ -146,6 +146,103 @@ function StudioEnvironment({ renderMode }) {
   }, [renderMode, scene])
 
   return null
+}
+
+function CameraRigLights({ modelInfo, lightMode, renderMode }) {
+  const { camera } = useThree()
+  const keyRef = React.useRef(null)
+  const fillRef = React.useRef(null)
+  const rimRef = React.useRef(null)
+  const pointRef = React.useRef(null)
+
+  const lighting = useMemo(() => {
+    if (lightMode === 'soft') {
+      return {
+        ambient: 0.42 * Math.PI,
+        hemi: 0.75,
+        key: 0.95,
+        fill: 0.42,
+        rim: 0.22,
+        point: 24,
+      }
+    }
+    if (lightMode === 'contrast') {
+      return {
+        ambient: 0.24 * Math.PI,
+        hemi: 0.5,
+        key: 1.35,
+        fill: 0.68,
+        rim: 0.42,
+        point: 35,
+      }
+    }
+    return {
+      ambient: 0.5 * Math.PI,
+      hemi: 0.95,
+      key: 1.55,
+      fill: 0.85,
+      rim: 0.5,
+      point: 55,
+    }
+  }, [lightMode])
+
+  useFrame(() => {
+    const radius = Math.max(modelInfo?.boundingRadius || 120, 60)
+    const target = new THREE.Vector3(0, 0, 0)
+    const forward = new THREE.Vector3()
+    camera.getWorldDirection(forward)
+    const up = camera.up.clone().normalize()
+    const right = new THREE.Vector3().crossVectors(forward, up).normalize()
+
+    const keyPos = camera.position
+      .clone()
+      .add(right.clone().multiplyScalar(radius * 0.55))
+      .add(up.clone().multiplyScalar(radius * 0.35))
+      .add(forward.clone().multiplyScalar(radius * 0.18))
+    const fillPos = camera.position
+      .clone()
+      .add(right.clone().multiplyScalar(-radius * 0.7))
+      .add(up.clone().multiplyScalar(radius * 0.1))
+      .add(forward.clone().multiplyScalar(-radius * 0.08))
+    const rimPos = camera.position
+      .clone()
+      .add(right.clone().multiplyScalar(radius * 0.15))
+      .add(up.clone().multiplyScalar(-radius * 0.5))
+      .add(forward.clone().multiplyScalar(-radius * 0.95))
+    const pointPos = camera.position
+      .clone()
+      .add(up.clone().multiplyScalar(radius * 0.08))
+
+    if (keyRef.current) {
+      keyRef.current.position.copy(keyPos)
+      keyRef.current.target.position.copy(target)
+      keyRef.current.target.updateMatrixWorld()
+    }
+    if (fillRef.current) {
+      fillRef.current.position.copy(fillPos)
+      fillRef.current.target.position.copy(target)
+      fillRef.current.target.updateMatrixWorld()
+    }
+    if (rimRef.current) {
+      rimRef.current.position.copy(rimPos)
+      rimRef.current.target.position.copy(target)
+      rimRef.current.target.updateMatrixWorld()
+    }
+    if (pointRef.current) {
+      pointRef.current.position.copy(pointPos)
+    }
+  })
+
+  return (
+    <>
+      <ambientLight intensity={lighting.ambient} />
+      <hemisphereLight args={['#ffffff', '#b7c2cf', renderMode === 'xray' ? Math.max(lighting.hemi, 1.05) : lighting.hemi]} />
+      <directionalLight ref={keyRef} intensity={lighting.key} />
+      <directionalLight ref={fillRef} intensity={lighting.fill} color="#dbeafe" />
+      <directionalLight ref={rimRef} intensity={lighting.rim} color="#fff7ed" />
+      <pointLight ref={pointRef} intensity={lighting.point} distance={Math.max((modelInfo?.boundingRadius || 120) * 12, 1400)} decay={2} color="#ffffff" />
+    </>
+  )
 }
 
 function SceneControls({ controlsRef }) {
@@ -1680,34 +1777,6 @@ export default function ViewerCanvas({
     [activeMesh, modelInfo, onSurfaceProbe, probeMode, visibleHoleItems],
   )
 
-  const lighting = useMemo(() => {
-    if (lightMode === 'soft') {
-      return {
-        ambient: 0.42 * Math.PI,
-        hemi: 0.75,
-        key: 0.95,
-        fill: 0.42,
-        rim: 0.22,
-      }
-    }
-    if (lightMode === 'contrast') {
-      return {
-        ambient: 0.24 * Math.PI,
-        hemi: 0.5,
-        key: 1.35,
-        fill: 0.68,
-        rim: 0.42,
-      }
-    }
-    return {
-      ambient: 0.5 * Math.PI,
-      hemi: 0.95,
-      key: 1.55,
-      fill: 0.85,
-      rim: 0.5,
-    }
-  }, [lightMode])
-
   return (
     <Canvas
       frameloop="demand"
@@ -1718,12 +1787,7 @@ export default function ViewerCanvas({
       style={{ background: renderMode === 'analysis' ? '#eef2f7' : '#e8eef5' }}
     >
       <StudioEnvironment renderMode={renderMode} />
-      <ambientLight intensity={lighting.ambient} />
-      <hemisphereLight args={['#ffffff', '#b7c2cf', renderMode === 'xray' ? Math.max(lighting.hemi, 1.05) : lighting.hemi]} />
-      <directionalLight position={[140, 180, 120]} intensity={lighting.key} />
-      <directionalLight position={[-110, 60, -80]} intensity={lighting.fill} color="#dbeafe" />
-      <directionalLight position={[0, -120, 80]} intensity={lighting.rim} color="#fff7ed" />
-      <pointLight position={[0, 0, 220]} intensity={lightMode === 'bright' ? 55 : lightMode === 'contrast' ? 35 : 24} distance={1400} decay={2} color="#ffffff" />
+      <CameraRigLights modelInfo={modelInfo} lightMode={lightMode} renderMode={renderMode} />
 
       <StepModel
         buffer={fileBuffer}
