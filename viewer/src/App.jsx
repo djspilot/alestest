@@ -116,6 +116,7 @@ function AppContent({
   effectiveSummary,
   effectiveBackendMesh,
   effectiveFlatMesh,
+  compactAssemblyView,
 }) {
   const controlsRef = useRef()
   const launchParamsRef = useRef(null)
@@ -669,6 +670,7 @@ function AppContent({
             onHighlightHiddenHoleLocationsChange={selection.setHighlightHiddenHoleLocations}
             selectedPartIndex={selectedPartIndex}
             onSelectPartIndex={handlePartSelectionChange}
+            compactAssemblyView={compactAssemblyView}
           />
         )}
 
@@ -730,6 +732,7 @@ function AppWithSelectionProvider() {
   const effectiveSummary = selectedPart?.timeline_summary || pipeline.summary
   const effectiveBackendMesh = selectedPart?.mesh || pipeline.backendMesh
   const effectiveFlatMesh = effectivePipelineVisuals?.unfold?.flat_mesh || null
+  const compactAssemblyView = pipelineResult?.is_assembly && selectedPartIndex != null
 
   return (
     <AppContent
@@ -740,6 +743,7 @@ function AppWithSelectionProvider() {
       effectiveSummary={effectiveSummary}
       effectiveBackendMesh={effectiveBackendMesh}
       effectiveFlatMesh={effectiveFlatMesh}
+      compactAssemblyView={compactAssemblyView}
     />
   )
 }

@@ -68,12 +68,42 @@ function PartRow({ part, index }) {
   )
 }
 
-export default function AssemblyPanel({ pipelineResult, selectedPartIndex, onSelectPartIndex }) {
+export default function AssemblyPanel({ pipelineResult, selectedPartIndex, onSelectPartIndex, compact = false }) {
   if (!pipelineResult?.is_assembly) return null
 
   const parts = pipelineResult.parts || []
   const solidCount = pipelineResult.solid_count || parts.length
   const selectedPart = parts[selectedPartIndex] || null
+
+  if (compact && selectedPart) {
+    return (
+      <div className="visual-stage-card">
+        <div className="timeline-item-head" style={{ marginBottom: 8 }}>
+          <div className="timeline-title">
+            Onderdeel {selectedPartIndex + 1}: {selectedPart.solid_name || selectedPart.file || `Onderdeel ${selectedPartIndex + 1}`}
+          </div>
+          <span className="hole-status-pill is-warning">{solidCount} onderdelen</span>
+        </div>
+        <div className="timeline-text" style={{ marginBottom: 10 }}>
+          Deze viewer staat op een individueel onderdeel uit een assembly. Kies hieronder alleen een ander onderdeel als je wilt wisselen.
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <select
+            value={selectedPartIndex ?? 0}
+            onChange={(event) => onSelectPartIndex(Number(event.target.value))}
+            style={{ width: '100%', padding: '8px 10px' }}
+          >
+            {parts.map((part, i) => (
+              <option key={part.solid_name || i} value={i}>
+                {i + 1}. {part.solid_name || part.file || `Onderdeel ${i + 1}`} - {part.category || part.part_type || '–'}
+              </option>
+            ))}
+          </select>
+        </div>
+        <PartRow part={selectedPart} index={selectedPartIndex} />
+      </div>
+    )
+  }
 
   return (
     <div className="visual-stage-card">

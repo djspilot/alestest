@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import {
   formatDetailValue,
   formatDeviation,
@@ -126,6 +126,7 @@ export default function StageDetailsPanel({
   onHighlightHiddenHoleLocationsChange,
   selectedPartIndex,
   onSelectPartIndex,
+  compactAssemblyView = false,
 }) {
   const [holeFilter, setHoleFilter] = useState('all')
   const [activeHoleMethod, setActiveHoleMethod] = useState('all')
@@ -146,26 +147,7 @@ export default function StageDetailsPanel({
           ? `Part timeline actief (${selectedPartTimelineEvents.length} events)`
           : 'Geen part timeline_events gevonden, job timeline fallback actief')
       : null
-  const effectiveGroupedStages = useMemo(() => {
-    if (pipelineResult?.is_assembly && selectedPartIndex != null) {
-      const parts = pipelineResult.parts || []
-      const selectedPart = parts[selectedPartIndex]
-      const partTimelineEvents = getPartTimelineEvents(selectedPart)
-      if (partTimelineEvents.length > 0) {
-        // Convert part timeline events to grouped stages format
-        const stageMap = new Map()
-        partTimelineEvents.forEach((event) => {
-          const stageName = event.stage || 'Unknown'
-          if (!stageMap.has(stageName)) {
-            stageMap.set(stageName, { stage: stageName, events: [] })
-          }
-          stageMap.get(stageName).events.push(event)
-        })
-        return Array.from(stageMap.values())
-      }
-    }
-    return groupedStages
-  }, [groupedStages, pipelineResult, selectedPartIndex])
+  const effectiveGroupedStages = groupedStages
 
   const selectedStage = effectiveGroupedStages[selectedStageIndex] || null
   const selectedEvent = selectedStage?.events?.[selectedEventIndex] || null
@@ -531,6 +513,7 @@ export default function StageDetailsPanel({
             pipelineResult={pipelineResult} 
             selectedPartIndex={selectedPartIndex}
             onSelectPartIndex={onSelectPartIndex}
+            compact={compactAssemblyView}
           />
         )}
         {partTimelineStatus && (
@@ -560,6 +543,7 @@ export default function StageDetailsPanel({
           pipelineResult={pipelineResult} 
           selectedPartIndex={selectedPartIndex}
           onSelectPartIndex={onSelectPartIndex}
+          compact={compactAssemblyView}
         />
       )}
       {partTimelineStatus && (
