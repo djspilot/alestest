@@ -54,9 +54,16 @@ function resolvePartFromJob(job, partIndex) {
 function getTimelineForJobView(job, partIndex) {
   const part = resolvePartFromJob(job, partIndex)
   if (part) {
+    const partEvents = Array.isArray(part.timeline_events) ? part.timeline_events : []
+    if (partEvents.length > 0) {
+      return {
+        events: partEvents,
+        summary: part.timeline_summary || job?.timeline_summary || null,
+      }
+    }
     return {
-      events: part.timeline_events || [],
-      summary: part.timeline_summary || job?.timeline_summary || null,
+      events: job?.timeline_events || [],
+      summary: job?.timeline_summary || null,
     }
   }
   return {
