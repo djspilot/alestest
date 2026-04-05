@@ -9,6 +9,7 @@ import { useViewer } from './hooks/useViewer'
 import { fetchFileAsBrowserFile } from './lib/files'
 import { normalizeStageName, MERGED_HOLES_STAGE } from './pipelineUi'
 import { getApiKeyHeaders, getDefaultPipelineApiBase } from './pipelineClient'
+import { getViewerMaterialPresets } from './StepModel'
 
 import { normalizeFoldId, normalizeUnfoldVisuals } from './lib/holes'
 
@@ -64,6 +65,15 @@ function AppContent() {
   const [debugPanelOpen, setDebugPanelOpen] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [loadingDefaultStep, setLoadingDefaultStep] = useState(false)
+  const [materialPreset, setMaterialPreset] = useState(() => window.localStorage.getItem('ales-viewer-material-preset') || 'technical_steel')
+  const materialOptions = useMemo(
+    () =>
+      Object.entries(getViewerMaterialPresets()).map(([value, config]) => ({
+        value,
+        label: config.label,
+      })),
+    [],
+  )
 
   // Pipeline hook manages all pipeline state + API communication
   const pipeline = usePipelineContext()
@@ -83,6 +93,10 @@ function AppContent() {
   useEffect(() => {
     if (viewer.error) setDebugPanelOpen(true)
   }, [viewer.error])
+
+  useEffect(() => {
+    window.localStorage.setItem('ales-viewer-material-preset', materialPreset)
+  }, [materialPreset])
 
   const latestErrorDebugEvent = useMemo(() => {
     const events = viewer.debugEvents || []
@@ -383,6 +397,9 @@ function AppContent() {
             pipelineStatus={pipeline.pipelineState.status}
             pipelineDebug={pipeline.pipelineState.debug || null}
             onResetPipelineApiBase={() => pipeline.setPipelineApiBase(getDefaultPipelineApiBase())}
+            materialPreset={materialPreset}
+            materialOptions={materialOptions}
+            onMaterialPresetChange={setMaterialPreset}
           />
         )}
 
@@ -457,6 +474,7 @@ function AppContent() {
                 useFlatView={useFlatView}
                 showHiddenHoles={selection.showHiddenHoles}
                 highlightHiddenHoleLocations={selection.highlightHiddenHoleLocations}
+                materialPreset={materialPreset}
               />
             </Suspense>
           )}

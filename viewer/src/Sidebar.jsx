@@ -29,6 +29,9 @@ export default function Sidebar({
   pipelineStatus,
   pipelineDebug,
   onResetPipelineApiBase,
+  materialPreset,
+  materialOptions,
+  onMaterialPresetChange,
 }) {
   const [showExtraOptions, setShowExtraOptions] = useState(false)
 
@@ -209,6 +212,22 @@ export default function Sidebar({
             {modelInfo && (
               <>
                 <h3>3D Model</h3>
+                <div className="sidebar-row">
+                  <span className="label">Materiaal look</span>
+                  <span className="value">{materialOptions?.find((option) => option.value === materialPreset)?.label || materialPreset}</span>
+                </div>
+                <select
+                  className="sidebar-input"
+                  value={materialPreset}
+                  onChange={(event) => onMaterialPresetChange?.(event.target.value)}
+                  style={{ marginBottom: 8 }}
+                >
+                  {(materialOptions || []).map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
                 <div className="sidebar-row">
                   <span className="label">Vertices</span>
                   <span className="value">{modelInfo.vertexCount?.toLocaleString() || '-'}</span>

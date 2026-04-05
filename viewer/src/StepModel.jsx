@@ -2,6 +2,53 @@ import React, { useEffect, useState, useMemo } from 'react'
 import * as THREE from 'three'
 import { parseStepFile } from './stepLoader'
 
+const MATERIAL_PRESETS = {
+  technical_steel: {
+    label: 'Technisch staal',
+    color: '#c9d1d9',
+    roughness: 0.62,
+    metalness: 0.56,
+    edgeColor: '#223243',
+    envIntensity: 1.0,
+  },
+  s235jr_en10025: {
+    label: 'S235JR (NEN-EN 10025-2)',
+    color: '#b7c0c7',
+    roughness: 0.68,
+    metalness: 0.42,
+    edgeColor: '#243443',
+    envIntensity: 0.92,
+  },
+  aluminium_5754: {
+    label: 'Aluminium EN AW-5754 (NEN-EN 485)',
+    color: '#d8dee3',
+    roughness: 0.34,
+    metalness: 0.82,
+    edgeColor: '#43596c',
+    envIntensity: 1.28,
+  },
+  rvs_304: {
+    label: 'RVS 304 / 1.4301 (NEN-EN 10088-2)',
+    color: '#dfe5e8',
+    roughness: 0.24,
+    metalness: 0.94,
+    edgeColor: '#546270',
+    envIntensity: 1.42,
+  },
+  dx51d_z: {
+    label: 'Verzinkt DX51D+Z (NEN-EN 10346)',
+    color: '#d2d6db',
+    roughness: 0.52,
+    metalness: 0.66,
+    edgeColor: '#3e4f5e',
+    envIntensity: 1.08,
+  },
+}
+
+export function getViewerMaterialPresets() {
+  return MATERIAL_PRESETS
+}
+
 function edgeThresholdForMesh(vertexCount) {
   if (vertexCount > 250000) return 72
   if (vertexCount > 120000) return 58
@@ -101,8 +148,10 @@ function StepGeometry({
   onSurfacePick,
   parseMode = 'auto',
   renderMode = 'clean',
+  materialPreset = 'technical_steel',
 }) {
   const [meshData, setMeshData] = useState(null)
+  const materialStyle = MATERIAL_PRESETS[materialPreset] || MATERIAL_PRESETS.technical_steel
 
   useEffect(() => {
     let cancelled = false
@@ -215,11 +264,12 @@ function StepGeometry({
               }}
             >
               <meshStandardMaterial
-                color="#dfe6ec"
-                roughness={0.88}
-                metalness={0.02}
+                color={materialStyle.color}
+                roughness={materialStyle.roughness}
+                metalness={materialStyle.metalness}
+                envMapIntensity={materialStyle.envIntensity}
                 transparent
-                opacity={renderMode === 'ghost' ? 0.08 : 0.22}
+                opacity={renderMode === 'ghost' ? 0.09 : 0.34}
                 side={THREE.DoubleSide}
                 polygonOffset
                 polygonOffsetFactor={1}
@@ -228,7 +278,7 @@ function StepGeometry({
             </mesh>
           )}
           <lineSegments geometry={item.lineGeometry}>
-            <lineBasicMaterial color="#1d2a35" transparent opacity={0.82} />
+            <lineBasicMaterial color={materialStyle.edgeColor} transparent opacity={0.88} />
           </lineSegments>
         </React.Fragment>
       ))}
@@ -236,7 +286,7 @@ function StepGeometry({
   )
 }
 
-export default function StepModel({ buffer, mesh, onLoaded, onError, onStatus, onDebug, onSurfacePick, parseMode, renderMode }) {
+export default function StepModel({ buffer, mesh, onLoaded, onError, onStatus, onDebug, onSurfacePick, parseMode, renderMode, materialPreset }) {
   return (
     <StepGeometry
       buffer={buffer}
@@ -248,6 +298,7 @@ export default function StepModel({ buffer, mesh, onLoaded, onError, onStatus, o
       onSurfacePick={onSurfacePick}
       parseMode={parseMode}
       renderMode={renderMode}
+      materialPreset={materialPreset}
     />
   )
 }

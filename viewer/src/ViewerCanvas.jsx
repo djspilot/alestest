@@ -21,6 +21,60 @@ function toLocalPoint(point, center, normalVector, epsilon) {
   )
 }
 
+function averagePoint(points) {
+  if (!Array.isArray(points) || points.length === 0) return null
+  const total = points.reduce(
+    (acc, point) => {
+      acc.x += Number(point[0] || 0)
+      acc.y += Number(point[1] || 0)
+      acc.z += Number(point[2] || 0)
+      return acc
+    },
+    { x: 0, y: 0, z: 0 },
+  )
+  return new THREE.Vector3(total.x / points.length, total.y / points.length, total.z / points.length)
+}
+
+function contourNormal(points, fallback = [0, 0, 1]) {
+  if (!Array.isArray(points) || points.length < 3) {
+    return new THREE.Vector3(...fallback).normalize()
+  }
+
+  const normal = new THREE.Vector3()
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index]
+    const next = points[(index + 1) % points.length]
+    const cx = Number(current[0] || 0)
+    const cy = Number(current[1] || 0)
+    const cz = Number(current[2] || 0)
+    const nx = Number(next[0] || 0)
+    const ny = Number(next[1] || 0)
+    const nz = Number(next[2] || 0)
+    normal.x += (cy - ny) * (cz + nz)
+    normal.y += (cz - nz) * (cx + nx)
+    normal.z += (cx - nx) * (cy + ny)
+  }
+
+  if (normal.lengthSq() < 1e-8) {
+    return new THREE.Vector3(...fallback).normalize()
+  }
+  return normal.normalize()
+}
+
+function projectPointsToPlane(points, origin, normal) {
+  if (!Array.isArray(points) || !origin || !normal) return []
+  return points.map((point) => {
+    const candidate = new THREE.Vector3(
+      Number(point[0] || 0),
+      Number(point[1] || 0),
+      Number(point[2] || 0),
+    )
+    const distance = candidate.clone().sub(origin).dot(normal)
+    const projected = candidate.clone().addScaledVector(normal, -distance)
+    return [projected.x, projected.y, projected.z]
+  })
+}
+
 function CameraFitter({ modelInfo, controlsRef }) {
   const { camera, invalidate } = useThree()
 
@@ -539,7 +593,7 @@ function inferProbeContour(point, normal, mesh, center, modelInfo) {
 
 function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSelect }) {
   const position = holeCenterPosition(hole, center)
-  const explicitContour = useMemo(() => {
+  const explicitContourData = useMemo(() => {
     if (!Array.isArray(hole.contour_points) || hole.contour_points.length < 3) return null
     const normalized = hole.contour_points
       .filter((point) => Array.isArray(point) && point.length >= 3)
@@ -549,10 +603,23 @@ function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSele
         Number(point[2] || 0) - center.z,
       ])
     if (normalized.length < 3) return null
-    const first = normalized[0]
-    const last = normalized[normalized.length - 1]
-    const isClosed = Math.hypot(first[0] - last[0], first[1] - last[1], first[2] - last[2]) < 0.25
-    return isClosed ? normalized : [...normalized, first]
+    const deduped = normalized.filter((point, index) => {
+      if (index === normalized.length - 1) {
+        const first = normalized[0]
+        return Math.hypot(point[0] - first[0], point[1] - first[1], point[2] - first[2]) >= 0.25
+      }
+      return true
+    })
+    const contourCenter = averagePoint(deduped)
+    if (!contourCenter) return null
+    const normal = contourNormal(deduped, hole.normal || hole.axis || [0, 0, 1])
+    const projected = projectPointsToPlane(deduped, contourCenter, normal)
+    const closed = projected.length > 0 ? [...projected, projected[0]] : projected
+    return {
+      points: closed,
+      center: [contourCenter.x, contourCenter.y, contourCenter.z],
+      normal,
+    }
   }, [center.x, center.y, center.z, hole.contour_points])
   const [rectWidth, rectHeight] = parseHoleSize(hole.size || hole.label, 14)
   const contourPoints = useMemo(() => getHoleContourPoints(hole, rectWidth, rectHeight), [hole, rectWidth, rectHeight])
@@ -575,28 +642,18 @@ function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSele
     [hole.id, onSelect],
   )
 
-  const explicitCenter = useMemo(() => {
-    if (!explicitContour || explicitContour.length === 0) return [position[0], position[1], position[2]]
-    const totals = explicitContour.reduce(
-      (acc, point) => {
-        acc[0] += point[0]
-        acc[1] += point[1]
-        acc[2] += point[2]
-        return acc
-      },
-      [0, 0, 0],
-    )
-    return [totals[0] / explicitContour.length, totals[1] / explicitContour.length, totals[2] / explicitContour.length]
-  }, [explicitContour, position])
+  const explicitCenter = explicitContourData?.center || [position[0], position[1], position[2]]
 
-  if (explicitContour) {
-    const normal = new THREE.Vector3(...(hole.normal || hole.axis || [0, 0, 1])).normalize()
-    const contourBase = toFloat32(explicitContour)
+  if (explicitContourData) {
+    const normal = explicitContourData.normal
+    const contourBase = toFloat32(
+      explicitContourData.points.map(([x, y, z]) => [x + normal.x * 0.06, y + normal.y * 0.06, z + normal.z * 0.06]),
+    )
     const contourHighlight = toFloat32(
-      explicitContour.map(([x, y, z]) => [x + normal.x * 0.2, y + normal.y * 0.2, z + normal.z * 0.2]),
+      explicitContourData.points.map(([x, y, z]) => [x + normal.x * 0.2, y + normal.y * 0.2, z + normal.z * 0.2]),
     )
     const contourInner = toFloat32(
-      explicitContour.map(([x, y, z]) => [x - normal.x * 0.2, y - normal.y * 0.2, z - normal.z * 0.2]),
+      explicitContourData.points.map(([x, y, z]) => [x - normal.x * 0.08, y - normal.y * 0.08, z - normal.z * 0.08]),
     )
     return (
       <group renderOrder={20} onClick={handleSelect}>
@@ -640,6 +697,19 @@ function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSele
           <sphereGeometry args={[hitRadius, 18, 18]} />
           <meshBasicMaterial transparent opacity={0.01} depthTest={false} depthWrite={false} side={THREE.DoubleSide} />
         </mesh>
+        {isSelected && (
+          <mesh position={explicitCenter}>
+            <sphereGeometry args={[Math.max(hitRadius * 0.55, 5.5), 18, 18]} />
+            <meshBasicMaterial
+              color={palette.secondary}
+              transparent
+              opacity={0.14}
+              blending={THREE.AdditiveBlending}
+              depthTest={false}
+              depthWrite={false}
+            />
+          </mesh>
+        )}
       </group>
     )
   }
@@ -688,6 +758,20 @@ function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSele
           <circleGeometry args={[hitRadius, 40]} />
           <meshBasicMaterial transparent opacity={0.01} depthTest={false} depthWrite={false} side={THREE.DoubleSide} />
         </mesh>
+        {isSelected && (
+          <mesh position={[0, 0, 0.12]}>
+            <circleGeometry args={[hitRadius * 1.26, 52]} />
+            <meshBasicMaterial
+              color={palette.secondary}
+              transparent
+              opacity={0.18}
+              blending={THREE.AdditiveBlending}
+              depthTest={false}
+              depthWrite={false}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+        )}
       </group>
     )
   }
@@ -735,6 +819,20 @@ function HoleOutline({ hole, center, isSelected, hasSelection, modelInfo, onSele
         <planeGeometry args={[Math.max(rectWidth, hitRadius * 2), Math.max(rectHeight, hitRadius * 2)]} />
         <meshBasicMaterial transparent opacity={0.01} depthTest={false} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
+      {isSelected && (
+        <mesh position={[0, 0, 0.1]}>
+          <planeGeometry args={[Math.max(rectWidth, hitRadius * 2) * 1.15, Math.max(rectHeight, hitRadius * 2) * 1.15]} />
+          <meshBasicMaterial
+            color={palette.secondary}
+            transparent
+            opacity={0.14}
+            blending={THREE.AdditiveBlending}
+            depthTest={false}
+            depthWrite={false}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
     </group>
   )
 }
@@ -1068,6 +1166,19 @@ function BendLineOverlay({ bend, center, isSelected, onSelect }) {
 
   return (
     <group position={position} quaternion={quaternion} renderOrder={22}>
+      {isSelected && (
+        <mesh>
+          <cylinderGeometry args={[2.9, 2.9, Math.max(Number(bend.length) || 0, 10) + 6, 24]} />
+          <meshBasicMaterial
+            color="#ffd87a"
+            transparent
+            opacity={0.16}
+            blending={THREE.AdditiveBlending}
+            depthTest={false}
+            depthWrite={false}
+          />
+        </mesh>
+      )}
       <mesh
         onClick={(event) => {
           event.stopPropagation()
@@ -1266,6 +1377,20 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
               onFoldSelect?.(row.id)
             }}
           >
+            {selected && (
+              <mesh position={[0, 0, 0.08]}>
+                <planeGeometry args={[(useExactSegment ? exactLength : row.lineLength) + 14, 13]} />
+                <meshBasicMaterial
+                  color="#ffe08a"
+                  transparent
+                  opacity={0.18}
+                  side={THREE.DoubleSide}
+                  blending={THREE.AdditiveBlending}
+                  depthTest={false}
+                  depthWrite={false}
+                />
+              </mesh>
+            )}
             <mesh>
               <planeGeometry args={[useExactSegment ? exactLength : row.lineLength, selected ? 8 : 5]} />
               <meshBasicMaterial
@@ -1477,6 +1602,7 @@ export default function ViewerCanvas({
   useFlatView,
   showHiddenHoles = false,
   highlightHiddenHoleLocations = false,
+  materialPreset = 'technical_steel',
 }) {
   const renderMode = 'clean'
   const holeItems = activeHoleVisuals?.items || backendVisuals?.holes?.items || []
@@ -1528,6 +1654,7 @@ export default function ViewerCanvas({
         onSurfacePick={handleSurfacePick}
         parseMode={parseMode}
         renderMode={renderMode}
+        materialPreset={materialPreset}
       />
 
       {useFlatView && focusedStage === MERGED_HOLES_STAGE && backendVisuals?.unfold?.success && (
