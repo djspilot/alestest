@@ -345,6 +345,48 @@ function AppContent() {
     if (controlsRef.current) controlsRef.current.reset()
   }, [])
 
+  // Handle part selection changes: update URL and trigger unfold reload
+  const handlePartSelectionChange = useCallback((partIndex) => {
+    if (partIndex == null) {
+      // Clear part selection from URL
+      const params = new URLSearchParams(window.location.search)
+      params.delete('part')
+      const newUrl = `${window.location.pathname}?${params.toString()}`.replace(/\?$/, '')
+      window.history.replaceState({}, '', newUrl)
+    } else {
+      // Update URL with part index
+      const params = new URLSearchParams(window.location.search)
+      params.set('part', String(partIndex))
+      const newUrl = `${window.location.pathname}?${params.toString()}`
+      window.history.replaceState({}, '', newUrl)
+      
+      // Reload unfold for this specific part
+      const apiBase = launchApiBase || pipeline.pipelineApiBase || getDefaultPipelineApiBase()
+      const jobId = launchParams.get('job')
+      if (jobId) {
+        const headers = getApiKeyHeaders(pipeline.pipelineApiKey)
+        const unfoldUrl = `${apiBase}/api/v1/jobs/${jobId}/parts/${partIndex}/unfold`
+        fetch(unfoldUrl, { headers })
+          .then(r => r.json())
+          .then(unfoldStatus => {
+            // Merge unfold result into pipeline state
+            const job = pipeline.pipelineState
+            if (job && job.result) {
+              const mergedJob = mergeJobWithUnfoldResult(
+                { ...job, result: job.result },
+                unfoldStatus
+              )
+              pipeline.setPipelineState({
+                ...pipeline.pipelineState,
+                result: mergedJob.result,
+              })
+            }
+          })
+          .catch(err => console.warn('Failed to load unfold for part:', err))
+      }
+    }
+  }, [launchParams, launchApiBase, pipeline, pipeline.pipelineApiKey])
+
   const handleLoadDefaultStep = useCallback(async () => {
     setLoadingDefaultStep(true)
     viewer.setError(null)
@@ -555,6 +597,8 @@ function AppContent() {
             onShowHiddenHolesChange={selection.setShowHiddenHoles}
             highlightHiddenHoleLocations={selection.highlightHiddenHoleLocations}
             onHighlightHiddenHoleLocationsChange={selection.setHighlightHiddenHoleLocations}
+            onSelectPart={handlePartSelectionChange}
+            launchedPartIndex={launchedPartIndex}
           />
         )}
 

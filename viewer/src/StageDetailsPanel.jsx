@@ -121,6 +121,8 @@ export default function StageDetailsPanel({
   onShowHiddenHolesChange,
   highlightHiddenHoleLocations,
   onHighlightHiddenHoleLocationsChange,
+  onSelectPart,
+  launchedPartIndex,
 }) {
   const [holeFilter, setHoleFilter] = useState('all')
   const [activeHoleMethod, setActiveHoleMethod] = useState('all')
@@ -130,7 +132,7 @@ export default function StageDetailsPanel({
   const [showStageExtraOptions, setShowStageExtraOptions] = useState(false)
   const [showHoleExtraOptions, setShowHoleExtraOptions] = useState(false)
   const [showUnfoldExtraOptions, setShowUnfoldExtraOptions] = useState(false)
-  const [selectedPartIndex, setSelectedPartIndex] = useState(null)
+  const [selectedPartIndex, setSelectedPartIndex] = useState(launchedPartIndex)
   const effectiveGroupedStages = useMemo(() => {
     if (pipelineResult?.is_assembly && selectedPartIndex != null) {
       const parts = pipelineResult.parts || []
@@ -513,7 +515,10 @@ export default function StageDetailsPanel({
           <AssemblyPanel 
             pipelineResult={pipelineResult} 
             selectedPartIndex={selectedPartIndex}
-            onSelectPartIndex={setSelectedPartIndex}
+            onSelectPartIndex={(partIndex) => {
+              setSelectedPartIndex(partIndex)
+              onSelectPart?.(partIndex)
+            }}
           />
         )}
         {renderStageList() && (
@@ -537,7 +542,10 @@ export default function StageDetailsPanel({
         <AssemblyPanel 
           pipelineResult={pipelineResult} 
           selectedPartIndex={selectedPartIndex}
-          onSelectPartIndex={setSelectedPartIndex}
+          onSelectPartIndex={(partIndex) => {
+            setSelectedPartIndex(partIndex)
+            onSelectPart?.(partIndex)
+          }}
         />
       )}
       {renderStageList() && (
