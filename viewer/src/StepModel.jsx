@@ -194,14 +194,16 @@ function StepGeometry({
     return {
       type: 'physical',
       opacity: 0.96,
-      roughness: materialStyle.roughness,
-      metalness: materialStyle.metalness,
+      roughness: Math.max(materialStyle.roughness - 0.08, 0.12),
+      metalness: Math.max(materialStyle.metalness - 0.08, 0.48),
       transmission: 0.0,
       thickness: 0.0,
-      clearcoat: 0.9,
+      clearcoat: 1.0,
       reflectivity: 1.0,
       edgeOpacity: renderMode === 'edges' ? 1 : 0.9,
       edgeColor: materialStyle.edgeColor,
+      emissive: '#3a4148',
+      emissiveIntensity: 0.16,
     }
   }, [materialStyle, renderMode])
 
@@ -332,6 +334,8 @@ function StepGeometry({
                   clearcoat={surfaceStyle.clearcoat}
                   clearcoatRoughness={Math.max(surfaceStyle.roughness * 0.55, 0.08)}
                   reflectivity={surfaceStyle.reflectivity}
+                  emissive={surfaceStyle.emissive || '#000000'}
+                  emissiveIntensity={surfaceStyle.emissiveIntensity || 0}
                   transmission={surfaceStyle.transmission}
                   thickness={surfaceStyle.thickness}
                   ior={1.5}

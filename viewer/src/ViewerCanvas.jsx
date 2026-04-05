@@ -154,6 +154,7 @@ function CameraRigLights({ modelInfo, lightMode, renderMode }) {
   const fillRef = React.useRef(null)
   const rimRef = React.useRef(null)
   const pointRef = React.useRef(null)
+  const headRef = React.useRef(null)
 
   const lighting = useMemo(() => {
     if (lightMode === 'soft') {
@@ -164,6 +165,7 @@ function CameraRigLights({ modelInfo, lightMode, renderMode }) {
         fill: 0.42,
         rim: 0.22,
         point: 24,
+        head: 1.1,
       }
     }
     if (lightMode === 'contrast') {
@@ -174,6 +176,7 @@ function CameraRigLights({ modelInfo, lightMode, renderMode }) {
         fill: 0.68,
         rim: 0.42,
         point: 35,
+        head: 1.45,
       }
     }
     return {
@@ -183,6 +186,7 @@ function CameraRigLights({ modelInfo, lightMode, renderMode }) {
       fill: 0.85,
       rim: 0.5,
       point: 55,
+      head: 1.75,
     }
   }, [lightMode])
 
@@ -212,6 +216,9 @@ function CameraRigLights({ modelInfo, lightMode, renderMode }) {
     const pointPos = camera.position
       .clone()
       .add(up.clone().multiplyScalar(radius * 0.08))
+    const headPos = camera.position
+      .clone()
+      .add(forward.clone().multiplyScalar(radius * 0.12))
 
     if (keyRef.current) {
       keyRef.current.position.copy(keyPos)
@@ -231,6 +238,11 @@ function CameraRigLights({ modelInfo, lightMode, renderMode }) {
     if (pointRef.current) {
       pointRef.current.position.copy(pointPos)
     }
+    if (headRef.current) {
+      headRef.current.position.copy(headPos)
+      headRef.current.target.position.copy(target)
+      headRef.current.target.updateMatrixWorld()
+    }
   })
 
   return (
@@ -241,6 +253,15 @@ function CameraRigLights({ modelInfo, lightMode, renderMode }) {
       <directionalLight ref={fillRef} intensity={lighting.fill} color="#dbeafe" />
       <directionalLight ref={rimRef} intensity={lighting.rim} color="#fff7ed" />
       <pointLight ref={pointRef} intensity={lighting.point} distance={Math.max((modelInfo?.boundingRadius || 120) * 12, 1400)} decay={2} color="#ffffff" />
+      <spotLight
+        ref={headRef}
+        intensity={lighting.head}
+        angle={0.7}
+        penumbra={0.9}
+        distance={Math.max((modelInfo?.boundingRadius || 120) * 16, 1800)}
+        decay={1.4}
+        color="#ffffff"
+      />
     </>
   )
 }
