@@ -18,11 +18,18 @@ function formatWorkerCrashMessage(event) {
   return `${message}${location}`
 }
 
+function getWorkerScriptUrl() {
+  const baseUrl = import.meta.env.BASE_URL || '/'
+  const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
+  return `${normalizedBase}step-worker.js`
+}
+
 function getWorker(onDebug) {
   if (workerInstance) return workerInstance
 
-  workerInstance = new Worker('/step-worker.js')
-  emitDebug(onDebug, 'worker_created', { script: '/step-worker.js' })
+  const workerScript = getWorkerScriptUrl()
+  workerInstance = new Worker(workerScript)
+  emitDebug(onDebug, 'worker_created', { script: workerScript })
   workerInstance.onmessage = (event) => {
     const { id, success, error, errorDetail, ...payload } = event.data || {}
     const request = pendingRequests.get(id)
