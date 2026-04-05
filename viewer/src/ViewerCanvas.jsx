@@ -1271,7 +1271,7 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
       const varyingVector = axisVectorForKey(varyingAxis)
       const basis = new THREE.Matrix4().makeBasis(lineVector, varyingVector, normalVector)
       const quaternion = new THREE.Quaternion().setFromRotationMatrix(basis)
-      const localStart = toLocalPoint(segment.start || detail.start, modelInfo?.center, normalVector, epsilon)
+      const localStart = toLocalPoint(segment?.start || detail.start, modelInfo?.center, normalVector, epsilon)
       const localEnd = toLocalPoint(segment?.end || detail.end, modelInfo?.center, normalVector, epsilon)
       const requestedLength =
         Number(segment?.length || detail.length || logical.length) || Math.max(Math.min(length, width) * 0.9, 10)
