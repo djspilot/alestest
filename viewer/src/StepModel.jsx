@@ -11,6 +11,14 @@ const MATERIAL_PRESETS = {
     edgeColor: '#223243',
     envIntensity: 1.38,
   },
+  studio_metallic: {
+    label: 'Studio Metallic',
+    color: '#e3e8ed',
+    roughness: 0.18,
+    metalness: 0.98,
+    edgeColor: '#2f4152',
+    envIntensity: 1.72,
+  },
   s235jr_en10025: {
     label: 'S235JR (NEN-EN 10025-2)',
     color: '#b7c0c7',
