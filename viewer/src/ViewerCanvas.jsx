@@ -22,6 +22,18 @@ function toLocalPoint(point, center, normalVector, epsilon) {
   )
 }
 
+function toOverlayPoint(point, center, normalVector, epsilon, coordinatesAreCentered = false) {
+  if (!Array.isArray(point) || point.length < 3) return null
+  const cx = coordinatesAreCentered ? 0 : center?.x || 0
+  const cy = coordinatesAreCentered ? 0 : center?.y || 0
+  const cz = coordinatesAreCentered ? 0 : center?.z || 0
+  return new THREE.Vector3(
+    Number(point[0] || 0) - cx + normalVector.x * epsilon,
+    Number(point[1] || 0) - cy + normalVector.y * epsilon,
+    Number(point[2] || 0) - cz + normalVector.z * epsilon,
+  )
+}
+
 function averagePoint(points) {
   if (!Array.isArray(points) || points.length === 0) return null
   const total = points.reduce(
@@ -1393,6 +1405,11 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
     const secondarySize = rankedAxes[1]?.size || width
     const normalVector = axisVectorForKey(thicknessAxis)
     const epsilon = Math.max((rankedAxes[2]?.size || 0) * 0.6, 0.2)
+    const centeredBounds = {
+      x: Math.max(length * 0.65, primarySize * 0.65, 20),
+      y: Math.max(width * 0.65, secondarySize * 0.65, 20),
+      z: Math.max((rankedAxes[2]?.size || 0) * 3, 8),
+    }
 
     let segmentRows
     if (foldDetails.length > 0) {
@@ -1432,6 +1449,10 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
         : Array.isArray(detail.center) && detail.center.length >= 3
             ? detail.center
             : [0, 0, 0]
+      const coordinatesAreCentered =
+        Math.abs(Number(detailCenter[0] || 0)) <= centeredBounds.x &&
+        Math.abs(Number(detailCenter[1] || 0)) <= centeredBounds.y &&
+        Math.abs(Number(detailCenter[2] || 0)) <= centeredBounds.z
       const segmentAxis = String(segment?.axis || detail.axis || '').toLowerCase()
       const lineAxis = inPlaneAxes.includes(segmentAxis) ? segmentAxis : inPlaneAxes[0]
       const varyingAxis = inPlaneAxes.find((axisKey) => axisKey !== lineAxis) || inPlaneAxes[1] || inPlaneAxes[0]
@@ -1439,8 +1460,20 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
       const varyingVector = axisVectorForKey(varyingAxis)
       const basis = new THREE.Matrix4().makeBasis(lineVector, varyingVector, normalVector)
       const quaternion = new THREE.Quaternion().setFromRotationMatrix(basis)
-      const localStart = toLocalPoint(segment?.start || detail.start, modelInfo?.center, normalVector, epsilon)
-      const localEnd = toLocalPoint(segment?.end || detail.end, modelInfo?.center, normalVector, epsilon)
+      const localStart = toOverlayPoint(
+        segment?.start || detail.start,
+        modelInfo?.center,
+        normalVector,
+        epsilon,
+        coordinatesAreCentered,
+      )
+      const localEnd = toOverlayPoint(
+        segment?.end || detail.end,
+        modelInfo?.center,
+        normalVector,
+        epsilon,
+        coordinatesAreCentered,
+      )
       const requestedLength =
         Number(segment?.length || detail.length || logical.length) || Math.max(Math.min(length, width) * 0.9, 10)
       const shouldPreferPrimaryAxis = requestedLength > secondarySize * 1.35 && primarySize > secondarySize * 1.2
@@ -1451,9 +1484,9 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
       )
       const position = modelInfo?.center
         ? [
-            Number(detailCenter[0] || 0) - modelInfo.center.x + normalVector.x * epsilon,
-            Number(detailCenter[1] || 0) - modelInfo.center.y + normalVector.y * epsilon,
-            Number(detailCenter[2] || 0) - modelInfo.center.z + normalVector.z * epsilon,
+            Number(detailCenter[0] || 0) - (coordinatesAreCentered ? 0 : modelInfo.center.x) + normalVector.x * epsilon,
+            Number(detailCenter[1] || 0) - (coordinatesAreCentered ? 0 : modelInfo.center.y) + normalVector.y * epsilon,
+            Number(detailCenter[2] || 0) - (coordinatesAreCentered ? 0 : modelInfo.center.z) + normalVector.z * epsilon,
           ]
         : [0, 0, 0]
       return {
@@ -1469,6 +1502,7 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
         direction: logical.type || null,
         segmentIndex: Number.isFinite(Number(segment?.index)) ? Number(segment.index) + 1 : idx + 1,
         logicalFoldId: normalizeFoldId(detail.id || logical.id || null),
+        coordinatesAreCentered,
       }
     })
   }, [bendSegments, bends, foldCount, foldDetails, length, modelInfo, width])
