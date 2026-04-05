@@ -132,7 +132,26 @@ export default function StageDetailsPanel({
   const [showStageExtraOptions, setShowStageExtraOptions] = useState(false)
   const [showHoleExtraOptions, setShowHoleExtraOptions] = useState(false)
   const [showUnfoldExtraOptions, setShowUnfoldExtraOptions] = useState(false)
-  const [selectedPartIndex, setSelectedPartIndex] = useState(launchedPartIndex)
+  const [selectedPartIndex, setSelectedPartIndex] = useState(null)
+
+  useEffect(() => {
+    if (!pipelineResult?.is_assembly) {
+      setSelectedPartIndex(null)
+      return
+    }
+
+    if (launchedPartIndex == null) return
+    const parts = pipelineResult.parts || []
+    const resolvedIndex = parts.findIndex((part, index) => {
+      const solidIndex = Number.isInteger(part?.solid_index) ? part.solid_index : index
+      return solidIndex === launchedPartIndex
+    })
+    if (resolvedIndex >= 0) {
+      setSelectedPartIndex(resolvedIndex)
+      onSelectStageIndex(0)
+      onSelectEventIndex(0)
+    }
+  }, [launchedPartIndex, onSelectEventIndex, onSelectStageIndex, pipelineResult])
   const effectiveGroupedStages = useMemo(() => {
     if (pipelineResult?.is_assembly && selectedPartIndex != null) {
       const parts = pipelineResult.parts || []
@@ -517,6 +536,8 @@ export default function StageDetailsPanel({
             selectedPartIndex={selectedPartIndex}
             onSelectPartIndex={(partIndex) => {
               setSelectedPartIndex(partIndex)
+              onSelectStageIndex(0)
+              onSelectEventIndex(0)
               onSelectPart?.(partIndex)
             }}
           />
@@ -544,6 +565,8 @@ export default function StageDetailsPanel({
           selectedPartIndex={selectedPartIndex}
           onSelectPartIndex={(partIndex) => {
             setSelectedPartIndex(partIndex)
+            onSelectStageIndex(0)
+            onSelectEventIndex(0)
             onSelectPart?.(partIndex)
           }}
         />

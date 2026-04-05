@@ -40,6 +40,31 @@ function mergeJobWithUnfoldResult(job, unfoldStatus) {
   }
 }
 
+function resolvePartFromJob(job, partIndex) {
+  if (partIndex == null) return null
+  const parts = job?.result?.parts || []
+  return (
+    parts.find((part, index) => {
+      const solidIndex = Number.isInteger(part?.solid_index) ? part.solid_index : index
+      return solidIndex === partIndex
+    }) || null
+  )
+}
+
+function getTimelineForJobView(job, partIndex) {
+  const part = resolvePartFromJob(job, partIndex)
+  if (part) {
+    return {
+      events: part.timeline_events || [],
+      summary: part.timeline_summary || job?.timeline_summary || null,
+    }
+  }
+  return {
+    events: job?.timeline_events || [],
+    summary: job?.timeline_summary || null,
+  }
+}
+
 function ViewerCanvasFallback() {
   return (
     <div className="loading-overlay">
@@ -182,11 +207,7 @@ function AppContent() {
       .then((job) => {
         let baseJob = job
         if (partIndex != null) {
-          const parts = job?.result?.parts || []
-          const partResult = parts.find((part, index) => {
-            const solidIndex = Number.isInteger(part?.solid_index) ? part.solid_index : index
-            return solidIndex === partIndex
-          }) || null
+          const partResult = resolvePartFromJob(job, partIndex)
           if (partResult) {
             baseJob = {
               ...job,
@@ -221,13 +242,14 @@ function AppContent() {
       .then((job) => {
         hydratedJob = job
         if (job?.status === 'completed') {
+          const timeline = getTimelineForJobView(job, partIndex)
           pipeline.setPipelineState({
             ...EMPTY_PIPELINE_STATE,
             status: 'completed',
             jobId: job.job_id,
             result: job.result || null,
-            events: job.timeline_events || [],
-            summary: job.timeline_summary || null,
+            events: timeline.events,
+            summary: timeline.summary,
             error: null,
             debug: {
               checkedBase: apiBase,
@@ -254,13 +276,14 @@ function AppContent() {
       .then((file) => viewer.handleFile(file, { skipPipelineStart: true }))
       .catch((err) => {
         if (hydratedJob?.status === 'completed') {
+          const timeline = getTimelineForJobView(hydratedJob, partIndex)
           pipeline.setPipelineState({
             ...EMPTY_PIPELINE_STATE,
             status: 'completed',
             jobId: hydratedJob.job_id,
             result: hydratedJob.result || null,
-            events: hydratedJob.timeline_events || [],
-            summary: hydratedJob.timeline_summary || null,
+            events: timeline.events,
+            summary: timeline.summary,
             error: null,
             debug: {
               checkedBase: apiBase,
