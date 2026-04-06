@@ -1321,6 +1321,12 @@ export default function StageDetailsPanel({
                         {unfoldVisuals.hidden_fold_candidate_count === 1 ? '' : 'n'} verborgen in de viewer.
                       </div>
                     )}
+                    {Number(unfoldVisuals.out_of_scope_fold_candidate_count || 0) > 0 && (
+                      <div className="timeline-text" style={{ marginTop: 4, color: '#92400e' }}>
+                        {unfoldVisuals.out_of_scope_fold_candidate_count} fold-candidate
+                        {unfoldVisuals.out_of_scope_fold_candidate_count === 1 ? '' : 'n'} viel buiten de uitslag en is niet getekend.
+                      </div>
+                    )}
                   </div>
                 )}
 

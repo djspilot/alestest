@@ -125,6 +125,11 @@ export function normalizeUnfoldVisuals(unfoldVisuals) {
       : segments.length > 0
         ? segments.length
         : null
+  const flatLength = Math.max(Number(unfoldVisuals.flat_length) || 0, 0)
+  const flatWidth = Math.max(Number(unfoldVisuals.flat_width) || 0, 0)
+  const inScopeX = Math.max(flatLength * 0.8, flatWidth * 0.8, 40)
+  const inScopeY = Math.max(flatWidth * 0.8, flatLength * 0.2, 40)
+  const inScopeZ = Math.max(Math.min(flatLength, flatWidth) * 0.15, 8)
 
   const normalizedFoldDetails = derivedFoldDetails
     .map((detail, index) => {
@@ -144,11 +149,17 @@ export function normalizeUnfoldVisuals(unfoldVisuals) {
         id: detail?.id ?? index + 1,
         length,
         _sourceIndex: index,
+        _outOfScope:
+          Array.isArray(detail?.center) &&
+          detail.center.length >= 3 &&
+          (Math.abs(Number(detail.center[0] || 0)) > inScopeX ||
+            Math.abs(Number(detail.center[1] || 0)) > inScopeY ||
+            Math.abs(Number(detail.center[2] || 0)) > inScopeZ),
       }
     })
     .filter((detail) => {
       const segmentCount = Array.isArray(detail?.segment_indices) ? detail.segment_indices.length : 0
-      return detail.length > 1 || segmentCount > 1
+      return (detail.length > 1 || segmentCount > 1) && !detail._outOfScope
     })
 
   const dedupedFoldDetails = []
@@ -182,6 +193,7 @@ export function normalizeUnfoldVisuals(unfoldVisuals) {
     radius: null,
   })
 
+  const outOfScopeFoldCandidateCount = normalizedFoldDetails.filter((detail) => detail._outOfScope).length
   const hiddenFoldCandidateCount = Math.max(0, derivedFoldDetails.length - dedupedFoldDetails.length)
 
   return {
@@ -191,6 +203,7 @@ export function normalizeUnfoldVisuals(unfoldVisuals) {
     fold_details: dedupedFoldDetails.length > 0 ? dedupedFoldDetails.map(({ _sourceIndex, ...detail }) => detail) : derivedFoldDetails,
     bends_logical: dedupedFoldDetails.length > 0 ? filteredBendsLogical : derivedBendsLogical,
     hidden_fold_candidate_count: hiddenFoldCandidateCount,
+    out_of_scope_fold_candidate_count: outOfScopeFoldCandidateCount,
   }
 }
 
