@@ -165,6 +165,14 @@ export default function StageDetailsPanel({
     ? pipelineVisuals?.holes_pre_unfold || pipelineVisuals?.holes || null
     : pipelineVisuals?.holes || null
   const unfoldVisuals = pipelineVisuals?.unfold || null
+  const rawFoldCount = Number(unfoldVisuals?.raw_fold_lines || 0)
+  const canonicalFoldCount = Number(unfoldVisuals?.fold_lines || 0)
+  const discardedFoldSegmentCount = Number(unfoldVisuals?.discarded_fold_segment_count || 0)
+  const hiddenFoldCandidateCount = Number(unfoldVisuals?.hidden_fold_candidate_count || 0)
+  const outOfScopeFoldCandidateCount = Number(unfoldVisuals?.out_of_scope_fold_candidate_count || 0)
+  const filteredFoldCandidateCount =
+    Number(unfoldVisuals?.filtered_fold_candidate_count || 0) ||
+    discardedFoldSegmentCount + hiddenFoldCandidateCount + outOfScopeFoldCandidateCount
   const holeItems = holeVisuals?.items || []
   const boundarySuppressedItems = holeVisuals?.boundary_suppressed || []
   const foldRows = useMemo(() => {
@@ -1315,16 +1323,26 @@ export default function StageDetailsPanel({
                     <div className="timeline-text" style={{ marginTop: 8 }}>
                       Samengevat: {unfoldVisuals.fold_lines ?? 0} zetlijnen na samenvoegen van losse segmenten.
                     </div>
-                    {Number(unfoldVisuals.hidden_fold_candidate_count || 0) > 0 && (
-                      <div className="timeline-text" style={{ marginTop: 4, color: '#9a3412' }}>
-                        {unfoldVisuals.hidden_fold_candidate_count} onbruikbare of dubbele fold-candidate
-                        {unfoldVisuals.hidden_fold_candidate_count === 1 ? '' : 'n'} verborgen in de viewer.
+                    {rawFoldCount > 0 && (
+                      <div className="timeline-text" style={{ marginTop: 4 }}>
+                        Fold pipeline: {rawFoldCount} raw candidate{rawFoldCount === 1 ? '' : 's'} → {filteredFoldCandidateCount} weggefilterd → {canonicalFoldCount} canonieke zetlijn{canonicalFoldCount === 1 ? '' : 'en'}.
                       </div>
                     )}
-                    {Number(unfoldVisuals.out_of_scope_fold_candidate_count || 0) > 0 && (
+                    {discardedFoldSegmentCount > 0 && (
+                      <div className="timeline-text" style={{ marginTop: 4, color: '#9a3412' }}>
+                        {discardedFoldSegmentCount} degeneratieve fold-segment{discardedFoldSegmentCount === 1 ? '' : 'en'} met nul- of bijna nul-lengte weggegooid.
+                      </div>
+                    )}
+                    {hiddenFoldCandidateCount > 0 && (
+                      <div className="timeline-text" style={{ marginTop: 4, color: '#9a3412' }}>
+                        {hiddenFoldCandidateCount} onbruikbare of dubbele fold-candidate
+                        {hiddenFoldCandidateCount === 1 ? '' : 'n'} verborgen in de viewer.
+                      </div>
+                    )}
+                    {outOfScopeFoldCandidateCount > 0 && (
                       <div className="timeline-text" style={{ marginTop: 4, color: '#92400e' }}>
-                        {unfoldVisuals.out_of_scope_fold_candidate_count} fold-candidate
-                        {unfoldVisuals.out_of_scope_fold_candidate_count === 1 ? '' : 'n'} viel buiten de uitslag en is niet getekend.
+                        {outOfScopeFoldCandidateCount} fold-candidate
+                        {outOfScopeFoldCandidateCount === 1 ? '' : 'n'} viel buiten de uitslag en is niet getekend.
                       </div>
                     )}
                   </div>

@@ -125,6 +125,7 @@ export function normalizeUnfoldVisuals(unfoldVisuals) {
       : segments.length > 0
         ? segments.length
         : null
+  const discardedFoldSegmentCount = Math.max(Number(unfoldVisuals.discarded_fold_segment_count) || 0, 0)
   const flatLength = Math.max(Number(unfoldVisuals.flat_length) || 0, 0)
   const flatWidth = Math.max(Number(unfoldVisuals.flat_width) || 0, 0)
   const inScopeX = Math.max(flatLength * 0.8, flatWidth * 0.8, 40)
@@ -195,6 +196,7 @@ export function normalizeUnfoldVisuals(unfoldVisuals) {
 
   const outOfScopeFoldCandidateCount = normalizedFoldDetails.filter((detail) => detail._outOfScope).length
   const hiddenFoldCandidateCount = Math.max(0, derivedFoldDetails.length - dedupedFoldDetails.length)
+  const filteredFoldCandidateCount = hiddenFoldCandidateCount + outOfScopeFoldCandidateCount + discardedFoldSegmentCount
 
   return {
     ...unfoldVisuals,
@@ -202,8 +204,10 @@ export function normalizeUnfoldVisuals(unfoldVisuals) {
     raw_fold_lines: rawFoldLines,
     fold_details: dedupedFoldDetails.length > 0 ? dedupedFoldDetails.map(({ _sourceIndex, ...detail }) => detail) : derivedFoldDetails,
     bends_logical: dedupedFoldDetails.length > 0 ? filteredBendsLogical : derivedBendsLogical,
+    discarded_fold_segment_count: discardedFoldSegmentCount,
     hidden_fold_candidate_count: hiddenFoldCandidateCount,
     out_of_scope_fold_candidate_count: outOfScopeFoldCandidateCount,
+    filtered_fold_candidate_count: filteredFoldCandidateCount,
   }
 }
 
