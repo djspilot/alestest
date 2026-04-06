@@ -132,6 +132,49 @@ def test_unfold_status_derives_merged_lines_from_groups(tmp_path, monkeypatch):
     assert payload["fold_details"][0]["segment_indices"] == [1, 2, 3]
 
 
+def test_unfold_status_filters_zero_length_segments_before_counting(tmp_path, monkeypatch):
+    db_path = tmp_path / "api.db"
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+
+    test_jobs = JobManager(str(db_path))
+    monkeypatch.setattr(routes_module, "jobs", test_jobs)
+    monkeypatch.setattr(routes_module, "UPLOAD_DIR", str(upload_dir))
+
+    step_path = upload_dir / "job-filter" / "part.step"
+    step_path.parent.mkdir(parents=True, exist_ok=True)
+    step_path.write_text("ISO-10303-21;")
+
+    job = test_jobs.create("job-filter", str(step_path), file_name="part.step")
+    test_jobs.mark_completed(job.job_id, {"file": "part.step", "success": True})
+    test_jobs.mark_unfold_completed(
+        job.job_id,
+        {
+            "success": True,
+            "flat_length": 300.0,
+            "flat_width": 80.0,
+            "bend_line_segments": [
+                {"index": 0, "axis": "X", "axis_span": [0.0, 40.0], "center": [20.0, 10.0, 0.0], "length": 40.0},
+                {"index": 1, "axis": "X", "axis_span": [190.0, 240.0], "center": [215.0, 10.0, 0.0], "length": 50.0},
+                {"index": 2, "axis": "X", "axis_span": [120.0, 120.0], "center": [120.0, 10.0, 0.0], "length": 0.0},
+            ],
+            "bends_logical": [
+                {"type": "up", "angle": 90.0, "radius": 1.0},
+                {"type": "up", "angle": 90.0, "radius": 1.0},
+                {"type": "up", "angle": 90.0, "radius": 1.0},
+            ],
+        },
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/v1/jobs/job-filter/unfold")
+    assert response.status_code == 200
+    payload = response.json()["result"]
+    assert payload["raw_fold_lines"] == 3
+    assert payload["fold_lines"] == 1
+    assert len(payload["fold_details"]) == 1
+
+
 def test_assembly_part_routes_expose_step_and_unfold_artifacts(tmp_path, monkeypatch):
     db_path = tmp_path / "api.db"
     upload_dir = tmp_path / "uploads"

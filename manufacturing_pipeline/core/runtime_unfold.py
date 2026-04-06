@@ -208,6 +208,177 @@ def _merge_fold_segments_runtime(bend_line_segments, bends_logical, fold_merge_s
     return merged_details, merged_bends, merged_groups
 
 
+def _segment_measured_length(segment):
+    start = segment.get("start")
+    end = segment.get("end")
+    if isinstance(start, (list, tuple)) and isinstance(end, (list, tuple)) and len(start) >= 3 and len(end) >= 3:
+        try:
+            return math.dist(
+                (float(start[0]), float(start[1]), float(start[2])),
+                (float(end[0]), float(end[1]), float(end[2])),
+            )
+        except Exception:
+            pass
+
+    axis_span = segment.get("axis_span") or []
+    if len(axis_span) >= 2:
+        try:
+            return abs(float(axis_span[1]) - float(axis_span[0]))
+        except Exception:
+            pass
+
+    try:
+        return abs(float(segment.get("length") or 0.0))
+    except Exception:
+        return 0.0
+
+
+def _filter_fold_segments_runtime(bend_line_segments, min_length=0.1):
+    filtered_segments = []
+    discarded_count = 0
+
+    for fallback_index, segment in enumerate(bend_line_segments or []):
+        try:
+            axis = str(segment.get("axis") or "").upper()
+            idx = int(segment.get("index", fallback_index))
+            axis_span = segment.get("axis_span") or []
+            center = segment.get("center") or [0.0, 0.0, 0.0]
+            if axis not in ("X", "Y") or len(axis_span) < 2:
+                discarded_count += 1
+                continue
+
+            span_min = float(min(axis_span[0], axis_span[1]))
+            span_max = float(max(axis_span[0], axis_span[1]))
+            measured_length = _segment_measured_length(segment)
+            if measured_length <= float(min_length) or abs(span_max - span_min) <= float(min_length):
+                discarded_count += 1
+                continue
+
+            filtered_segments.append(
+                {
+                    "index": idx,
+                    "axis": axis,
+                    "center": [
+                        float(center[0]) if len(center) > 0 else 0.0,
+                        float(center[1]) if len(center) > 1 else 0.0,
+                        float(center[2]) if len(center) > 2 else 0.0,
+                    ],
+                    "length": float(segment.get("length") or measured_length),
+                    "axis_span": [span_min, span_max],
+                    "start": segment.get("start"),
+                    "end": segment.get("end"),
+                }
+            )
+        except Exception:
+            discarded_count += 1
+
+    return filtered_segments, discarded_count
+
+
+def _build_fold_detail_from_group_runtime(group, segments, index):
+    member_indexes = []
+    for value in group.get("segment_indices") or []:
+        try:
+            member_indexes.append(int(value))
+        except Exception:
+            continue
+
+    members = []
+    for member_index in member_indexes:
+        for fallback_index, segment in enumerate(segments or []):
+            try:
+                segment_index = int(segment.get("index", fallback_index))
+            except Exception:
+                segment_index = fallback_index
+            if segment_index == member_index:
+                members.append(segment)
+                break
+
+    if not members:
+        return None
+
+    first = members[0]
+    center = first.get("center") or [0.0, 0.0, 0.0]
+    fixed_x = float(center[0]) if len(center) > 0 else 0.0
+    fixed_y = float(center[1]) if len(center) > 1 else 0.0
+    fixed_z = float(center[2]) if len(center) > 2 else 0.0
+    axis = str(group.get("axis") or first.get("axis") or "Y").upper()
+    span_values = []
+    for segment in members:
+        axis_span = segment.get("axis_span") or []
+        if len(axis_span) >= 2:
+            try:
+                span_values.extend([float(axis_span[0]), float(axis_span[1])])
+            except Exception:
+                continue
+    if not span_values:
+        return None
+
+    if axis == "X":
+        start = [min(span_values), fixed_y, fixed_z]
+        end = [max(span_values), fixed_y, fixed_z]
+    else:
+        start = [fixed_x, min(span_values), fixed_z]
+        end = [fixed_x, max(span_values), fixed_z]
+
+    return {
+        "id": int(group.get("id") or (index + 1)),
+        "axis": axis.lower(),
+        "center": [
+            (float(start[0]) + float(end[0])) / 2.0,
+            (float(start[1]) + float(end[1])) / 2.0,
+            (float(start[2]) + float(end[2])) / 2.0,
+        ],
+        "start": start,
+        "end": end,
+        "length": _segment_measured_length({"start": start, "end": end}),
+        "segment_indices": [member_index + 1 for member_index in member_indexes],
+    }
+
+
+def canonicalize_unfold_payload(result, fold_merge_settings=None):
+    payload = dict(result or {})
+    original_segments = list(payload.get("bend_line_segments") or [])
+    filtered_segments, discarded_count = _filter_fold_segments_runtime(original_segments)
+    payload["bend_line_segments"] = filtered_segments
+
+    existing_raw_fold_lines = payload.get("raw_fold_lines")
+    if existing_raw_fold_lines is None:
+        payload["raw_fold_lines"] = len(original_segments)
+
+    if discarded_count:
+        payload["discarded_fold_segment_count"] = discarded_count
+
+    merged_details, merged_bends, merged_groups = _merge_fold_segments_runtime(
+        filtered_segments,
+        payload.get("bends_logical") or [],
+        fold_merge_settings=fold_merge_settings,
+    )
+
+    if merged_details:
+        payload["fold_details"] = merged_details
+        payload["bends_logical"] = merged_bends
+        payload["bend_line_groups"] = merged_groups
+        payload["fold_lines"] = len(merged_details)
+        return payload
+
+    groups = payload.get("bend_line_groups") or []
+    if not payload.get("fold_details") and groups and filtered_segments:
+        payload["fold_details"] = [
+            detail
+            for index, group in enumerate(groups)
+            if (detail := _build_fold_detail_from_group_runtime(group, filtered_segments, index)) is not None
+        ]
+
+    if not payload.get("bends_logical") and payload.get("fold_details"):
+        payload["bends_logical"] = [{"id": detail.get("id")} for detail in payload["fold_details"]]
+
+    if payload.get("fold_lines") in (None, 0) and payload.get("fold_details"):
+        payload["fold_lines"] = len(payload["fold_details"])
+
+    return payload
+
+
 _PERSISTENT_FREECAD_WORKERS = {}
 _PERSISTENT_FREECAD_WORKERS_LOCK = threading.Lock()
 
@@ -1560,6 +1731,7 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
         if direct_result.get("success"):
             timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
             timings["route"] = "direct"
+            direct_result = canonicalize_unfold_payload(direct_result)
             direct_result["unfold_timings_ms"] = timings
             return direct_result
 
@@ -1599,6 +1771,7 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
         python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
         timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
         timings["route"] = "worker" if _persistent_freecad_worker_enabled() else "subprocess"
+        python_runtime_result = canonicalize_unfold_payload(python_runtime_result)
         python_runtime_result["unfold_timings_ms"] = timings
         _print_unfold_timings(part_name, timings)
         return python_runtime_result

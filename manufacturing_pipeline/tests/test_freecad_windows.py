@@ -269,6 +269,30 @@ def test_runtime_merge_fold_segments_keeps_distinct_lines_separate() -> None:
     assert [group["segment_indices"] for group in merged_groups] == [[0], [1]]
 
 
+def test_canonicalize_unfold_payload_filters_degenerate_segments_before_merge() -> None:
+    payload = {
+        "bend_line_segments": [
+            {"index": 0, "axis": "X", "center": (20.0, 10.0, 0.0), "axis_span": (0.0, 40.0), "length": 40.0},
+            {"index": 1, "axis": "X", "center": (215.0, 10.1, 0.0), "axis_span": (190.0, 240.0), "length": 50.0},
+            {"index": 2, "axis": "X", "center": (120.0, 10.0, 0.0), "axis_span": (120.0, 120.0), "length": 0.0},
+        ],
+        "bends_logical": [
+            {"type": "up", "angle": 90.0, "radius": 1.0},
+            {"type": "up", "angle": 90.0, "radius": 1.0},
+            {"type": "up", "angle": 90.0, "radius": 1.0},
+        ],
+    }
+
+    result = runtime_unfold.canonicalize_unfold_payload(payload)
+
+    assert result["raw_fold_lines"] == 3
+    assert result["discarded_fold_segment_count"] == 1
+    assert len(result["bend_line_segments"]) == 2
+    assert result["fold_lines"] == 1
+    assert len(result["fold_details"]) == 1
+    assert result["fold_details"][0]["segment_indices"] == [1, 2]
+
+
 def test_summarize_unfold_failure_prefers_exception_details() -> None:
     result = {
         "attempts": 4,

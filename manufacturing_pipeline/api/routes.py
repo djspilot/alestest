@@ -32,7 +32,7 @@ from manufacturing_pipeline.api.schemas import (
 )
 from manufacturing_pipeline.api.job_manager import jobs
 from manufacturing_pipeline.api.analysis_service import run_step_analysis
-from manufacturing_pipeline.core.runtime_unfold import run_unfold_to_step
+from manufacturing_pipeline.core.runtime_unfold import canonicalize_unfold_payload, run_unfold_to_step
 from manufacturing_pipeline.analysis.io.step_file_io import extract_solids_to_temp_files
 from manufacturing_pipeline.reporting.xml_exporter import export_to_xml
 from pathlib import Path
@@ -108,26 +108,7 @@ def _build_fold_detail_from_group(group: dict, segments: list[dict], index: int)
 
 
 def _normalize_unfold_payload(result: dict | None) -> dict:
-    payload = dict(result or {})
-    segments = payload.get("bend_line_segments") or []
-    groups = payload.get("bend_line_groups") or []
-    fold_details = payload.get("fold_details") or []
-    bends_logical = payload.get("bends_logical") or []
-
-    if not fold_details and groups and segments:
-        fold_details = [
-            detail
-            for index, group in enumerate(groups)
-            if (detail := _build_fold_detail_from_group(group, segments, index)) is not None
-        ]
-        payload["fold_details"] = fold_details
-    if not bends_logical and fold_details:
-        payload["bends_logical"] = [{"id": detail.get("id")} for detail in fold_details]
-    if not payload.get("fold_lines") and fold_details:
-        payload["fold_lines"] = len(fold_details)
-    if payload.get("raw_fold_lines") is None and segments:
-        payload["raw_fold_lines"] = len(segments)
-    return payload
+    return canonicalize_unfold_payload(result)
 
 
 def _refresh_live_summary(summary_raw: dict | None) -> dict | None:
