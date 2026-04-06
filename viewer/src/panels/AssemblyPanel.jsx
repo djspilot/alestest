@@ -87,6 +87,15 @@ export default function AssemblyPanel({ pipelineResult, selectedPartIndex, onSel
         <div className="timeline-text" style={{ marginBottom: 10 }}>
           Deze viewer staat op een individueel onderdeel uit een assembly. Kies hieronder alleen een ander onderdeel als je wilt wisselen.
         </div>
+        <div style={{ marginBottom: 10 }}>
+          <button
+            className="timeline-nav-btn"
+            onClick={() => onSelectPartIndex?.(null)}
+            style={{ width: '100%' }}
+          >
+            Terug naar hele assembly
+          </button>
+        </div>
         <div style={{ marginBottom: 12 }}>
           <select
             value={selectedPartIndex ?? 0}

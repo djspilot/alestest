@@ -420,25 +420,34 @@ function AppContent({
     const parts = pipeline.pipelineState?.result?.parts || []
     const selectedPart = partIndex != null ? parts[partIndex] || null : null
     const solidIndex = Number.isInteger(selectedPart?.solid_index) ? selectedPart.solid_index : partIndex
+    const apiBase = launchApiBase || pipeline.pipelineApiBase || getDefaultPipelineApiBase()
+    const jobId = launchParams.get('job')
+    const headers = getApiKeyHeaders(pipeline.pipelineApiKey)
 
     if (partIndex == null) {
-      // Clear part selection from URL
       const params = new URLSearchParams(window.location.search)
       params.delete('part')
       const newUrl = `${window.location.pathname}?${params.toString()}`.replace(/\?$/, '')
       window.history.replaceState({}, '', newUrl)
-    } else {
-      // Update URL with part index
+
+      if (jobId) {
+        const fileName = pipeline.pipelineState?.result?.file || viewer.fileName || 'assembly.step'
+        const stepUrl = `${apiBase}/api/v1/jobs/${jobId}/step`
+        fetchFileAsBrowserFile(stepUrl, fileName, { headers })
+          .then((file) => viewer.handleFile(file, { skipPipelineStart: true }))
+          .catch((err) => console.warn('Failed to load STEP for assembly:', err))
+      }
+      return
+    }
+
+    if (partIndex != null) {
       const params = new URLSearchParams(window.location.search)
       params.set('part', String(solidIndex))
       const newUrl = `${window.location.pathname}?${params.toString()}`
       window.history.replaceState({}, '', newUrl)
 
-      const apiBase = launchApiBase || pipeline.pipelineApiBase || getDefaultPipelineApiBase()
-      const jobId = launchParams.get('job')
       const fileName = selectedPart?.file || selectedPart?.solid_name || `part_${partIndex + 1}.step`
       if (jobId && selectedPart) {
-        const headers = getApiKeyHeaders(pipeline.pipelineApiKey)
         const unfoldUrl = `${apiBase}/api/v1/jobs/${jobId}/parts/${solidIndex}/unfold`
         const stepUrl = `${apiBase}/api/v1/jobs/${jobId}/parts/${solidIndex}/step`
 
@@ -722,7 +731,7 @@ function AppWithSelectionProvider() {
         })
         if (resolvedIndex >= 0) return resolvedIndex
       }
-      return 0
+      return null
     })
   }, [launchedPartIndex, parts, pipelineResult])
 
