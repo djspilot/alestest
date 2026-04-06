@@ -34,6 +34,30 @@ function toOverlayPoint(point, center, normalVector, epsilon, coordinatesAreCent
   )
 }
 
+function axisComponent(point, axisKey) {
+  if (!point) return 0
+  if (axisKey === 'x') return Number(point.x ?? point[0] ?? 0)
+  if (axisKey === 'y') return Number(point.y ?? point[1] ?? 0)
+  return Number(point.z ?? point[2] ?? 0)
+}
+
+function scoreOverlayPlacement({ start, end, midpoint, primaryAxis, secondaryAxis, thicknessAxis, primarySize, secondarySize, thicknessSize }) {
+  const tolerance = 8
+  const maxPrimary = Math.max(primarySize / 2, 1)
+  const maxSecondary = Math.max(secondarySize / 2, 1)
+  const maxThickness = Math.max(thicknessSize * 4, 6)
+  const points = [start, end, midpoint].filter(Boolean)
+  if (points.length === 0) return Number.POSITIVE_INFINITY
+
+  let penalty = 0
+  for (const point of points) {
+    penalty += Math.max(0, Math.abs(axisComponent(point, primaryAxis)) - maxPrimary - tolerance)
+    penalty += Math.max(0, Math.abs(axisComponent(point, secondaryAxis)) - maxSecondary - tolerance)
+    penalty += Math.max(0, Math.abs(axisComponent(point, thicknessAxis)) - maxThickness)
+  }
+  return penalty
+}
+
 function averagePoint(points) {
   if (!Array.isArray(points) || points.length === 0) return null
   const total = points.reduce(
@@ -1403,13 +1427,9 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
     const secondaryAxis = inPlaneAxes[1] || inPlaneAxes[0]
     const primarySize = rankedAxes[0]?.size || length
     const secondarySize = rankedAxes[1]?.size || width
+    const thicknessSize = rankedAxes[2]?.size || 0
     const normalVector = axisVectorForKey(thicknessAxis)
     const epsilon = Math.max((rankedAxes[2]?.size || 0) * 0.6, 0.2)
-    const centeredBounds = {
-      x: Math.max(length * 0.65, primarySize * 0.65, 20),
-      y: Math.max(width * 0.65, secondarySize * 0.65, 20),
-      z: Math.max((rankedAxes[2]?.size || 0) * 3, 8),
-    }
 
     let segmentRows
     if (foldDetails.length > 0) {
@@ -1449,10 +1469,6 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
         : Array.isArray(detail.center) && detail.center.length >= 3
             ? detail.center
             : [0, 0, 0]
-      const coordinatesAreCentered =
-        Math.abs(Number(detailCenter[0] || 0)) <= centeredBounds.x &&
-        Math.abs(Number(detailCenter[1] || 0)) <= centeredBounds.y &&
-        Math.abs(Number(detailCenter[2] || 0)) <= centeredBounds.z
       const segmentAxis = String(segment?.axis || detail.axis || '').toLowerCase()
       const lineAxis = inPlaneAxes.includes(segmentAxis) ? segmentAxis : inPlaneAxes[0]
       const varyingAxis = inPlaneAxes.find((axisKey) => axisKey !== lineAxis) || inPlaneAxes[1] || inPlaneAxes[0]
@@ -1460,20 +1476,49 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
       const varyingVector = axisVectorForKey(varyingAxis)
       const basis = new THREE.Matrix4().makeBasis(lineVector, varyingVector, normalVector)
       const quaternion = new THREE.Quaternion().setFromRotationMatrix(basis)
-      const localStart = toOverlayPoint(
-        segment?.start || detail.start,
-        modelInfo?.center,
-        normalVector,
-        epsilon,
-        coordinatesAreCentered,
-      )
-      const localEnd = toOverlayPoint(
-        segment?.end || detail.end,
-        modelInfo?.center,
-        normalVector,
-        epsilon,
-        coordinatesAreCentered,
-      )
+      const centeredStart = toOverlayPoint(segment?.start || detail.start, modelInfo?.center, normalVector, epsilon, true)
+      const centeredEnd = toOverlayPoint(segment?.end || detail.end, modelInfo?.center, normalVector, epsilon, true)
+      const worldStart = toOverlayPoint(segment?.start || detail.start, modelInfo?.center, normalVector, epsilon, false)
+      const worldEnd = toOverlayPoint(segment?.end || detail.end, modelInfo?.center, normalVector, epsilon, false)
+      const centeredMidpoint = centeredStart && centeredEnd ? centeredStart.clone().add(centeredEnd).multiplyScalar(0.5) : null
+      const worldMidpoint = worldStart && worldEnd ? worldStart.clone().add(worldEnd).multiplyScalar(0.5) : null
+      const centeredPosition = [
+        Number(detailCenter[0] || 0) + normalVector.x * epsilon,
+        Number(detailCenter[1] || 0) + normalVector.y * epsilon,
+        Number(detailCenter[2] || 0) + normalVector.z * epsilon,
+      ]
+      const worldPosition = modelInfo?.center
+        ? [
+            Number(detailCenter[0] || 0) - modelInfo.center.x + normalVector.x * epsilon,
+            Number(detailCenter[1] || 0) - modelInfo.center.y + normalVector.y * epsilon,
+            Number(detailCenter[2] || 0) - modelInfo.center.z + normalVector.z * epsilon,
+          ]
+        : [0, 0, 0]
+      const centeredScore = scoreOverlayPlacement({
+        start: centeredStart,
+        end: centeredEnd,
+        midpoint: centeredMidpoint || centeredPosition,
+        primaryAxis,
+        secondaryAxis,
+        thicknessAxis,
+        primarySize,
+        secondarySize,
+        thicknessSize,
+      })
+      const worldScore = scoreOverlayPlacement({
+        start: worldStart,
+        end: worldEnd,
+        midpoint: worldMidpoint || worldPosition,
+        primaryAxis,
+        secondaryAxis,
+        thicknessAxis,
+        primarySize,
+        secondarySize,
+        thicknessSize,
+      })
+      const coordinatesAreCentered = centeredScore <= worldScore
+      const localStart = coordinatesAreCentered ? centeredStart : worldStart
+      const localEnd = coordinatesAreCentered ? centeredEnd : worldEnd
       const requestedLength =
         Number(segment?.length || detail.length || logical.length) || Math.max(Math.min(length, width) * 0.9, 10)
       const shouldPreferPrimaryAxis = requestedLength > secondarySize * 1.35 && primarySize > secondarySize * 1.2
@@ -1482,13 +1527,7 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
         new THREE.Vector3(1, 0, 0),
         axisVectorForKey(fallbackAxis),
       )
-      const position = modelInfo?.center
-        ? [
-            Number(detailCenter[0] || 0) - (coordinatesAreCentered ? 0 : modelInfo.center.x) + normalVector.x * epsilon,
-            Number(detailCenter[1] || 0) - (coordinatesAreCentered ? 0 : modelInfo.center.y) + normalVector.y * epsilon,
-            Number(detailCenter[2] || 0) - (coordinatesAreCentered ? 0 : modelInfo.center.z) + normalVector.z * epsilon,
-          ]
-        : [0, 0, 0]
+      const position = coordinatesAreCentered ? centeredPosition : worldPosition
       return {
         id,
         position,
