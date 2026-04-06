@@ -132,6 +132,22 @@ export function normalizeUnfoldVisuals(unfoldVisuals) {
   const inScopeY = Math.max(flatWidth * 0.8, flatLength * 0.2, 40)
   const inScopeZ = Math.max(Math.min(flatLength, flatWidth) * 0.15, 8)
 
+  // Compute centroid of all fold detail centers so scope check uses relative
+  // coordinates. FreeCAD flat patterns can be far from the origin, so checking
+  // abs(center) against the part dimensions (inScopeX/Y/Z) would incorrectly
+  // filter valid fold lines that happen to have large absolute coordinates.
+  const centersForCentroid = derivedFoldDetails
+    .filter((d) => Array.isArray(d?.center) && d.center.length >= 3)
+    .map((d) => d.center)
+  const centroid =
+    centersForCentroid.length > 0
+      ? [
+          centersForCentroid.reduce((s, c) => s + Number(c[0] || 0), 0) / centersForCentroid.length,
+          centersForCentroid.reduce((s, c) => s + Number(c[1] || 0), 0) / centersForCentroid.length,
+          centersForCentroid.reduce((s, c) => s + Number(c[2] || 0), 0) / centersForCentroid.length,
+        ]
+      : [0, 0, 0]
+
   const normalizedFoldDetails = derivedFoldDetails
     .map((detail, index) => {
       const start = Array.isArray(detail?.start) ? detail.start : null
@@ -153,9 +169,9 @@ export function normalizeUnfoldVisuals(unfoldVisuals) {
         _outOfScope:
           Array.isArray(detail?.center) &&
           detail.center.length >= 3 &&
-          (Math.abs(Number(detail.center[0] || 0)) > inScopeX ||
-            Math.abs(Number(detail.center[1] || 0)) > inScopeY ||
-            Math.abs(Number(detail.center[2] || 0)) > inScopeZ),
+          (Math.abs(Number(detail.center[0] || 0) - centroid[0]) > inScopeX ||
+            Math.abs(Number(detail.center[1] || 0) - centroid[1]) > inScopeY ||
+            Math.abs(Number(detail.center[2] || 0) - centroid[2]) > inScopeZ),
       }
     })
     .filter((detail) => {
