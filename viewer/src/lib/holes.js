@@ -126,12 +126,71 @@ export function normalizeUnfoldVisuals(unfoldVisuals) {
         ? segments.length
         : null
 
+  const normalizedFoldDetails = derivedFoldDetails
+    .map((detail, index) => {
+      const start = Array.isArray(detail?.start) ? detail.start : null
+      const end = Array.isArray(detail?.end) ? detail.end : null
+      const measuredLength =
+        start && end && start.length >= 3 && end.length >= 3
+          ? Math.hypot(
+              Number(end[0] || 0) - Number(start[0] || 0),
+              Number(end[1] || 0) - Number(start[1] || 0),
+              Number(end[2] || 0) - Number(start[2] || 0),
+            )
+          : null
+      const length = Number(detail?.length ?? measuredLength ?? 0)
+      return {
+        ...detail,
+        id: detail?.id ?? index + 1,
+        length,
+        _sourceIndex: index,
+      }
+    })
+    .filter((detail) => {
+      const segmentCount = Array.isArray(detail?.segment_indices) ? detail.segment_indices.length : 0
+      return detail.length > 1 || segmentCount > 1
+    })
+
+  const dedupedFoldDetails = []
+  const dedupeMap = new Map()
+  for (const detail of normalizedFoldDetails) {
+    const logical = derivedBendsLogical[(detail._sourceIndex ?? 0)] || {}
+    const center = Array.isArray(detail.center) ? detail.center : [0, 0, 0]
+    const key = [
+      String(detail.axis || ''),
+      Math.round(Number(center[0] || 0) / 2),
+      Math.round(Number(center[1] || 0) / 2),
+      Math.round(Number(center[2] || 0) / 2),
+      Math.round(Number(logical.angle || 0)),
+      Math.round(Number(logical.radius || 0) * 2),
+    ].join('|')
+    const existingIndex = dedupeMap.get(key)
+    if (existingIndex == null) {
+      dedupeMap.set(key, dedupedFoldDetails.length)
+      dedupedFoldDetails.push(detail)
+      continue
+    }
+    if (detail.length > dedupedFoldDetails[existingIndex].length) {
+      dedupedFoldDetails[existingIndex] = detail
+    }
+  }
+
+  const filteredBendsLogical = dedupedFoldDetails.map((detail) => derivedBendsLogical[detail._sourceIndex ?? 0] || {
+    id: detail.id,
+    type: null,
+    angle: null,
+    radius: null,
+  })
+
+  const hiddenFoldCandidateCount = Math.max(0, derivedFoldDetails.length - dedupedFoldDetails.length)
+
   return {
     ...unfoldVisuals,
-    fold_lines: derivedFoldLines,
+    fold_lines: dedupedFoldDetails.length > 0 ? dedupedFoldDetails.length : derivedFoldLines,
     raw_fold_lines: rawFoldLines,
-    fold_details: derivedFoldDetails,
-    bends_logical: derivedBendsLogical,
+    fold_details: dedupedFoldDetails.length > 0 ? dedupedFoldDetails.map(({ _sourceIndex, ...detail }) => detail) : derivedFoldDetails,
+    bends_logical: dedupedFoldDetails.length > 0 ? filteredBendsLogical : derivedBendsLogical,
+    hidden_fold_candidate_count: hiddenFoldCandidateCount,
   }
 }
 

@@ -1315,6 +1315,12 @@ export default function StageDetailsPanel({
                     <div className="timeline-text" style={{ marginTop: 8 }}>
                       Samengevat: {unfoldVisuals.fold_lines ?? 0} zetlijnen na samenvoegen van losse segmenten.
                     </div>
+                    {Number(unfoldVisuals.hidden_fold_candidate_count || 0) > 0 && (
+                      <div className="timeline-text" style={{ marginTop: 4, color: '#9a3412' }}>
+                        {unfoldVisuals.hidden_fold_candidate_count} onbruikbare of dubbele fold-candidate
+                        {unfoldVisuals.hidden_fold_candidate_count === 1 ? '' : 'n'} verborgen in de viewer.
+                      </div>
+                    )}
                   </div>
                 )}
 
