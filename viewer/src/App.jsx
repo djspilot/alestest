@@ -136,6 +136,7 @@ function AppContent({
   const [debugPanelOpen, setDebugPanelOpen] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [loadingDefaultStep, setLoadingDefaultStep] = useState(false)
+  const [studioMenuOpen, setStudioMenuOpen] = useState(false)
   const [materialPreset, setMaterialPreset] = useState(() => window.localStorage.getItem('ales-viewer-material-preset') || 'technical_steel')
   const [renderMode, setRenderMode] = useState(() => {
     const saved = window.localStorage.getItem('ales-viewer-render-mode')
@@ -200,6 +201,19 @@ function AppContent({
   useEffect(() => {
     window.localStorage.setItem('ales-viewer-light-mode', lightMode)
   }, [lightMode])
+
+  useEffect(() => {
+    if (!studioMenuOpen) return undefined
+
+    const handlePointerDown = (event) => {
+      const target = event.target
+      if (target instanceof Element && target.closest('.studio-menu-shell')) return
+      setStudioMenuOpen(false)
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    return () => window.removeEventListener('pointerdown', handlePointerDown)
+  }, [studioMenuOpen])
 
   const latestErrorDebugEvent = useMemo(() => {
     const events = viewer.debugEvents || []
@@ -501,48 +515,6 @@ function AppContent({
               Terug naar API
             </button>
           )}
-          {viewer.fileName && (
-            <select
-              className="header-toggle-btn"
-              value={materialPreset}
-              onChange={(event) => setMaterialPreset(event.target.value)}
-              title="Materiaalweergave"
-            >
-              {materialOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          )}
-          {viewer.fileName && (
-            <select
-              className="header-toggle-btn"
-              value={renderMode}
-              onChange={(event) => setRenderMode(event.target.value)}
-              title="Render mode"
-            >
-              {renderModeOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          )}
-          {viewer.fileName && (
-            <select
-              className="header-toggle-btn"
-              value={lightMode}
-              onChange={(event) => setLightMode(event.target.value)}
-              title="Licht mode"
-            >
-              {lightModeOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          )}
           <button className="header-toggle-btn" onClick={() => setRightPanelOpen((v) => !v)}>
             {rightPanelOpen ? 'Verberg rechts' : 'Toon rechts'}
           </button>
@@ -615,6 +587,51 @@ function AppContent({
                   {selection.probeMode ? 'Probe mode aan' : 'Probe mode'}
                 </button>
                 <button className="toolbar-btn" onClick={resetViewer}>Nieuw bestand</button>
+              </div>
+              <div className="studio-menu-shell">
+                <button
+                  className={`studio-menu-fab ${studioMenuOpen ? 'is-open' : ''}`}
+                  onClick={() => setStudioMenuOpen((value) => !value)}
+                  title="Studio-instellingen"
+                  aria-expanded={studioMenuOpen}
+                >
+                  Studio
+                </button>
+                {studioMenuOpen && (
+                  <div className="studio-menu-popover">
+                    <div className="studio-menu-title">Studio</div>
+                    <label className="studio-menu-field">
+                      <span>Materiaal</span>
+                      <select value={materialPreset} onChange={(event) => setMaterialPreset(event.target.value)}>
+                        {materialOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="studio-menu-field">
+                      <span>Weergave</span>
+                      <select value={renderMode} onChange={(event) => setRenderMode(event.target.value)}>
+                        {renderModeOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="studio-menu-field">
+                      <span>Licht</span>
+                      <select value={lightMode} onChange={(event) => setLightMode(event.target.value)}>
+                        {lightModeOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
               </div>
               <div className="viewer-info">
                 {viewer.fileName}{' '}
