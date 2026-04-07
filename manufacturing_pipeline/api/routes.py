@@ -278,7 +278,7 @@ def _rebuild_timeline_from_result_dict(result: dict) -> tuple[list, dict | None]
     if not events:
         return [], None
     summary = {
-        "total_elapsed_seconds": None,
+        "total_elapsed_seconds": 0.0,
         "event_count": len(events),
         "step_count": 0,
         "part_name": result.get("file"),

@@ -303,7 +303,7 @@ def _build_timeline(result: dict, analysis, total_holes: int, timing_data: dict 
         if not events:
             return [], None
         summary = {
-            "total_elapsed_seconds": None,
+            "total_elapsed_seconds": 0.0,
             "event_count": len(events),
             "step_count": 0,
             "part_name": result.get("file"),
