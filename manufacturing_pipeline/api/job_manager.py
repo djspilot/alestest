@@ -226,6 +226,7 @@ class JobManager:
                 """SELECT *
                    FROM api_jobs
                    WHERE request_fingerprint = ?
+                     AND archived = 0
                      AND status IN ('queued', 'processing', 'completed')
                    ORDER BY
                      CASE status

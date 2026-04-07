@@ -340,6 +340,17 @@ def canonicalize_unfold_payload(result, fold_merge_settings=None):
     payload = dict(result or {})
     original_segments = list(payload.get("bend_line_segments") or [])
     filtered_segments, discarded_count = _filter_fold_segments_runtime(original_segments)
+    if original_segments and not filtered_segments:
+        # Backward-compatibility path for minimal/mock payloads that expose raw
+        # bend_line_segments without geometric merge metadata like axis_span.
+        has_merge_geometry = any(
+            (segment.get("axis") or "").upper() in {"X", "Y"} or len(segment.get("axis_span") or []) >= 2
+            for segment in original_segments
+            if isinstance(segment, dict)
+        )
+        if not has_merge_geometry:
+            filtered_segments = original_segments
+            discarded_count = 0
     payload["bend_line_segments"] = filtered_segments
 
     existing_raw_fold_lines = payload.get("raw_fold_lines")

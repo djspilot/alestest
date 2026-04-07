@@ -677,6 +677,17 @@ async def analyze(
     file_hash = hashlib.md5(content).hexdigest()
     request_fingerprint = _build_request_fingerprint(file_hash, aag, merged_disable_stages)
 
+    reusable_job = jobs.find_reusable_job(request_fingerprint)
+    if reusable_job is not None:
+        return JobCreated(
+            job_id=reusable_job.job_id,
+            status=reusable_job.status,
+            reused_existing=True,
+            created_at=reusable_job.created_at,
+            archived=bool(getattr(reusable_job, "archived", False)),
+            archived_at=getattr(reusable_job, "archived_at", None),
+        )
+
     # Save file to upload directory
     job_id = str(uuid.uuid4())
     job_dir = os.path.join(UPLOAD_DIR, job_id)
@@ -694,7 +705,13 @@ async def analyze(
                       file_size_bytes=len(content))
     background_tasks.add_task(_run_analysis_job, job_id, step_path, aag, merged_disable_stages)
 
-    return JobCreated(job_id=job_id, status=job.status, created_at=job.created_at)
+    return JobCreated(
+        job_id=job_id,
+        status=job.status,
+        created_at=job.created_at,
+        archived=bool(getattr(job, "archived", False)),
+        archived_at=getattr(job, "archived_at", None),
+    )
 
 
 @router.get("/jobs", response_model=JobListResponse)
