@@ -450,6 +450,7 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
 
         # Build base result
         result = {
+            "result_schema_version": 2,
             "file": part_name,
             "success": True,
             "category": getattr(analysis, "part_category", "UNKNOWN"),

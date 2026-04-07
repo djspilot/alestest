@@ -111,6 +111,25 @@ def _normalize_unfold_payload(result: dict | None) -> dict:
     return canonicalize_unfold_payload(result)
 
 
+def _resolve_job_timeline(job) -> tuple[list, dict | None]:
+    """Single source of truth for reading timeline events from a job.
+
+    For completed jobs: reads from result['timeline'], falls back to
+    _rebuild_timeline_from_result_dict when timeline was never stored
+    (e.g. old cached jobs).  For in-progress jobs: reads live
+    progress_events from memory.
+    """
+    if job.status == "completed":
+        timeline_raw = (job.result or {}).get("timeline") or []
+        summary_raw = (job.result or {}).get("timeline_summary")
+        if not timeline_raw and job.result:
+            timeline_raw, summary_raw = _rebuild_timeline_from_result_dict(job.result)
+    else:
+        timeline_raw = getattr(job, "progress_events", None) or []
+        summary_raw = _refresh_live_summary(getattr(job, "progress_summary", None))
+    return timeline_raw or [], summary_raw
+
+
 def _refresh_live_summary(summary_raw: dict | None) -> dict | None:
     if not summary_raw:
         return None
@@ -656,14 +675,20 @@ async def analyze(
 
     file_hash = hashlib.md5(content).hexdigest()
     request_fingerprint = _build_request_fingerprint(file_hash, aag, merged_disable_stages)
+    CURRENT_RESULT_SCHEMA_VERSION = 2
     reusable_job = jobs.find_reusable_job(request_fingerprint)
     if reusable_job:
-        return JobCreated(
-            job_id=reusable_job.job_id,
-            status=reusable_job.status,
-            reused_existing=True,
-            created_at=reusable_job.created_at,
-        )
+        # Only reuse completed jobs whose result was produced by the current
+        # schema version.  Stale results (missing visuals, empty timeline, etc.)
+        # are silently dropped so a fresh analysis runs instead.
+        result_version = (reusable_job.result or {}).get("result_schema_version", 1)
+        if result_version >= CURRENT_RESULT_SCHEMA_VERSION:
+            return JobCreated(
+                job_id=reusable_job.job_id,
+                status=reusable_job.status,
+                reused_existing=True,
+                created_at=reusable_job.created_at,
+            )
 
     # Save file to upload directory
     job_id = str(uuid.uuid4())
@@ -718,16 +743,7 @@ async def get_job(
         return _build_xml_response(job.result)
 
 
-    if job.status == "completed":
-        timeline_raw = (job.result or {}).get("timeline") or []
-        summary_raw = (job.result or {}).get("timeline_summary")
-        # Fallback: rebuild from stored result dict when timeline was not
-        # generated (e.g. old cached jobs where timing_data was unavailable).
-        if not timeline_raw and job.result:
-            timeline_raw, summary_raw = _rebuild_timeline_from_result_dict(job.result)
-    else:
-        timeline_raw = getattr(job, "progress_events", None) or []
-        summary_raw = _refresh_live_summary(getattr(job, "progress_summary", None))
+    timeline_raw, summary_raw = _resolve_job_timeline(job)
 
     response = JobStatus(
         job_id=job.job_id,
@@ -755,19 +771,10 @@ async def get_job_timeline(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    if job.status == "completed":
-        timeline_raw = (job.result or {}).get("timeline") or []
-        summary_raw = (job.result or {}).get("timeline_summary")
-        # Fallback: rebuild from stored result dict when timeline was not
-        # generated (e.g. old cached jobs where timing_data was unavailable).
-        if not timeline_raw and job.result:
-            timeline_raw, summary_raw = _rebuild_timeline_from_result_dict(job.result)
-    else:
-        timeline_raw = getattr(job, "progress_events", None) or []
-        summary_raw = _refresh_live_summary(getattr(job, "progress_summary", None))
+    timeline_raw, summary_raw = _resolve_job_timeline(job)
 
     summary = TimelineSummary(**summary_raw) if summary_raw else None
-    events = [TimelineEvent(**e) for e in (timeline_raw or [])]
+    events = [TimelineEvent(**e) for e in timeline_raw]
 
     return JobTimelineResponse(
         job_id=job.job_id,
