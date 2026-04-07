@@ -189,6 +189,109 @@ def _source_step_available(job) -> bool:
     return bool(getattr(job, "file_path", None)) and os.path.exists(job.file_path)
 
 
+def _rebuild_timeline_from_result_dict(result: dict) -> tuple[list, dict | None]:
+    """Reconstruct minimal timeline events from a completed result dict.
+
+    Used when result['timeline'] is empty (e.g. old cached job where timing_data
+    was unavailable at analysis time).  Does not require the analysis object —
+    only the stored result/visuals data.  Stages get synthetic stage_end events
+    so the viewer's stage list is selectable.
+    """
+    from manufacturing_pipeline.api.analysis_service import _synthetic_stage_end
+
+    events = []
+    current_ms = 0
+    visuals = result.get("visuals") or {}
+    production = result.get("production") or {}
+
+    route = result.get("route") or {}
+    if route:
+        events.append(_synthetic_stage_end("Profile Router", current_ms))
+        events.append({
+            "type": "classification_decision",
+            "stage": "Profile Router",
+            "timestamp_ms": 0,
+            "status": "OK",
+            "payload": {k: v for k, v in route.items() if k != "debug"},
+        })
+
+    classification = visuals.get("classification") or {}
+    if classification or result.get("category"):
+        events.append(_synthetic_stage_end("Classify geometry", current_ms))
+        events.append({
+            "type": "geometry_classified",
+            "stage": "Classify geometry",
+            "timestamp_ms": current_ms,
+            "status": "OK",
+            "payload": {
+                **classification,
+                "category": result.get("category"),
+                "part_type": result.get("part_type"),
+                "bends_total": production.get("bends_total", 0),
+            },
+        })
+
+    holes_pre_unfold = visuals.get("holes_pre_unfold") or {}
+    if holes_pre_unfold.get("items"):
+        events.append(_synthetic_stage_end("Detect holes (pre-unfold)", current_ms))
+        events.append({
+            "type": "holes_detected_pre_unfold",
+            "stage": "Detect holes (pre-unfold)",
+            "timestamp_ms": current_ms,
+            "status": "OK",
+            "payload": {k: v for k, v in holes_pre_unfold.items() if k != "flat_mesh"},
+        })
+
+    holes = visuals.get("holes") or {}
+    events.append(_synthetic_stage_end("Detect holes", current_ms))
+    events.append({
+        "type": "holes_detected",
+        "stage": "Detect holes",
+        "timestamp_ms": current_ms,
+        "status": "OK",
+        "payload": {"total": holes.get("total", 0)},
+    })
+    events.append({
+        "type": "bends_detected",
+        "stage": "Classify geometry",
+        "timestamp_ms": current_ms,
+        "status": "OK",
+        "payload": {
+            "total": production.get("bends_total", 0),
+            "up": production.get("bends_up", 0),
+            "down": production.get("bends_down", 0),
+        },
+    })
+
+    unfold = visuals.get("unfold") or {}
+    if unfold:
+        success = bool(unfold.get("success"))
+        events.append(_synthetic_stage_end("Unfold", current_ms, "OK" if success else "FAIL"))
+        events.append({
+            "type": "unfold_result",
+            "stage": "Unfold",
+            "timestamp_ms": current_ms,
+            "status": "OK" if success else "FAIL",
+            "payload": {k: v for k, v in unfold.items() if k not in {"flat_mesh", "bends_3d"}},
+        })
+
+    if not events:
+        return [], None
+    summary = {
+        "total_elapsed_seconds": None,
+        "event_count": len(events),
+        "step_count": 0,
+        "part_name": result.get("file"),
+        "analysis_started_at": None,
+        "active_stage": None,
+        "active_stage_started_at": None,
+        "active_stage_elapsed_seconds": None,
+        "completed_step_count": 0,
+        "total_steps_hint": 0,
+    }
+    return events, summary
+
+
 def _build_request_fingerprint(file_hash: str, use_aag: bool, disable_stages: set[str]) -> str:
     payload = {
         "file_hash": file_hash,
@@ -651,12 +754,16 @@ async def get_job_timeline(job_id: str):
     if job.status == "completed":
         timeline_raw = (job.result or {}).get("timeline") or []
         summary_raw = (job.result or {}).get("timeline_summary")
+        # Fallback: rebuild from stored result dict when timeline was not
+        # generated (e.g. old cached jobs where timing_data was unavailable).
+        if not timeline_raw and job.result:
+            timeline_raw, summary_raw = _rebuild_timeline_from_result_dict(job.result)
     else:
         timeline_raw = getattr(job, "progress_events", None) or []
         summary_raw = _refresh_live_summary(getattr(job, "progress_summary", None))
 
     summary = TimelineSummary(**summary_raw) if summary_raw else None
-    events = [TimelineEvent(**e) for e in timeline_raw]
+    events = [TimelineEvent(**e) for e in (timeline_raw or [])]
 
     return JobTimelineResponse(
         job_id=job.job_id,

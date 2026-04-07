@@ -67,15 +67,37 @@ def _load_timing_json(output_dir: str, step_file: str) -> dict | None:
         return None
 
 
-def _build_timeline(result: dict, analysis, total_holes: int, timing_data: dict | None) -> tuple[list[dict], dict | None]:
-    """Build replay timeline events and a compact summary."""
-    if not timing_data:
-        return [], None
+def _synthetic_stage_end(stage: str, current_ms: int, status: str = "OK") -> dict:
+    """Minimal stage_end event used when timing_data is unavailable.
 
+    Without timing data there are no stage_start/stage_end events from the
+    profiler loop, so stages would never be selectable in the viewer.
+    Inserting synthetic stage_end events restores selectability while keeping
+    elapsed_seconds=None to signal that no timing is available.
+    """
+    return {
+        "type": "stage_end",
+        "stage": stage,
+        "timestamp_ms": current_ms,
+        "status": status,
+        "payload": {"elapsed_seconds": None, "error": None},
+    }
+
+
+def _build_timeline(result: dict, analysis, total_holes: int, timing_data: dict | None) -> tuple[list[dict], dict | None]:
+    """Build replay timeline events and a compact summary.
+
+    When timing_data (the profiler JSON) is available the full step-by-step
+    timing is reconstructed.  When it is absent (e.g. Docker deployment where
+    the timing file was not written) we still emit all content events
+    (classification, holes, unfold) together with synthetic stage_end markers
+    so the viewer's stage list remains selectable.
+    """
     events: list[dict] = []
     current_ms = 0
-    steps = timing_data.get("steps", [])
+    steps = timing_data.get("steps", []) if timing_data else []
 
+    # ── Step-based timing events (only when timing_data is present) ──────────
     for step in steps:
         step_name = step.get("name", "Unknown")
         step_status = (step.get("status") or "OK").upper()
@@ -135,8 +157,11 @@ def _build_timeline(result: dict, analysis, total_holes: int, timing_data: dict 
             }
         )
 
+    # ── Content events (always generated from analysis + result objects) ──────
     route_result = getattr(analysis, "route_result", None)
     if route_result is not None:
+        if not timing_data:
+            events.append(_synthetic_stage_end("Profile Router", current_ms))
         events.append(
             {
                 "type": "classification_decision",
@@ -159,6 +184,8 @@ def _build_timeline(result: dict, analysis, total_holes: int, timing_data: dict 
     # replay (job auto-load) as well as live polling.
     classification_visuals = getattr(analysis, "classification_visuals", None)
     if classification_visuals or result.get("category"):
+        if not timing_data:
+            events.append(_synthetic_stage_end("Classify geometry", current_ms))
         events.append(
             {
                 "type": "geometry_classified",
@@ -181,6 +208,8 @@ def _build_timeline(result: dict, analysis, total_holes: int, timing_data: dict 
     # pre-unfold hole panel works on replay.
     pre_unfold_visuals = getattr(analysis, "detected_hole_visuals_pre_unfold", None)
     if pre_unfold_visuals:
+        if not timing_data:
+            events.append(_synthetic_stage_end("Detect holes (pre-unfold)", current_ms))
         events.append(
             {
                 "type": "holes_detected_pre_unfold",
@@ -193,6 +222,8 @@ def _build_timeline(result: dict, analysis, total_holes: int, timing_data: dict 
             }
         )
 
+    if not timing_data:
+        events.append(_synthetic_stage_end("Detect holes", current_ms))
     events.append(
         {
             "type": "holes_detected",
@@ -222,6 +253,8 @@ def _build_timeline(result: dict, analysis, total_holes: int, timing_data: dict 
     unfold_result = getattr(analysis, "unfold_result", None)
     if unfold_result:
         success = bool(unfold_result.get("success"))
+        if not timing_data:
+            events.append(_synthetic_stage_end("Unfold", current_ms, "OK" if success else "FAIL"))
         # Use 'unfold_result' to match the live profiler's profiler.emit() type
         # and the viewer's enrichment check (event.type === 'unfold_result').
         events.append(
@@ -250,6 +283,8 @@ def _build_timeline(result: dict, analysis, total_holes: int, timing_data: dict 
     )):
         # Emit an unfold_result event even when unfold_result is absent but the
         # step ran (e.g. exception during unfold).
+        if not timing_data:
+            events.append(_synthetic_stage_end("Unfold", current_ms, "FAIL"))
         events.append(
             {
                 "type": "unfold_result",
@@ -262,6 +297,24 @@ def _build_timeline(result: dict, analysis, total_holes: int, timing_data: dict 
                 },
             }
         )
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    if not timing_data:
+        if not events:
+            return [], None
+        summary = {
+            "total_elapsed_seconds": None,
+            "event_count": len(events),
+            "step_count": 0,
+            "part_name": result.get("file"),
+            "analysis_started_at": None,
+            "active_stage": None,
+            "active_stage_started_at": None,
+            "active_stage_elapsed_seconds": None,
+            "completed_step_count": 0,
+            "total_steps_hint": 0,
+        }
+        return events, summary
 
     total_elapsed = float(timing_data.get("total_elapsed") or 0.0)
     summary = {
