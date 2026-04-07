@@ -20,6 +20,7 @@ class Job:
     __slots__ = ("job_id", "status", "created_at", "started_at", "completed_at",
                  "result", "error", "file_path", "file_name", "file_hash",
                  "request_fingerprint",
+                 "archived", "archived_at",
                  "file_size_bytes", "progress_events", "progress_summary",
                  "unfold_status", "unfold_requested_at", "unfold_started_at",
                  "unfold_completed_at", "unfold_result", "unfold_error")
@@ -38,6 +39,8 @@ class Job:
         self.file_name = file_name or os.path.basename(file_path)
         self.file_hash = file_hash
         self.request_fingerprint = request_fingerprint
+        self.archived = False
+        self.archived_at: Optional[datetime] = None
         self.file_size_bytes = file_size_bytes
         self.progress_events: list[dict] = []
         self.progress_summary: Optional[dict] = None
@@ -73,6 +76,8 @@ class JobManager:
                     file_name TEXT NOT NULL,
                     file_hash TEXT,
                     request_fingerprint TEXT,
+                    archived INTEGER NOT NULL DEFAULT 0,
+                    archived_at TEXT,
                     file_size_bytes INTEGER,
                     status TEXT NOT NULL DEFAULT 'queued',
                     created_at TEXT NOT NULL,
@@ -98,6 +103,10 @@ class JobManager:
                 conn.execute("ALTER TABLE api_jobs ADD COLUMN file_path TEXT")
             if "request_fingerprint" not in existing_columns:
                 conn.execute("ALTER TABLE api_jobs ADD COLUMN request_fingerprint TEXT")
+            if "archived" not in existing_columns:
+                conn.execute("ALTER TABLE api_jobs ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+            if "archived_at" not in existing_columns:
+                conn.execute("ALTER TABLE api_jobs ADD COLUMN archived_at TEXT")
             if "unfold_requested_at" not in existing_columns:
                 conn.execute("ALTER TABLE api_jobs ADD COLUMN unfold_requested_at TEXT")
             if "unfold_started_at" not in existing_columns:
@@ -119,6 +128,8 @@ class JobManager:
                     ON api_jobs(file_hash);
                 CREATE INDEX IF NOT EXISTS idx_api_jobs_request_fingerprint
                     ON api_jobs(request_fingerprint);
+                CREATE INDEX IF NOT EXISTS idx_api_jobs_archived
+                    ON api_jobs(archived);
             """)
             conn.commit()
         finally:
@@ -158,6 +169,8 @@ class JobManager:
         job.file_name = row["file_name"] or ""
         job.file_hash = row["file_hash"] or ""
         job.request_fingerprint = row["request_fingerprint"] or ""
+        job.archived = bool(row["archived"]) if "archived" in row.keys() else False
+        job.archived_at = self._str_to_dt(row["archived_at"]) if "archived_at" in row.keys() else None
         job.file_size_bytes = row["file_size_bytes"] or 0
         job.status = row["status"]
         job.created_at = self._str_to_dt(row["created_at"])
@@ -192,11 +205,11 @@ class JobManager:
         try:
             conn.execute(
                 """INSERT INTO api_jobs
-                   (job_id, file_path, file_name, file_hash, request_fingerprint, file_size_bytes, status, created_at,
-                    unfold_status)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (job_id, file_path, job.file_name, file_hash, request_fingerprint, file_size_bytes,
-                 "queued", self._dt_to_str(job.created_at), "idle")
+                   (job_id, file_path, file_name, file_hash, request_fingerprint, archived, archived_at,
+                    file_size_bytes, status, created_at, unfold_status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (job_id, file_path, job.file_name, file_hash, request_fingerprint, 0, None,
+                 file_size_bytes, "queued", self._dt_to_str(job.created_at), "idle")
             )
             conn.commit()
         finally:
@@ -245,6 +258,39 @@ class JobManager:
             if not row:
                 return None
             return self._row_to_job(row)
+        finally:
+            conn.close()
+
+    def set_archived(self, job_id: str, archived: bool) -> Optional[Job]:
+        now = datetime.now(timezone.utc) if archived else None
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job:
+                job.archived = archived
+                job.archived_at = now
+        self._update_db(
+            job_id,
+            archived=1 if archived else 0,
+            archived_at=self._dt_to_str(now),
+        )
+        return self.get(job_id)
+
+    def archive_all(self) -> int:
+        now = self._dt_to_str(datetime.now(timezone.utc))
+        with self._lock:
+            for job in self._jobs.values():
+                job.archived = True
+                job.archived_at = self._str_to_dt(now)
+        conn = self._get_conn()
+        try:
+            cursor = conn.execute(
+                """UPDATE api_jobs
+                   SET archived = 1, archived_at = ?
+                   WHERE archived = 0""",
+                (now,),
+            )
+            conn.commit()
+            return cursor.rowcount
         finally:
             conn.close()
 
@@ -364,22 +410,29 @@ class JobManager:
     # ------------------------------------------------------------------
 
     def list_jobs(self, limit: int = 20, offset: int = 0,
-                  status: Optional[str] = None) -> tuple[list[dict], int]:
+                  status: Optional[str] = None,
+                  include_archived: bool = False,
+                  archived_only: bool = False) -> tuple[list[dict], int]:
         """List jobs (lightweight summaries, no result_json)."""
         conn = self._get_conn()
         try:
-            where = ""
+            where_clauses = []
             params: list = []
+            if archived_only:
+                where_clauses.append("archived = 1")
+            elif not include_archived:
+                where_clauses.append("archived = 0")
             if status:
-                where = "WHERE status = ?"
+                where_clauses.append("status = ?")
                 params.append(status)
+            where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
             total = conn.execute(
                 f"SELECT COUNT(*) FROM api_jobs {where}", params
             ).fetchone()[0]
 
             rows = conn.execute(
-                f"""SELECT job_id, file_path, file_name, file_hash, file_size_bytes,
+                f"""SELECT job_id, file_path, file_name, file_hash, archived, archived_at, file_size_bytes,
                            status, created_at, started_at, completed_at, error,
                            result_json, unfold_status, unfold_requested_at,
                            unfold_started_at, unfold_completed_at, unfold_result_json,
@@ -396,6 +449,8 @@ class JobManager:
                     "job_id": row["job_id"],
                     "file_name": row["file_name"],
                     "file_hash": row["file_hash"],
+                    "archived": bool(row["archived"]),
+                    "archived_at": row["archived_at"],
                     "file_size_bytes": row["file_size_bytes"],
                     "status": row["status"],
                     "source_step_available": bool(row["file_path"]) and os.path.exists(row["file_path"]),
@@ -463,8 +518,11 @@ class JobManager:
             stats["total_jobs"] = conn.execute(
                 "SELECT COUNT(*) FROM api_jobs"
             ).fetchone()[0]
+            stats["archived_jobs"] = conn.execute(
+                "SELECT COUNT(*) FROM api_jobs WHERE archived = 1"
+            ).fetchone()[0]
             for row in conn.execute(
-                "SELECT status, COUNT(*) as cnt FROM api_jobs GROUP BY status"
+                "SELECT status, COUNT(*) as cnt FROM api_jobs WHERE archived = 0 GROUP BY status"
             ):
                 stats[f"jobs_{row['status']}"] = row["cnt"]
             stats["jobs_last_24h"] = conn.execute(

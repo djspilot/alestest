@@ -7,6 +7,79 @@ from manufacturing_pipeline.api import routes as routes_module
 from manufacturing_pipeline.api.job_manager import JobManager
 
 
+def test_job_archive_roundtrip_and_default_listing(tmp_path):
+    db_path = tmp_path / "api.db"
+    test_jobs = JobManager(str(db_path))
+
+    job = test_jobs.create("job-archive", str(tmp_path / "part.step"), file_name="part.step")
+    test_jobs.mark_completed(job.job_id, {"file": "part.step", "success": True})
+
+    items, total = test_jobs.list_jobs()
+    assert total == 1
+    assert items[0]["job_id"] == "job-archive"
+    assert items[0]["archived"] is False
+
+    updated = test_jobs.set_archived(job.job_id, True)
+    assert updated is not None
+    assert updated.archived is True
+    assert updated.archived_at is not None
+
+    active_items, active_total = test_jobs.list_jobs()
+    assert active_total == 0
+    assert active_items == []
+
+    archived_items, archived_total = test_jobs.list_jobs(archived_only=True)
+    assert archived_total == 1
+    assert archived_items[0]["job_id"] == "job-archive"
+    assert archived_items[0]["archived"] is True
+
+    restored = test_jobs.set_archived(job.job_id, False)
+    assert restored is not None
+    assert restored.archived is False
+    assert restored.archived_at is None
+
+
+def test_archive_endpoints_and_filters(tmp_path, monkeypatch):
+    db_path = tmp_path / "api.db"
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+
+    test_jobs = JobManager(str(db_path))
+    monkeypatch.setattr(routes_module, "jobs", test_jobs)
+    monkeypatch.setattr(routes_module, "UPLOAD_DIR", str(upload_dir))
+
+    step_path = upload_dir / "job-archive-api" / "part.step"
+    step_path.parent.mkdir(parents=True, exist_ok=True)
+    step_path.write_text("ISO-10303-21;")
+
+    job = test_jobs.create("job-archive-api", str(step_path), file_name="part.step")
+    test_jobs.mark_completed(job.job_id, {"file": "part.step", "success": True})
+
+    client = TestClient(app)
+
+    archive_response = client.post(f"/api/v1/jobs/{job.job_id}/archive")
+    assert archive_response.status_code == 200
+    assert archive_response.json()["archived"] is True
+
+    active_list = client.get("/api/v1/jobs")
+    assert active_list.status_code == 200
+    assert active_list.json()["total"] == 0
+
+    archived_list = client.get("/api/v1/jobs?archived_only=true")
+    assert archived_list.status_code == 200
+    assert archived_list.json()["total"] == 1
+    assert archived_list.json()["items"][0]["job_id"] == job.job_id
+    assert archived_list.json()["items"][0]["archived"] is True
+
+    restore_response = client.post(f"/api/v1/jobs/{job.job_id}/restore")
+    assert restore_response.status_code == 200
+    assert restore_response.json()["archived"] is False
+
+    bulk_archive = client.post("/api/v1/jobs/archive-all")
+    assert bulk_archive.status_code == 200
+    assert bulk_archive.json()["affected"] == 1
+
+
 def test_unfold_flow_for_completed_job(tmp_path, monkeypatch):
     db_path = tmp_path / "api.db"
     upload_dir = tmp_path / "uploads"

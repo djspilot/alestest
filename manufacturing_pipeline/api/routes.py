@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, Response
 from manufacturing_pipeline.api.config import ALLOWED_EXTENSIONS, DISABLE_STAGES, MAX_FILE_SIZE_MB, UPLOAD_DIR, VALID_STAGE_KEYS
 from manufacturing_pipeline.api.schemas import (
     AnalysisResult,
+    BulkJobActionResult,
     HealthResponse,
     JobCreated,
     JobListItem,
@@ -701,9 +702,17 @@ async def list_jobs(
     limit: int = Query(20, ge=1, le=100, description="Items per page"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
     status: str = Query(None, description="Filter by status: queued, processing, completed, failed"),
+    include_archived: bool = Query(False, description="Include archived jobs in the result"),
+    archived_only: bool = Query(False, description="Only return archived jobs"),
 ):
     """List all analysis jobs (paginated)."""
-    items, total = jobs.list_jobs(limit=limit, offset=offset, status=status)
+    items, total = jobs.list_jobs(
+        limit=limit,
+        offset=offset,
+        status=status,
+        include_archived=include_archived,
+        archived_only=archived_only,
+    )
     return JobListResponse(
         items=[JobListItem(**item) for item in items],
         total=total,
@@ -737,6 +746,8 @@ async def get_job(
         created_at=job.created_at,
         started_at=job.started_at,
         completed_at=job.completed_at,
+        archived=bool(getattr(job, "archived", False)),
+        archived_at=getattr(job, "archived_at", None),
         source_step_available=_source_step_available(job),
         timeline_summary=TimelineSummary(**summary_raw) if summary_raw else None,
         timeline_events=[TimelineEvent(**e) for e in timeline_raw],
@@ -748,6 +759,69 @@ async def get_job(
         response.result = AnalysisResult(**job.result)
 
     return response
+
+
+@router.post("/jobs/{job_id}/archive", response_model=JobStatus)
+async def archive_job(job_id: str):
+    """Archive a job so it disappears from the default jobs list."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    updated = jobs.set_archived(job_id, True)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Job not found")
+    timeline_raw, summary_raw = _resolve_job_timeline(updated)
+    response = JobStatus(
+        job_id=updated.job_id,
+        status=updated.status,
+        created_at=updated.created_at,
+        started_at=updated.started_at,
+        completed_at=updated.completed_at,
+        archived=bool(getattr(updated, "archived", False)),
+        archived_at=getattr(updated, "archived_at", None),
+        source_step_available=_source_step_available(updated),
+        timeline_summary=TimelineSummary(**summary_raw) if summary_raw else None,
+        timeline_events=[TimelineEvent(**e) for e in timeline_raw],
+        error=updated.error,
+        unfold=_build_unfold_status(updated),
+        result=AnalysisResult(**updated.result) if updated.status == "completed" and updated.result else None,
+    )
+    return response
+
+
+@router.post("/jobs/{job_id}/restore", response_model=JobStatus)
+async def restore_job(job_id: str):
+    """Restore an archived job back into the default jobs list."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    updated = jobs.set_archived(job_id, False)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Job not found")
+    timeline_raw, summary_raw = _resolve_job_timeline(updated)
+    response = JobStatus(
+        job_id=updated.job_id,
+        status=updated.status,
+        created_at=updated.created_at,
+        started_at=updated.started_at,
+        completed_at=updated.completed_at,
+        archived=bool(getattr(updated, "archived", False)),
+        archived_at=getattr(updated, "archived_at", None),
+        source_step_available=_source_step_available(updated),
+        timeline_summary=TimelineSummary(**summary_raw) if summary_raw else None,
+        timeline_events=[TimelineEvent(**e) for e in timeline_raw],
+        error=updated.error,
+        unfold=_build_unfold_status(updated),
+        result=AnalysisResult(**updated.result) if updated.status == "completed" and updated.result else None,
+    )
+    return response
+
+
+@router.post("/jobs/archive-all", response_model=BulkJobActionResult)
+async def archive_all_jobs():
+    """Archive all jobs."""
+    affected = jobs.archive_all()
+    return BulkJobActionResult(affected=affected)
 
 
 @router.get("/jobs/{job_id}/timeline", response_model=JobTimelineResponse)

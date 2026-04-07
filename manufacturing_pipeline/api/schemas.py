@@ -144,6 +144,8 @@ class JobCreated(BaseModel):
     status: Literal["queued", "processing", "completed", "failed"] = "queued"
     reused_existing: bool = False
     created_at: datetime
+    archived: bool = False
+    archived_at: Optional[datetime] = None
 
 
 class JobStatus(BaseModel):
@@ -152,6 +154,8 @@ class JobStatus(BaseModel):
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    archived: bool = False
+    archived_at: Optional[datetime] = None
     source_step_available: bool = False
     timeline_summary: Optional[TimelineSummary] = None
     timeline_events: list[TimelineEvent] = Field(default_factory=list)
@@ -191,6 +195,8 @@ class JobListItem(BaseModel):
     file_hash: Optional[str] = None
     file_size_bytes: Optional[int] = None
     status: str
+    archived: bool = False
+    archived_at: Optional[str] = None
     source_step_available: bool = False
     created_at: Optional[str] = None
     started_at: Optional[str] = None
@@ -211,8 +217,13 @@ class JobListResponse(BaseModel):
 class JobStats(BaseModel):
     """Aggregated job statistics."""
     total_jobs: int = 0
+    archived_jobs: int = 0
     jobs_completed: int = 0
     jobs_failed: int = 0
     jobs_queued: int = 0
     jobs_processing: int = 0
     jobs_last_24h: int = 0
+
+
+class BulkJobActionResult(BaseModel):
+    affected: int = 0

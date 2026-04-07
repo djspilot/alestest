@@ -33,6 +33,7 @@
 
   .toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 24px; border-bottom: 1px solid #d8dee8; background: #ffffff; }
   .toolbar span { color: #64748b; font-size: 11px; }
+  .toolbar select { background: #ffffff; border: 1px solid #cbd5e1; color: #334155; padding: 5px 10px; border-radius: 6px; font-family: inherit; font-size: 11px; }
   .refresh-btn { margin-left: auto; background: #ffffff; border: 1px solid #cbd5e1; color: #334155; padding: 5px 14px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 11px; font-weight: 500; transition: all 0.15s; }
   .refresh-btn:hover { border-color: #94a3b8; color: #0f172a; background: #f1f5f9; }
   a.docs-link { color: #475569; font-size: 11px; text-decoration: none; }
@@ -178,6 +179,12 @@
 
 <div class="toolbar">
   <span id="autoRefreshLabel"></span>
+  <select id="archiveFilter" onchange="loadJobs()">
+    <option value="active">Actieve jobs</option>
+    <option value="all">Alles</option>
+    <option value="archived">Archief</option>
+  </select>
+  <button class="refresh-btn" onclick="archiveAllJobs()">Archiveer alles</button>
   <a class="docs-link" href="/docs" target="_blank">→ API docs</a>
   <button class="refresh-btn" onclick="loadAll()">↻ Ververs</button>
 </div>
@@ -302,12 +309,16 @@
     const viewerBtn = job.status === 'completed'
       ? `<a class="mini-btn" href="${escapeHtml(buildViewerUrl(job.job_id, job.file_name || job.result?.file))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🔬 Viewer</a>`
       : '';
+    const archiveBtn = job.archived
+      ? `<button class="mini-btn" onclick="restoreJob('${escapeHtml(job.job_id)}')">Herstel</button>`
+      : `<button class="mini-btn" onclick="archiveJob('${escapeHtml(job.job_id)}')">Archiveer</button>`;
 
     return `
       <div class="action-stack">
         <div class="action-row">
           ${statusBadge}
           ${viewerBtn}
+          ${archiveBtn}
           <button class="mini-btn" onclick="requestUnfold('${escapeHtml(job.job_id)}')" ${canQueue ? '' : 'disabled'}>
             ${unfoldStatus === 'completed' ? 'Opnieuw unfolden' : 'Unfold'}
           </button>
@@ -369,6 +380,58 @@
     }
   }
 
+  async function archiveJob(jobId) {
+    const errEl = document.getElementById('errorMsg');
+    try {
+      const r = await fetch(`/api/v1/jobs/${jobId}/archive`, {
+        method: 'POST',
+        headers: headers(),
+      });
+      if (r.status === 401) throw new Error('401 — Vul een geldige API key in.');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      errEl.style.display = 'none';
+      await Promise.all([loadStats(), loadJobs()]);
+    } catch (error) {
+      errEl.style.display = '';
+      errEl.textContent = `Archiveren mislukt: ${error.message}`;
+    }
+  }
+
+  async function restoreJob(jobId) {
+    const errEl = document.getElementById('errorMsg');
+    try {
+      const r = await fetch(`/api/v1/jobs/${jobId}/restore`, {
+        method: 'POST',
+        headers: headers(),
+      });
+      if (r.status === 401) throw new Error('401 — Vul een geldige API key in.');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      errEl.style.display = 'none';
+      await Promise.all([loadStats(), loadJobs()]);
+    } catch (error) {
+      errEl.style.display = '';
+      errEl.textContent = `Herstellen mislukt: ${error.message}`;
+    }
+  }
+
+  async function archiveAllJobs() {
+    const errEl = document.getElementById('errorMsg');
+    if (!window.confirm('Alle jobs archiveren?')) return;
+    try {
+      const r = await fetch('/api/v1/jobs/archive-all', {
+        method: 'POST',
+        headers: headers(),
+      });
+      if (r.status === 401) throw new Error('401 — Vul een geldige API key in.');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      errEl.style.display = 'none';
+      await Promise.all([loadStats(), loadJobs()]);
+    } catch (error) {
+      errEl.style.display = '';
+      errEl.textContent = `Bulk archiveren mislukt: ${error.message}`;
+    }
+  }
+
   async function checkHealth() {
     const dot = document.getElementById('healthDot');
     const label = document.getElementById('healthLabel');
@@ -405,8 +468,12 @@
     activeJobIds = new Set();
     const tbody = document.getElementById('jobTable');
     const errEl = document.getElementById('errorMsg');
+    const archiveMode = document.getElementById('archiveFilter').value;
     try {
-      const r = await fetch('/api/v1/jobs?limit=50&offset=0', { headers: headers() });
+      const params = new URLSearchParams({ limit: '50', offset: '0' });
+      if (archiveMode === 'all') params.set('include_archived', 'true');
+      if (archiveMode === 'archived') params.set('archived_only', 'true');
+      const r = await fetch(`/api/v1/jobs?${params.toString()}`, { headers: headers() });
       if (r.status === 401) {
         errEl.style.display = '';
         errEl.textContent = '401 — Vul een geldige API key in.';
@@ -419,7 +486,7 @@
       const items = data.items || [];
 
       if (!items.length) {
-        tbody.innerHTML = '<tr><td colspan="11" class="empty">Nog geen jobs</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="11" class="empty">${archiveMode === 'archived' ? 'Nog geen gearchiveerde jobs' : 'Nog geen jobs'}</td></tr>`;
         return;
       }
 
