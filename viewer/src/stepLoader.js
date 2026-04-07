@@ -112,7 +112,7 @@ export async function parseStepFile(buffer, options = {}) {
       requestId: id,
       bytes: buffer?.byteLength || 0,
     })
-    worker.postMessage({ id, buffer }, [buffer])
+    worker.postMessage({ id, buffer })
   })
 }
 

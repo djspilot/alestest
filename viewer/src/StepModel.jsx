@@ -232,11 +232,22 @@ function StepGeometry({
         return
       }
 
-      if (!buffer || parseMode === 'backend-only') {
+      if (parseMode === 'backend-only') {
         onDebug?.({
           source: 'step-model',
           stage: 'no_local_parse',
           hasBuffer: Boolean(buffer),
+          parseMode,
+        })
+        // Don't clear existing mesh when pipeline is just processing.
+        // The WASM model should stay visible while awaiting backend results.
+        return
+      }
+      if (!buffer) {
+        onDebug?.({
+          source: 'step-model',
+          stage: 'no_local_parse',
+          hasBuffer: false,
           parseMode,
         })
         setMeshData(null)
