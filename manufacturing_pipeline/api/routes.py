@@ -721,6 +721,10 @@ async def get_job(
     if job.status == "completed":
         timeline_raw = (job.result or {}).get("timeline") or []
         summary_raw = (job.result or {}).get("timeline_summary")
+        # Fallback: rebuild from stored result dict when timeline was not
+        # generated (e.g. old cached jobs where timing_data was unavailable).
+        if not timeline_raw and job.result:
+            timeline_raw, summary_raw = _rebuild_timeline_from_result_dict(job.result)
     else:
         timeline_raw = getattr(job, "progress_events", None) or []
         summary_raw = _refresh_live_summary(getattr(job, "progress_summary", None))
