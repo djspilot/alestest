@@ -651,7 +651,8 @@ def format_analysis_report(analysis: PartAnalysis) -> str:
     lines.append("=" * 70)
 
     lines.append(f"\n--- CLASSIFICATIE ---")
-    lines.append(f"Type:           {analysis.part_type.value.upper()}")
+    part_type_label = getattr(getattr(analysis, "part_type", None), "value", None) or "UNKNOWN"
+    lines.append(f"Type:           {part_type_label.upper()}")
     lines.append(f"Sheet Metal:    {'Ja' if analysis.is_sheet_metal else 'Nee'}")
     lines.append(f"Profiel:        {'Ja (ingekocht)' if analysis.is_profile else 'Nee'}")
     lines.append(f"Draaistuk:      {'Ja' if analysis.is_turned else 'Nee'}")

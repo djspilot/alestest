@@ -9,6 +9,7 @@ Verifieert dat de pipeline correct terugvalt als:
 
 import os
 import pytest
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 
@@ -195,6 +196,35 @@ class TestMeshFallback:
         assert result.get("success") is True
         # mesh is optioneel
         assert "mesh" not in result or result["mesh"] is None
+
+    def test_format_analysis_report_handles_missing_part_type(self):
+        from manufacturing_pipeline.analysis.part_analyzer import format_analysis_report
+
+        analysis = SimpleNamespace(
+            name="test.step",
+            part_type=None,
+            is_sheet_metal=False,
+            is_profile=False,
+            is_turned=False,
+            length=100.0,
+            width=50.0,
+            height=10.0,
+            thickness=2.0,
+            bend_count_erp=0,
+            total_hole_count=0,
+            max_hole_diameter=0.0,
+            can_unfold=False,
+            unfold_reason="n/a",
+            flat_length=0.0,
+            flat_width=0.0,
+            reasoning=[],
+            bends=[],
+            holes=[],
+        )
+
+        report = format_analysis_report(analysis)
+
+        assert "Type:           UNKNOWN" in report
 
 
 # ---------------------------------------------------------------------------

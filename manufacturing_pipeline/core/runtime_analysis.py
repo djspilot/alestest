@@ -421,9 +421,11 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
     )
     analysis.classification_visuals = classification_visuals
 
+    part_type_label = getattr(getattr(analysis, "part_type", None), "value", None) or "UNKNOWN"
+
     print(f"\n--- Classificatie ({source}) ---")
     print(f"Categorie:   {part_category}")
-    print(f"Type:        {analysis.part_type.value.upper()}")
+    print(f"Type:        {part_type_label.upper()}")
     print(f"Afmetingen:  {analysis.length:.0f} x {analysis.width:.0f} x {analysis.height:.0f} mm")
     print(f"Dikte:       {analysis.thickness:.1f} mm")
     print(f"Zettingen:   {analysis.bend_count_erp}")
@@ -433,7 +435,7 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
         {
             **classification_visuals,
             "category": part_category,
-            "part_type": analysis.part_type.value if hasattr(analysis.part_type, "value") else str(analysis.part_type),
+            "part_type": part_type_label,
             "length": round(float(analysis.length or 0), 3),
             "width": round(float(analysis.width or 0), 3),
             "height": round(float(analysis.height or 0), 3),
