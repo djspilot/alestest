@@ -675,20 +675,6 @@ async def analyze(
 
     file_hash = hashlib.md5(content).hexdigest()
     request_fingerprint = _build_request_fingerprint(file_hash, aag, merged_disable_stages)
-    CURRENT_RESULT_SCHEMA_VERSION = 2
-    reusable_job = jobs.find_reusable_job(request_fingerprint)
-    if reusable_job:
-        # Only reuse completed jobs whose result was produced by the current
-        # schema version.  Stale results (missing visuals, empty timeline, etc.)
-        # are silently dropped so a fresh analysis runs instead.
-        result_version = (reusable_job.result or {}).get("result_schema_version", 1)
-        if result_version >= CURRENT_RESULT_SCHEMA_VERSION:
-            return JobCreated(
-                job_id=reusable_job.job_id,
-                status=reusable_job.status,
-                reused_existing=True,
-                created_at=reusable_job.created_at,
-            )
 
     # Save file to upload directory
     job_id = str(uuid.uuid4())
