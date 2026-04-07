@@ -226,6 +226,12 @@ class TestMeshFallback:
 
         assert "Type:           UNKNOWN" in report
 
+    def test_format_bend_type_label_handles_none(self):
+        from manufacturing_pipeline.core.runtime_analysis import _format_bend_type_label
+
+        assert _format_bend_type_label(None) == "?"
+        assert _format_bend_type_label("up") == "UP"
+
 
 # ---------------------------------------------------------------------------
 # Config: FREECAD_RUNTIME_ROOT env var

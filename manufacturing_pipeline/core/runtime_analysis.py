@@ -85,6 +85,12 @@ from manufacturing_pipeline.core.unfold_integration import (
 # Runtime cross-module calls used by run_analysis
 from manufacturing_pipeline.core.runtime_unfold import run_unfold_to_step
 
+
+def _format_bend_type_label(value) -> str:
+    """Return a safe uppercase bend direction label for reports."""
+    return str(value or "?").upper()
+
+
 def run_analysis(step_file, output_dir, args, progress_callback=None):
     """Run the complete analysis pipeline.
 
@@ -1347,7 +1353,8 @@ def run_analysis(step_file, output_dir, args, progress_callback=None):
                     for i, b in enumerate(bends):
                         angle_str = f"{b['angle']:.1f}" if b.get('angle') is not None else "?"
                         radius_str = f"{b['radius']:.1f}" if b.get('radius') is not None else "?"
-                        f.write(f"    {i+1}. {b.get('type', '?').upper()} {angle_str}° (R={radius_str}mm)\n")
+                        bend_type_label = _format_bend_type_label(b.get("type"))
+                        f.write(f"    {i+1}. {bend_type_label} {angle_str}° (R={radius_str}mm)\n")
 
                 if unfold_result.get('fold_details'):
                     f.write("  Fold Lines (Center X, Y, Z | Length):\n")
