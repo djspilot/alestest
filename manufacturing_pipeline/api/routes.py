@@ -855,6 +855,7 @@ async def analyze(
     file: UploadFile = File(...),
     aag: bool = Query(True, description="Run AAG topology-based feature recognition"),
     disable_stages: str = Query("", description="Comma-separated stage keys to disable: classify_geometry, profile_router, detect_holes_pre_unfold, unfold, detect_holes, aag"),
+    force: bool = Query(False, description="Skip deduplication and always create a new job"),
 ):
     """Upload a STEP file for manufacturing analysis.
 
@@ -888,16 +889,17 @@ async def analyze(
     file_hash = hashlib.md5(content).hexdigest()
     request_fingerprint = _build_request_fingerprint(file_hash, aag, merged_disable_stages)
 
-    reusable_job = jobs.find_reusable_job(request_fingerprint)
-    if reusable_job is not None:
-        return JobCreated(
-            job_id=reusable_job.job_id,
-            status=reusable_job.status,
-            reused_existing=True,
-            created_at=reusable_job.created_at,
-            archived=bool(getattr(reusable_job, "archived", False)),
-            archived_at=getattr(reusable_job, "archived_at", None),
-        )
+    if not force:
+        reusable_job = jobs.find_reusable_job(request_fingerprint)
+        if reusable_job is not None:
+            return JobCreated(
+                job_id=reusable_job.job_id,
+                status=reusable_job.status,
+                reused_existing=True,
+                created_at=reusable_job.created_at,
+                archived=bool(getattr(reusable_job, "archived", False)),
+                archived_at=getattr(reusable_job, "archived_at", None),
+            )
 
     # Save file to upload directory
     job_id = str(uuid.uuid4())
@@ -1043,6 +1045,57 @@ async def restore_job(job_id: str):
         result=AnalysisResult(**_effective_result_dict(updated)) if updated.status == "completed" and updated.result else None,
     )
     return response
+
+
+@router.post("/jobs/{job_id}/reanalyze", response_model=JobCreated, status_code=202)
+async def reanalyze_job(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    aag: bool = Query(True, description="Run AAG topology-based feature recognition"),
+    disable_stages: str = Query("", description="Comma-separated stage keys to disable"),
+):
+    """Create a new analysis job from an existing job's stored STEP file."""
+    original = jobs.get(job_id)
+    if not original:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not _source_step_available(original):
+        raise HTTPException(status_code=409, detail="Source STEP file is no longer available for this job")
+
+    request_disabled = {s.strip() for s in disable_stages.split(",") if s.strip()}
+    invalid_keys = request_disabled - VALID_STAGE_KEYS
+    if invalid_keys:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid disable_stages keys: {', '.join(sorted(invalid_keys))}. Valid: {', '.join(sorted(VALID_STAGE_KEYS))}",
+        )
+    merged_disable_stages = DISABLE_STAGES | request_disabled
+
+    new_job_id = str(uuid.uuid4())
+    new_job_dir = os.path.join(UPLOAD_DIR, new_job_id)
+    os.makedirs(new_job_dir, exist_ok=True)
+    file_name = original.file_name or os.path.basename(original.file_path)
+    new_step_path = os.path.join(new_job_dir, file_name)
+    shutil.copy2(original.file_path, new_step_path)
+
+    with open(new_step_path, "rb") as f:
+        file_hash = hashlib.md5(f.read()).hexdigest()
+    request_fingerprint = _build_request_fingerprint(file_hash, aag, merged_disable_stages)
+    file_size_bytes = os.path.getsize(new_step_path)
+
+    new_job = jobs.create(new_job_id, new_step_path,
+                          file_name=file_name,
+                          file_hash=file_hash,
+                          request_fingerprint=request_fingerprint,
+                          file_size_bytes=file_size_bytes)
+    background_tasks.add_task(_run_analysis_job, new_job_id, new_step_path, aag, merged_disable_stages)
+
+    return JobCreated(
+        job_id=new_job_id,
+        status=new_job.status,
+        created_at=new_job.created_at,
+        archived=False,
+        archived_at=None,
+    )
 
 
 @router.post("/jobs/archive-all", response_model=BulkJobActionResult)

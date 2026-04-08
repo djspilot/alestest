@@ -42,6 +42,8 @@
   th { padding: 9px 12px; text-align: left; font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
   tbody tr { border-bottom: 1px solid #e5e7eb; transition: background 0.15s; background: #ffffff; }
   tbody tr:hover { background: #f8fafc; }
+  @keyframes highlightFade { 0%,20% { background: #fef9c3; } 100% { background: #ffffff; } }
+  tbody tr.highlight-reused { animation: highlightFade 2.5s ease-out forwards; }
   td { padding: 10px 12px; color: #334155; }
   td.file { color: #0f172a; font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   td.mono { font-family: ui-monospace, 'SF Mono', 'Cascadia Code', monospace; font-size: 11px; color: #475569; }
@@ -158,6 +160,9 @@
 <div class="upload-bar">
   <input type="file" id="uploadInput" accept=".step,.stp" multiple>
   <button class="upload-btn" id="uploadBtn" onclick="document.getElementById('uploadInput').click()">+ STEP uploaden</button>
+  <label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#475569;cursor:pointer">
+    <input type="checkbox" id="forceUpload"> Opnieuw analyseren
+  </label>
   <span id="uploadStatus"></span>
 </div>
 
@@ -296,6 +301,8 @@
     const archiveBtn = job.archived
       ? `<button class="mini-btn" onclick="restoreJob('${escapeHtml(job.job_id)}')">Herstel</button>`
       : `<button class="mini-btn" onclick="archiveJob('${escapeHtml(job.job_id)}')">Archiveer</button>`;
+    const canReanalyze = job.source_step_available && !['queued', 'processing'].includes(job.status);
+    const reanalyzeBtn = `<button class="mini-btn" onclick="reanalyzeJob('${escapeHtml(job.job_id)}')" ${canReanalyze ? '' : 'disabled'} title="Nieuwe analyse starten op hetzelfde STEP bestand">Opnieuw analyseren</button>`;
 
     return `
       <div class="action-stack">
@@ -306,6 +313,7 @@
           <button class="mini-btn" onclick="requestUnfold('${escapeHtml(job.job_id)}')" ${canQueue ? '' : 'disabled'}>
             ${unfoldStatus === 'completed' ? 'Opnieuw unfolden' : 'Unfold'}
           </button>
+          ${reanalyzeBtn}
           ${downloadMenu}
         </div>
         ${foldSummary}
@@ -395,6 +403,34 @@
     } catch (error) {
       errEl.style.display = '';
       errEl.textContent = `Herstellen mislukt: ${error.message}`;
+    }
+  }
+
+  async function reanalyzeJob(jobId) {
+    const errEl = document.getElementById('errorMsg');
+    try {
+      const r = await fetch(`/api/v1/jobs/${jobId}/reanalyze`, {
+        method: 'POST',
+        headers: headers(),
+      });
+      if (r.status === 401) throw new Error('401 — Vul een geldige API key in.');
+      if (!r.ok) {
+        let detail = `HTTP ${r.status}`;
+        try { detail = (await r.json()).detail || detail; } catch {}
+        throw new Error(detail);
+      }
+      const data = await r.json();
+      errEl.style.display = 'none';
+      await loadAll();
+      const row = document.querySelector(`tr[data-job-id="${CSS.escape(data.job_id)}"]`);
+      if (row) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        row.classList.add('highlight-reused');
+        setTimeout(() => row.classList.remove('highlight-reused'), 2500);
+      }
+    } catch (error) {
+      errEl.style.display = '';
+      errEl.textContent = `Opnieuw analyseren mislukt: ${error.message}`;
     }
   }
 
@@ -532,7 +568,7 @@
         const fname = job.file_name || res.file || job.job_id.slice(0,8);
         const actions = renderUnfoldActions(job);
 
-        return `<tr class="clickable" onclick="openDetail('${escapeHtml(job.job_id)}')">
+        return `<tr class="clickable" data-job-id="${escapeHtml(job.job_id)}" onclick="openDetail('${escapeHtml(job.job_id)}')">
           <td class="file" title="${escapeHtml(fname)}">${escapeHtml(fname)}</td>
           <td>${statusCell}</td>
           <td>${cat}</td>
@@ -629,14 +665,25 @@
     btn.disabled = true;
     status.textContent = `Uploaden (0/${files.length})…`;
     let done = 0;
+    let reusedJobId = null;
+    const force = document.getElementById('forceUpload')?.checked || false;
     for (const file of files) {
       try {
         const fd = new FormData();
         fd.append('file', file);
-        const r = await fetch('/api/v1/analyze', { method: 'POST', headers: headers(), body: fd });
+        const analyzeUrl = force ? '/api/v1/analyze?force=true' : '/api/v1/analyze';
+        const r = await fetch(analyzeUrl, { method: 'POST', headers: headers(), body: fd });
         if (!r.ok) { status.textContent = `Fout bij ${file.name}: HTTP ${r.status}`; break; }
+        const data = await r.json();
         done++;
-        status.textContent = done < files.length ? `Uploaden (${done}/${files.length})…` : `${done} bestand(en) geüpload ✓`;
+        if (data.reused_existing && !force) {
+          reusedJobId = data.job_id;
+          status.textContent = done < files.length
+            ? `Uploaden (${done}/${files.length})…`
+            : `Bestaande analyse gevonden (${file.name}) ↓`;
+        } else {
+          status.textContent = done < files.length ? `Uploaden (${done}/${files.length})…` : `${done} bestand(en) geüpload ✓`;
+        }
       } catch (e) {
         status.textContent = `Fout: ${e.message}`;
         break;
@@ -644,7 +691,17 @@
     }
     btn.disabled = false;
     this.value = '';
-    setTimeout(() => loadAll(), 500);
+    setTimeout(async () => {
+      await loadAll();
+      if (reusedJobId) {
+        const row = document.querySelector(`tr[data-job-id="${CSS.escape(reusedJobId)}"]`);
+        if (row) {
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          row.classList.add('highlight-reused');
+          setTimeout(() => row.classList.remove('highlight-reused'), 2500);
+        }
+      }
+    }, 500);
   });
 
   function toggleParts(rowId) {
