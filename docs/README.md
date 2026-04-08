@@ -16,6 +16,7 @@ Technische documentatie voor de ALES Manufacturing Pipeline.
 | [naming_strategy.md](naming_strategy.md) | Naamgeving strategie voor onderdelen in XML-output |
 | [feature_detection_roadmap.md](feature_detection_roadmap.md) | Roadmap voor feature-detectie en XML uitrol per fase |
 | [xml_status_workflow.md](xml_status_workflow.md) | XML validatie workflow en snapshot-bewaring |
+| [xml_workdocument_classification_matrix.md](xml_workdocument_classification_matrix.md) | Werkdocument met matrix per classificatie: aanwezig, ontbrekend en plan |
 
 ## Overhaul (lopend)
 
