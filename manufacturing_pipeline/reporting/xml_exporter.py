@@ -29,6 +29,9 @@ class _Elem:
     def append(self, child: "_Elem") -> None:
         self._children.append(child)
 
+    def insert(self, index: int, child: "_Elem") -> None:
+        self._children.insert(index, child)
+
     def __iter__(self):
         return iter(self._children)
 
@@ -590,6 +593,8 @@ def _append_calculation_result(root: "_Elem", result: Dict[str, Any], part_name:
 
     # AAG details (if available)
     aag_details = result.get('aag_details') or {}
+    unfold_visuals = (visuals.get('unfold') or {}) if isinstance(visuals, dict) else {}
+    sheet_metrics = result.get('sheet_metrics') or {}
 
     # Bend details
     bend_details = aag_details.get('bend_details', [])
@@ -599,8 +604,19 @@ def _append_calculation_result(root: "_Elem", result: Dict[str, Any], part_name:
         ET.SubElement(calc, 'Sheet_BendAngles').text = bend_angles
         ET.SubElement(calc, 'Sheet_BendInnerRadii').text = bend_radii
     else:
-        ET.SubElement(calc, 'Sheet_BendAngles').text = ''
-        ET.SubElement(calc, 'Sheet_BendInnerRadii').text = ''
+        visual_bends = unfold_visuals.get('bends_logical') or []
+        bend_angles = '_'.join(
+            _format_float(b.get('angle', 0))
+            for b in visual_bends
+            if b.get('angle') is not None
+        )
+        bend_radii = '_'.join(
+            _format_float(b.get('radius', 0))
+            for b in visual_bends
+            if b.get('radius') is not None
+        )
+        ET.SubElement(calc, 'Sheet_BendAngles').text = bend_angles
+        ET.SubElement(calc, 'Sheet_BendInnerRadii').text = bend_radii
 
     # Hole details
     if accepted_visual_holes:
@@ -707,28 +723,47 @@ def _append_calculation_result(root: "_Elem", result: Dict[str, Any], part_name:
     width = dimensions.get('width', 0)
     height = dimensions.get('height', 0)
 
-    volume = length * width * height
+    volume = sheet_metrics.get('volume')
+    if volume is None:
+        volume = length * width * height
     ET.SubElement(calc, 'Sheet_Volume').text = _format_float(volume)
 
-    if category == 'SHEET_METAL':
-        top_area = length * width
-    else:
-        top_area = 0
+    top_area = sheet_metrics.get('top_area')
+    if top_area is None:
+        if category == 'SHEET_METAL':
+            top_area = length * width
+        else:
+            top_area = 0
     ET.SubElement(calc, 'Sheet_TopArea').text = _format_float(top_area)
+    ET.SubElement(calc, 'Sheet_BottomArea').text = _format_float(sheet_metrics.get('bottom_area', top_area))
 
-    if category == 'SHEET_METAL' and thickness > 0:
+    if 'box_area' in sheet_metrics:
+        box_area = sheet_metrics.get('box_area', 0)
+    elif category == 'SHEET_METAL' and thickness > 0:
         box_area = 2 * (length * width + length * height + width * height)
-        total_area = box_area
     else:
         box_area = 0
-        total_area = 0
+
+    total_area = sheet_metrics.get('total_area')
+    if total_area is None:
+        if category == 'SHEET_METAL' and thickness > 0:
+            total_area = box_area
+        else:
+            total_area = 0
 
     ET.SubElement(calc, 'Sheet_BoxArea').text = _format_float(box_area)
+    ET.SubElement(calc, 'Sheet_AreaNoHoles').text = _format_float(sheet_metrics.get('area_no_holes', top_area))
     ET.SubElement(calc, 'Sheet_TotalArea').text = _format_float(total_area)
 
+    outer_contour = sheet_metrics.get('outer_contour')
+    total_contour = sheet_metrics.get('total_contour')
     cut_length = aag_details.get('total_cut_length', 0)
-    ET.SubElement(calc, 'Sheet_OuterContour').text = _format_float(cut_length)
-    ET.SubElement(calc, 'Sheet_TotalContour').text = _format_float(cut_length)
+    if outer_contour is None:
+        outer_contour = cut_length
+    if total_contour is None:
+        total_contour = cut_length
+    ET.SubElement(calc, 'Sheet_OuterContour').text = _format_float(outer_contour)
+    ET.SubElement(calc, 'Sheet_TotalContour').text = _format_float(total_contour)
 
     weight = _estimate_weight(volume, material)
     ET.SubElement(calc, 'Sheet_Weight').text = _format_float(weight)

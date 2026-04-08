@@ -6,10 +6,233 @@ Wraps process_single_file() and enriches the result with AAG details.
 import os
 import shutil
 import json
+import math
 from types import SimpleNamespace
 
 from manufacturing_pipeline.core.runtime_analysis import run_analysis
 from manufacturing_pipeline.core.file_utils import get_output_dir
+
+
+def _erp_bend_angle(angle: float | int | None) -> float | None:
+    """Convert internal bend angle to ERP/viewer angle relative to flat sheet."""
+    if angle is None:
+        return None
+    try:
+        value = abs(float(angle))
+    except Exception:
+        return None
+    return round(abs(180.0 - value), 3)
+
+
+def _orthonormal_basis_from_normal(normal: list[float] | tuple[float, float, float]) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    nx, ny, nz = [float(component) for component in normal]
+    norm = math.sqrt(nx * nx + ny * ny + nz * nz)
+    if norm <= 1e-12:
+        return (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)
+    nx /= norm
+    ny /= norm
+    nz /= norm
+    if abs(nx) < 0.9:
+        rx, ry, rz = 1.0, 0.0, 0.0
+    else:
+        rx, ry, rz = 0.0, 1.0, 0.0
+    ux = ny * rz - nz * ry
+    uy = nz * rx - nx * rz
+    uz = nx * ry - ny * rx
+    u_norm = math.sqrt(ux * ux + uy * uy + uz * uz)
+    if u_norm <= 1e-12:
+        return (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)
+    ux /= u_norm
+    uy /= u_norm
+    uz /= u_norm
+    vx = ny * uz - nz * uy
+    vy = nz * ux - nx * uz
+    vz = nx * uy - ny * ux
+    return (ux, uy, uz), (vx, vy, vz)
+
+
+def _polygon_area_2d(points_2d: list[tuple[float, float]]) -> float:
+    if len(points_2d) < 3:
+        return 0.0
+    total = 0.0
+    for index, (x0, y0) in enumerate(points_2d):
+        x1, y1 = points_2d[(index + 1) % len(points_2d)]
+        total += x0 * y1 - x1 * y0
+    return abs(total) * 0.5
+
+
+def _hole_area_from_visual_item(item: dict) -> float:
+    contour_points = [
+        point for point in (item.get("contour_points") or [])
+        if isinstance(point, (list, tuple)) and len(point) >= 3
+    ]
+    if len(contour_points) >= 3:
+        origin = contour_points[0]
+        u, v = _orthonormal_basis_from_normal(item.get("normal") or [0.0, 0.0, 1.0])
+        points_2d: list[tuple[float, float]] = []
+        for px, py, pz in contour_points:
+            dx = float(px) - float(origin[0])
+            dy = float(py) - float(origin[1])
+            dz = float(pz) - float(origin[2])
+            points_2d.append((
+                dx * u[0] + dy * u[1] + dz * u[2],
+                dx * v[0] + dy * v[1] + dz * v[2],
+            ))
+        area = _polygon_area_2d(points_2d)
+        if area > 0:
+            return area
+
+    diameter = item.get("diameter")
+    if diameter is not None:
+        try:
+            radius = float(diameter) * 0.5
+        except Exception:
+            radius = 0.0
+        if radius > 0:
+            return math.pi * radius * radius
+
+    size_text = str(item.get("size") or item.get("label") or "").lower().replace(",", ".")
+    if "x" in size_text:
+        parts = []
+        for raw_part in size_text.split("x"):
+            token = "".join(ch for ch in raw_part if ch.isdigit() or ch in {".", "-"})
+            if not token:
+                continue
+            try:
+                parts.append(abs(float(token)))
+            except Exception:
+                continue
+        if len(parts) >= 2:
+            major = max(parts)
+            minor = min(parts)
+            item_type = str(item.get("type") or "").lower()
+            if "irregular" in item_type:
+                straight = max(0.0, major - minor)
+                radius = minor * 0.5
+                return straight * minor + math.pi * radius * radius
+            return math.pi * (major * 0.5) * (minor * 0.5)
+
+    perimeter = item.get("perimeter")
+    if perimeter is not None:
+        try:
+            perimeter_value = float(perimeter)
+        except Exception:
+            perimeter_value = 0.0
+        if perimeter_value > 0:
+            radius = perimeter_value / (2.0 * math.pi)
+            return math.pi * radius * radius
+
+    return 0.0
+
+
+def _hole_perimeter_from_visual_item(item: dict) -> float:
+    contour_points = [
+        point for point in (item.get("contour_points") or [])
+        if isinstance(point, (list, tuple)) and len(point) >= 3
+    ]
+    if len(contour_points) >= 2:
+        total = 0.0
+        for index, point in enumerate(contour_points):
+            next_point = contour_points[(index + 1) % len(contour_points)]
+            dx = float(next_point[0]) - float(point[0])
+            dy = float(next_point[1]) - float(point[1])
+            dz = float(next_point[2]) - float(point[2])
+            total += math.sqrt(dx * dx + dy * dy + dz * dz)
+        if total > 0:
+            return total
+
+    perimeter = item.get("perimeter")
+    if perimeter is not None:
+        try:
+            perimeter_value = float(perimeter)
+        except Exception:
+            perimeter_value = 0.0
+        if perimeter_value > 0:
+            return perimeter_value
+
+    diameter = item.get("diameter")
+    if diameter is not None:
+        try:
+            diameter_value = float(diameter)
+        except Exception:
+            diameter_value = 0.0
+        if diameter_value > 0:
+            return math.pi * diameter_value
+
+    size_text = str(item.get("size") or item.get("label") or "").lower().replace(",", ".")
+    if "x" in size_text:
+        parts = []
+        for raw_part in size_text.split("x"):
+            token = "".join(ch for ch in raw_part if ch.isdigit() or ch in {".", "-"})
+            if not token:
+                continue
+            try:
+                parts.append(abs(float(token)))
+            except Exception:
+                continue
+        if len(parts) >= 2:
+            major = max(parts)
+            minor = min(parts)
+            item_type = str(item.get("type") or "").lower()
+            if "irregular" in item_type:
+                straight = max(0.0, major - minor)
+                radius = minor * 0.5
+                return 2.0 * straight + math.pi * minor
+            semi_major = major * 0.5
+            semi_minor = minor * 0.5
+            if semi_major > 0 and semi_minor > 0:
+                h = ((semi_major - semi_minor) ** 2) / ((semi_major + semi_minor) ** 2)
+                return math.pi * (semi_major + semi_minor) * (1.0 + (3.0 * h) / (10.0 + math.sqrt(4.0 - 3.0 * h)))
+
+    return 0.0
+
+
+def _build_sheet_metrics(result: dict, analysis) -> dict:
+    thickness = float(result.get("thickness") or 0.0)
+    volume = float(getattr(analysis, "volume", 0.0) or 0.0)
+    surface_area = float(getattr(analysis, "surface_area", 0.0) or 0.0)
+    dimensions = result.get("dimensions") or {}
+    length = float(dimensions.get("length") or 0.0)
+    width = float(dimensions.get("width") or 0.0)
+    height = float(dimensions.get("height") or 0.0)
+
+    if thickness > 0 and volume > 0:
+        top_area = volume / thickness
+    else:
+        top_area = length * width
+
+    accepted_holes = [
+        item for item in ((result.get("visuals") or {}).get("holes") or {}).get("items", [])
+        if str(item.get("status") or "").lower() == "accepted"
+    ]
+    hole_area_total = sum(_hole_area_from_visual_item(item) for item in accepted_holes)
+    hole_perimeter_total = sum(_hole_perimeter_from_visual_item(item) for item in accepted_holes)
+
+    if thickness > 0 and surface_area > 0 and top_area > 0:
+        total_contour = max(0.0, (surface_area - (2.0 * top_area)) / thickness)
+    else:
+        flat_dimensions = result.get("flat_dimensions") or {}
+        flat_length = float(flat_dimensions.get("length") or 0.0)
+        flat_width = float(flat_dimensions.get("width") or 0.0)
+        if flat_length > 0 and flat_width > 0:
+            total_contour = (2.0 * (flat_length + flat_width)) + hole_perimeter_total
+        else:
+            total_contour = 0.0
+
+    outer_contour = max(0.0, total_contour - hole_perimeter_total)
+
+    return {
+        "volume": volume,
+        "top_area": top_area,
+        "bottom_area": top_area,
+        "area_no_holes": top_area + hole_area_total,
+        "total_area": surface_area if surface_area > 0 else (2.0 * top_area),
+        "box_area": 2.0 * (length * width + length * height + width * height) if min(length, width, height) > 0 else 0.0,
+        "hole_area_total": hole_area_total,
+        "hole_perimeter_total": hole_perimeter_total,
+        "outer_contour": outer_contour,
+        "total_contour": total_contour,
+    }
 
 
 def _serialize_3d_bends(step_file: str, thickness: float | None = None) -> list[dict]:
@@ -552,12 +775,30 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
                 "flat_width": unfold_result.get("flat_width") if unfold_result else None,
                 "fold_lines": unfold_result.get("fold_lines") if unfold_result else 0,
                 "fold_details": unfold_result.get("fold_details", []) if unfold_result else [],
-                "bends_logical": unfold_result.get("bends_logical", []) if unfold_result else [],
+                "bends_logical": [
+                    {
+                        **bend,
+                        "angle_raw": bend.get("angle"),
+                        "angle": _erp_bend_angle(bend.get("angle")),
+                    }
+                    for bend in (unfold_result.get("bends_logical", []) if unfold_result else [])
+                ],
+                "bend_angles_erp": [
+                    angle for angle in (
+                        _erp_bend_angle(angle)
+                        for angle in (unfold_result.get("bend_angles", []) if unfold_result else [])
+                    )
+                    if angle is not None
+                ],
+                "bend_angles_raw": list(unfold_result.get("bend_angles", []) if unfold_result else []),
                 "bend_line_segments": unfold_result.get("bend_line_segments", []) if unfold_result else [],
                 "bend_line_groups": unfold_result.get("bend_line_groups", []) if unfold_result else [],
                 "bends_3d": _serialize_3d_bends(step_file, result.get("thickness")),
             },
         }
+
+        if str(result.get("category") or "").upper() in {"PLAAT (VLAK)", "GEBOGEN PLAATWERK", "SHEET_METAL"}:
+            result["sheet_metrics"] = _build_sheet_metrics(result, analysis)
 
         # Build replay timeline from profiler + analysis outputs
         timeline_events, timeline_summary = _build_timeline(result, analysis, total_holes, timing_data)
