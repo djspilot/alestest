@@ -2,9 +2,47 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
+import sys
 import tempfile
 from typing import Any, Dict
+
+
+def _kill_process_tree(proc, grace_seconds=5):
+    """Kill a subprocess and its children reliably."""
+    if proc.poll() is not None:
+        return
+    if os.name == "posix":
+        try:
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            proc.terminate()
+        try:
+            proc.wait(timeout=grace_seconds)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
+        try:
+            proc.wait(timeout=grace_seconds)
+        except subprocess.TimeoutExpired:
+            pass
+    else:
+        proc.terminate()
+        try:
+            proc.wait(timeout=grace_seconds)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.wait(timeout=grace_seconds)
+            except subprocess.TimeoutExpired:
+                pass
 
 
 def run_freecadcmd_script(freecadcmd: str, script: str, timeout_seconds: int = 300) -> Dict[str, Any]:
@@ -16,15 +54,34 @@ def run_freecadcmd_script(freecadcmd: str, script: str, timeout_seconds: int = 3
             handle.write(script)
             tmp_file = handle.name
 
-        proc = subprocess.run(
-            [freecadcmd, tmp_file],
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-            check=False,
-        )
+        popen_kwargs: Dict[str, Any] = {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "text": True,
+        }
+        if os.name == "posix":
+            popen_kwargs["start_new_session"] = True
 
-        output_lines = [line.strip() for line in (proc.stdout or "").splitlines() if line.strip()]
+        proc = subprocess.Popen([freecadcmd, tmp_file], **popen_kwargs)
+        timed_out = False
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            _kill_process_tree(proc)
+            stdout, stderr = proc.communicate()
+            timed_out = True
+
+        if timed_out:
+            return {
+                "success": False,
+                "error": f"Timeout (>{timeout_seconds}s)",
+                "timeout": True,
+                "timeout_seconds": timeout_seconds,
+                "attempts": 0,
+                "error_details": [],
+            }
+
+        output_lines = [line.strip() for line in (stdout or "").splitlines() if line.strip()]
         for line in output_lines:
             if not (line.startswith("{") and line.endswith("}")) and "[DEBUG]" in line:
                 print(line)
@@ -39,10 +96,10 @@ def run_freecadcmd_script(freecadcmd: str, script: str, timeout_seconds: int = 3
                 except Exception:
                     continue
 
-        stderr = (proc.stderr or "").strip()
+        stderr_str = (stderr or "").strip()
         return {
             "success": False,
-            "error": f"FreeCADCmd uitvoer niet parsebaar (code {proc.returncode}): {stderr[:300]}",
+            "error": f"FreeCADCmd uitvoer niet parsebaar (code {proc.returncode}): {stderr_str[:300]}",
             "attempts": 0,
             "error_details": [],
         }

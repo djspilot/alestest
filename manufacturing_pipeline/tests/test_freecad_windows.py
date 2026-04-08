@@ -87,17 +87,11 @@ def test_run_unfold_uses_host_python_wrapper(tmp_path) -> None:
         flat_length = 0.0
         flat_width = 0.0
 
-    class DummyCompletedProcess:
-        def __init__(self) -> None:
-            self.returncode = 0
-            self.stdout = "\n✓ Ontbuigen geslaagd!\n"
-            self.stderr = ""
-
-    def fake_run(cmd, capture_output, text, timeout, env):  # type: ignore[no-untyped-def]
+    def fake_run_process(cmd, *, env, timeout_seconds, text=True):  # type: ignore[no-untyped-def]
         commands.append((cmd, env))
-        return DummyCompletedProcess()
+        return (0, "\n✓ Ontbuigen geslaagd!\n", "", False)
 
-    with patch("manufacturing_pipeline.core.runtime_unfold.subprocess.run", side_effect=fake_run):
+    with patch("manufacturing_pipeline.core.runtime_unfold._run_process_with_timeout", side_effect=fake_run_process):
         result = runtime_unfold.run_unfold(str(step_file), str(output_dir), "part", DummyAnalysis())
 
     assert result["success"] is True
@@ -195,7 +189,7 @@ def test_run_unfold_to_step_retries_with_windows_desktop_freecad(monkeypatch, tm
 
     attempts = []
 
-    def fake_attempt(step, out, part, cfg, runtime_label="managed"):  # type: ignore[no-untyped-def]
+    def fake_attempt(step, out, part, cfg, runtime_label="managed", timeout_seconds=None):  # type: ignore[no-untyped-def]
         attempts.append((cfg.freecad_cmd, runtime_label))
         if "runtime" in cfg.freecad_path:
             return {"success": False, "error": "managed failed"}

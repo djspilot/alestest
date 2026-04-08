@@ -4,6 +4,7 @@ import os
 import sys
 import math
 import json
+import signal
 import subprocess
 import threading
 import queue
@@ -55,6 +56,8 @@ def _get_unfold_runtime_settings(config_path=None):
     unfold_thresholds = get_unfold_thresholds(config_path)
     return {
         "runtime_timeout_sec": int(unfold_thresholds["runtime"]["timeout_sec"]),
+        "runtime_extra_timeout_per_mb_sec": int(unfold_thresholds["runtime"].get("extra_timeout_per_mb_sec", 45)),
+        "runtime_max_timeout_sec": int(unfold_thresholds["runtime"].get("max_timeout_sec", 600)),
         "candidate_limits": {
             "max_solids": int(unfold_thresholds["candidate_limits"]["max_solids"]),
             "max_base_faces_per_solid": int(
@@ -79,6 +82,77 @@ def _get_unfold_runtime_settings(config_path=None):
             for bucket, value in unfold_thresholds["k_factor"]["thickness_buckets_mm"].items()
         },
     }
+
+
+def _compute_unfold_timeout_sec(step_file, config_path=None):
+    """Compute effective unfold timeout based on STEP file size."""
+    settings = _get_unfold_runtime_settings(config_path)
+    base = settings["runtime_timeout_sec"]
+    per_mb = settings["runtime_extra_timeout_per_mb_sec"]
+    cap = settings["runtime_max_timeout_sec"]
+    try:
+        size_mb = os.path.getsize(step_file) / (1024 * 1024)
+    except OSError:
+        size_mb = 0.0
+    effective = max(base, min(cap, math.ceil(base + size_mb * per_mb)))
+    return effective
+
+
+def _kill_process_tree(proc, grace_seconds=5):
+    """Kill a subprocess and its children reliably."""
+    if proc.poll() is not None:
+        return
+    if os.name == "posix":
+        try:
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            proc.terminate()
+        try:
+            proc.wait(timeout=grace_seconds)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
+        try:
+            proc.wait(timeout=grace_seconds)
+        except subprocess.TimeoutExpired:
+            pass
+    else:
+        proc.terminate()
+        try:
+            proc.wait(timeout=grace_seconds)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.wait(timeout=grace_seconds)
+            except subprocess.TimeoutExpired:
+                pass
+
+
+def _run_process_with_timeout(cmd, *, env, timeout_seconds, text=True):
+    """Run a subprocess with proper timeout and process-group cleanup."""
+    popen_kwargs = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": text,
+        "env": env,
+    }
+    if os.name == "posix":
+        popen_kwargs["start_new_session"] = True
+
+    proc = subprocess.Popen(cmd, **popen_kwargs)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_seconds)
+        return proc.returncode, stdout or "", stderr or "", False
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(proc)
+        stdout, stderr = proc.communicate()
+        return None, stdout or "", stderr or "", True
 
 
 def _merge_fold_segments_runtime(bend_line_segments, bends_logical, fold_merge_settings=None):
@@ -715,10 +789,12 @@ def _resolve_windows_desktop_freecad_config():
     return None
 
 
-def _run_unfold_subprocess_attempt(step_file, output_dir, part_name, sys_config, runtime_label="managed"):
+def _run_unfold_subprocess_attempt(step_file, output_dir, part_name, sys_config, runtime_label="managed", timeout_seconds=None):
     fc_lib = sys_config.freecad_lib
     fc_mod = sys_config.freecad_mod
     unfold_settings = _get_unfold_runtime_settings()
+    if timeout_seconds is None:
+        timeout_seconds = unfold_settings["runtime_timeout_sec"]
     freecad_python = sys_config.freecad_python
     freecad_env = _build_freecad_subprocess_env(sys_config)
     debug_snapshot = _runtime_debug_snapshot(sys_config, freecad_env)
@@ -1473,25 +1549,29 @@ print("UNFOLD_RESULT:" + json.dumps(result))
         print(f"    [!] {msg}")
         return {"success": False, "error": msg}
 
+    print(f"    Unfold timeout: {timeout_seconds}s")
+
     try:
-        proc = subprocess.run(
+        returncode, stdout, stderr, timed_out = _run_process_with_timeout(
             [freecad_python, "-c", unfold_script],
-            capture_output=True,
-            text=True,
-            timeout=unfold_settings["runtime_timeout_sec"],
             env=freecad_env,
+            timeout_seconds=timeout_seconds,
         )
 
-        if proc.returncode != 0:
-            stderr = (proc.stderr or "").strip()
-            if stderr:
-                for line in stderr.split('\n')[:10]:
+        if timed_out:
+            _print_runtime_debug_snapshot("    [runtime-timeout]", debug_snapshot)
+            return {"success": False, "error": f"Timeout (>{timeout_seconds}s)", "timeout": True, "timeout_seconds": timeout_seconds}
+
+        if returncode != 0:
+            stderr_str = (stderr or "").strip()
+            if stderr_str:
+                for line in stderr_str.split('\n')[:10]:
                     print(f"    [FreeCAD stderr] {line}")
             _print_runtime_debug_snapshot("    [runtime-failure]", debug_snapshot)
-            return {"success": False, "error": f"FreeCAD exited {proc.returncode}: {stderr[:300]}"}
+            return {"success": False, "error": f"FreeCAD exited {returncode}: {stderr_str[:300]}"}
 
         # Parse result
-        stdout_lines = (proc.stdout or "").strip().split('\n')
+        stdout_lines = (stdout or "").strip().split('\n')
         for line in stdout_lines:
             if line.startswith('UNFOLD_RESULT:'):
                 result = json.loads(line[len('UNFOLD_RESULT:'):])
@@ -1506,8 +1586,8 @@ print("UNFOLD_RESULT:" + json.dumps(result))
                     first_traceback = (result.get("first_traceback") or "").strip()
                     if first_traceback:
                         print("    [FreeCAD traceback (first failure)]:")
-                        for line in first_traceback.splitlines()[:12]:
-                            print(f"      {line}")
+                        for tl in first_traceback.splitlines()[:12]:
+                            print(f"      {tl}")
                 return result
 
         # Debug: show what FreeCAD actually output
@@ -1515,18 +1595,15 @@ print("UNFOLD_RESULT:" + json.dumps(result))
             print(f"    [FreeCAD stdout (last 5 lines)]:")
             for line in stdout_lines[-5:]:
                 print(f"      {line}")
-        stderr = (proc.stderr or "").strip()
-        if stderr:
+        stderr_str = (stderr or "").strip()
+        if stderr_str:
             print(f"    [FreeCAD stderr (last 5 lines)]:")
-            for line in stderr.split('\n')[-5:]:
+            for line in stderr_str.split('\n')[-5:]:
                 print(f"      {line}")
         _print_runtime_debug_snapshot("    [runtime-no-result]", debug_snapshot)
 
         return {"success": False, "error": "No result returned"}
 
-    except subprocess.TimeoutExpired:
-        _print_runtime_debug_snapshot("    [runtime-timeout]", debug_snapshot)
-        return {"success": False, "error": f"Timeout (>{unfold_settings['runtime_timeout_sec']}s)"}
     except FileNotFoundError:
         msg = (
             f"FreeCAD executable not found: \"{freecad_python}\".\n"
@@ -1594,10 +1671,13 @@ def _run_direct_unfold_attempt(step_file, output_dir, part_name):
     return result
 
 
-def _run_direct_python_subprocess_attempt(step_file, output_dir, part_name, sys_config):
+def _run_direct_python_subprocess_attempt(step_file, output_dir, part_name, sys_config, timeout_seconds=None):
     freecad_python = sys_config.freecad_python
     if not freecad_python or not os.path.exists(freecad_python):
         return {"success": False, "error": "FreeCAD Python runtime niet gevonden"}
+
+    if timeout_seconds is None:
+        timeout_seconds = _compute_unfold_timeout_sec(step_file)
 
     freecad_env = _build_freecad_subprocess_env(sys_config)
     freecad_env["FREECAD_UNFOLD_MODE"] = "direct"
@@ -1647,16 +1727,11 @@ print("DIRECT_UNFOLD_RESULT:" + json.dumps(payload))
 """
 
     try:
-        proc = subprocess.run(
+        returncode, stdout, stderr, timed_out = _run_process_with_timeout(
             [freecad_python, "-c", script],
-            capture_output=True,
-            text=True,
-            timeout=300,
             env=freecad_env,
+            timeout_seconds=timeout_seconds,
         )
-    except subprocess.TimeoutExpired:
-        _print_runtime_debug_snapshot("    [direct-python-timeout]", debug_snapshot)
-        return {"success": False, "error": "Timeout (>300s) in FreeCAD Python runtime"}
     except FileNotFoundError:
         _print_runtime_debug_snapshot("    [direct-python-missing]", debug_snapshot)
         return {"success": False, "error": f"FreeCAD Python executable not found: {freecad_python}"}
@@ -1664,7 +1739,11 @@ print("DIRECT_UNFOLD_RESULT:" + json.dumps(payload))
         _print_runtime_debug_snapshot("    [direct-python-exception]", debug_snapshot)
         return {"success": False, "error": str(exc)}
 
-    for line in reversed((proc.stdout or "").splitlines()):
+    if timed_out:
+        _print_runtime_debug_snapshot("    [direct-python-timeout]", debug_snapshot)
+        return {"success": False, "error": f"Timeout (>{timeout_seconds}s) in FreeCAD Python runtime", "timeout": True, "timeout_seconds": timeout_seconds}
+
+    for line in reversed((stdout or "").splitlines()):
         if not line.startswith("DIRECT_UNFOLD_RESULT:"):
             continue
         try:
@@ -1674,15 +1753,29 @@ print("DIRECT_UNFOLD_RESULT:" + json.dumps(payload))
         payload.setdefault("runtime_source", "direct-freecad-python")
         return payload
 
-    stderr = (proc.stderr or "").strip()
-    if stderr:
-        for line in stderr.splitlines()[-8:]:
+    stderr_str = (stderr or "").strip()
+    if stderr_str:
+        for line in stderr_str.splitlines()[-8:]:
             print(f"    [direct-python-stderr] {line}")
     _print_runtime_debug_snapshot("    [direct-python-no-result]", debug_snapshot)
-    return {"success": False, "error": stderr or "No result returned from FreeCAD Python runtime"}
+    return {"success": False, "error": stderr_str or "No result returned from FreeCAD Python runtime"}
 
 
-def _run_direct_python_worker_attempt(step_file, output_dir, part_name, sys_config):
+def _drop_persistent_freecad_worker(sys_config):
+    """Discard and close a poisoned persistent worker."""
+    key = _worker_cache_key(sys_config)
+    with _PERSISTENT_FREECAD_WORKERS_LOCK:
+        worker = _PERSISTENT_FREECAD_WORKERS.pop(key, None)
+    if worker is not None:
+        try:
+            worker.close()
+        except Exception:
+            pass
+
+
+def _run_direct_python_worker_attempt(step_file, output_dir, part_name, sys_config, timeout_seconds=None):
+    if timeout_seconds is None:
+        timeout_seconds = _compute_unfold_timeout_sec(step_file)
     debug_snapshot = _runtime_debug_snapshot(sys_config, _build_freecad_subprocess_env(sys_config))
     try:
         worker = _get_persistent_freecad_worker(sys_config)
@@ -1690,10 +1783,11 @@ def _run_direct_python_worker_attempt(step_file, output_dir, part_name, sys_conf
             step_file=step_file,
             output_dir=output_dir,
             part_name=part_name,
-            timeout_seconds=300,
+            timeout_seconds=timeout_seconds,
             variant=_unfolder_variant_mode(),
         )
     except Exception as exc:
+        _drop_persistent_freecad_worker(sys_config)
         _print_runtime_debug_snapshot("    [direct-python-worker-failure]", debug_snapshot)
         return {
             "success": False,
@@ -1731,6 +1825,12 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     """
     _t_total = time.perf_counter()
     timings: dict = {}
+    timeout_seconds = _compute_unfold_timeout_sec(step_file)
+    try:
+        size_mb = os.path.getsize(step_file) / (1024 * 1024)
+    except OSError:
+        size_mb = 0.0
+    print(f"  [unfold] File size: {size_mb:.1f} MB → timeout: {timeout_seconds}s")
 
     mode = os.getenv("FREECAD_UNFOLD_MODE", "auto").strip().lower()
 
@@ -1754,6 +1854,7 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
             output_dir,
             part_name,
             sys_config,
+            timeout_seconds=timeout_seconds,
         )
         timings["worker_attempt_ms"] = round((time.perf_counter() - _t0) * 1000)
         if python_runtime_result.get("worker_transport_error"):
@@ -1764,6 +1865,7 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
                 part_name,
                 sys_config,
                 runtime_label="direct-freecad-python",
+                timeout_seconds=timeout_seconds,
             )
             timings["subprocess_fallback_ms"] = round((time.perf_counter() - _t0) * 1000)
     else:
@@ -1774,6 +1876,7 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
             part_name,
             sys_config,
             runtime_label="direct-freecad-python",
+            timeout_seconds=timeout_seconds,
         )
         timings["subprocess_attempt_ms"] = round((time.perf_counter() - _t0) * 1000)
 
@@ -1824,6 +1927,7 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
         part_name,
         desktop_config,
         runtime_label="desktop-freecad",
+        timeout_seconds=timeout_seconds,
     )
     timings["desktop_fallback_ms"] = round((time.perf_counter() - _t0) * 1000)
     timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
@@ -1861,7 +1965,7 @@ def run_unfold(step_file, output_dir, part_name, analysis):
     unfold_script = os.path.join(PIPELINE_DIR, "analysis", "freecad_unfold.py")
     dxf_output = os.path.join(output_dir, f"{part_name}_flat.dxf")
     unfold_result = {'success': False, 'error_details': []}
-    unfold_settings = _get_unfold_runtime_settings()
+    timeout_seconds = _compute_unfold_timeout_sec(step_file)
 
     if not os.path.exists(unfold_script):
         print(f"  [!] Unfold script not found: {unfold_script}")
@@ -1871,18 +1975,20 @@ def run_unfold(step_file, output_dir, part_name, analysis):
     freecad_env = _build_freecad_subprocess_env(sys_config)
 
     try:
-        result = subprocess.run(
+        returncode, stdout, stderr, timed_out = _run_process_with_timeout(
             [HOST_PYTHON, unfold_script, step_file, "-o", dxf_output],
-            capture_output=True,
-            text=True,
-            timeout=unfold_settings["runtime_timeout_sec"],
             env=freecad_env,
+            timeout_seconds=timeout_seconds,
         )
 
-        if result.returncode == 0:
+        if timed_out:
+            print(f"  ✗ Unfold timeout (>{timeout_seconds}s)")
+            return unfold_result
+
+        if returncode == 0:
             unfold_result['success'] = True
             # Parse output for dimensions
-            for line in result.stdout.split('\n'):
+            for line in stdout.split('\n'):
                 if 'Unfold geslaagd' in line or 'Unfold successful' in line:
                     print(f"  [OK] {line.strip()}")
                 elif 'Fold lines' in line:
@@ -1893,7 +1999,7 @@ def run_unfold(step_file, output_dir, part_name, analysis):
                 print(f"  [OK] DXF: {dxf_output} ({size_kb:.0f} KB)")
 
                 # Update analysis with flat dimensions
-                for line in result.stdout.split('\n'):
+                for line in stdout.split('\n'):
                     if 'Unfold geslaagd' in line or 'Unfold successful' in line:
                         try:
                             parts = line.split(':')
@@ -1905,7 +2011,7 @@ def run_unfold(step_file, output_dir, part_name, analysis):
                             pass
         else:
             # Parse error details from output
-            for line in result.stdout.split('\n'):
+            for line in stdout.split('\n'):
                 if '✗' in line and 'fout:' in line:
                     msg = line.split('fout:')[-1].strip() if 'fout:' in line else line
                     unfold_result['error_details'].append({
@@ -1923,8 +2029,6 @@ def run_unfold(step_file, output_dir, part_name, analysis):
             if theoretical:
                 unfold_result['theoretical'] = theoretical
 
-    except subprocess.TimeoutExpired:
-        print(f"  ✗ Unfold timeout (>{unfold_settings['runtime_timeout_sec']}s)")
     except Exception as e:
         print(f"  ✗ Unfold error: {e}")
 

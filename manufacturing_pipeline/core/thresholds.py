@@ -15,6 +15,8 @@ DEFAULT_THRESHOLDS: Dict[str, Any] = {
     "unfold": {
         "runtime": {
             "timeout_sec": 180,
+            "extra_timeout_per_mb_sec": 45,
+            "max_timeout_sec": 600,
         },
         "candidate_limits": {
             "max_solids": 3,
@@ -98,6 +100,17 @@ def validate_thresholds(thresholds: Dict[str, Any]) -> None:
     timeout_sec = _require_number("unfold.runtime.timeout_sec", runtime["timeout_sec"])
     if timeout_sec < 1:
         raise ValueError("Threshold 'unfold.runtime.timeout_sec' must be >= 1")
+
+    extra_timeout_per_mb_sec = _require_number(
+        "unfold.runtime.extra_timeout_per_mb_sec",
+        runtime["extra_timeout_per_mb_sec"],
+    )
+    if extra_timeout_per_mb_sec < 0:
+        raise ValueError("Threshold 'unfold.runtime.extra_timeout_per_mb_sec' must be >= 0")
+
+    max_timeout_sec = _require_number("unfold.runtime.max_timeout_sec", runtime["max_timeout_sec"])
+    if max_timeout_sec < timeout_sec:
+        raise ValueError("Threshold 'unfold.runtime.max_timeout_sec' must be >= timeout_sec")
 
     for key in ("max_solids", "max_base_faces_per_solid"):
         value = limits[key]
