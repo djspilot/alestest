@@ -30,6 +30,7 @@ Dat betekent:
 
 ## Bronnen voor dit werkdocument
 
+- `Voorbeeldxml`
 - `manufacturing_pipeline/reporting/xml_exporter.py`
 - `manufacturing_pipeline/api/routes.py`
 - `manufacturing_pipeline/api/analysis_service.py`
@@ -56,6 +57,23 @@ De kern van het vervolgwerk is daarom niet alleen extra detectie bouwen, maar vo
 - één canoniek analysis-resultmodel invoeren
 - de XML-exporter terugbrengen tot een pure writer/mappinglaag
 
+## Vergelijkingsbasis: Voorbeeldxml
+
+De toegevoegde `Voorbeeldxml` gebruiken we in dit document als referentie voor de gewenste veldset per classificatie.
+
+Belangrijke observaties bij deze bron:
+
+- het bestand is bruikbaar als veldinventaris, maar niet direct als harde XML-specificatie
+- er staan marker-prefixen `1` voor meerdere tags; dat lijkt een handmatige markering van gewenste velden
+- het bestand bevat ook enkele onregelmatigheden of typfouten, zoals `Tube_Heigth`, `Tube_Succes`, `Tube-HolesCS` en een ongeldige `tube_Thread` tagregel
+- daarom behandelen we `Voorbeeldxml` als referentie voor veldkeuze, niet als parser-strikt eindformaat
+
+Werkafspraak voor het plan vanaf nu:
+
+- `Voorbeeldxml` bepaalt primair welke velden we minimaal in de losse controle-XML willen kunnen tonen
+- velden die wij al kunnen leveren maar niet in `Voorbeeldxml` staan, worden per classificatie apart benoemd als `extra beschikbare data`
+- per classificatie beslissen we daarna expliciet of die extra data in de uiteindelijke XML moet komen of alleen in debug/controle-output blijft
+
 ## Doelbeeld
 
 De gewenste eindsituatie is:
@@ -69,6 +87,22 @@ De gewenste eindsituatie is:
 ## Matrix Per Classificatie
 
 ### 1. Vlakke plaat
+
+#### Vergelijking met Voorbeeldxml
+
+| Groep | In Voorbeeldxml | In huidige pipeline / plan | Besluitrichting |
+|---|---|---|---|
+| Kernidentiteit | `Sheet_PartName`, `Sheet_Name`, `Sheet_Type`, `Sheet_Count` | Ja | Overnemen als vaste kernset |
+| Basismateriaal en maatvoering | `Sheet_Material`, `Sheet_Thickness`, `Sheet_BoxX`, `Sheet_BoxY` | Ja | Overnemen als vaste kernset |
+| Productietelling | `Sheet_NrBends`, `Sheet_NrHoles` | Ja | Overnemen als vaste kernset |
+| Snij- en oppervlaktematen | `Sheet_TopArea`, `Sheet_Volume`, `Sheet_AreaNoHoles`, `Sheet_TotalArea`, `Sheet_BoxArea`, `Sheet_OuterContour`, `Sheet_TotalContour` | Ja, grotendeels | Overnemen als vaste kernset |
+| Gatdetail | `Sheet_HoleContours`, `Sheet_HoleRadii` | Ja | Overnemen als vaste kernset |
+| Unfold / bestanden | `Sheet_UnfoldSuccess`, `Sheet_FilePathDXF`, `Sheet_FilePath` | Gedeeltelijk | `Sheet_FilePathDXF` beoordelen als productieveld; `Sheet_FilePath` alleen indien echt nodig |
+| ERP / planning | `Sheet_OrderNr`, `Sheet_DeliveryDate`, `Sheet_Time`, `Sheet_Cost`, `Sheet_AP_*`, `Sheet_Machine` | Nee of beperkt | Alleen opnemen als ERP-koppeling dit echt vereist |
+| Traceability / ids | `Sheet_Id_*`, `Sheet_OriginalName`, `Sheet_AssemblyLevel` | Gedeeltelijk | Kandidaten voor controle-XML, niet direct voor minimale productie-XML |
+| Visuele assets | `Sheet_FilePathPNG*`, `Sheet_FilePathPDF_BendDrawing` | Nee | Voorlopig buiten scope |
+| Speciale legacy velden | `Sheet_NrMarkingLines`, `Sheet_MarkingLength`, `Sheet_NrHolesCS`, `Sheet_HolesCS`, `Sheet_BendTable`, `Sheet_ContourString`, `Sheet_ProfileExists`, `Sheet_BBox3D`, `Sheet_HasBevel` | Grotendeels nee | Per veld expliciet beslissen; niet automatisch meenemen |
+| Extra data die wij al hebben maar niet in voorbeeld staat | `Sheet_HoleTypes`, `Sheet_ThreadedHoles`, `Sheet_CountersunkHoles`, `Sheet_CountersunkAngles`, `Sheet_FeatExtTotL`, `Sheet_BottomArea` | Ja | Beslissen of deze in eind-XML moeten, of alleen in controle-XML |
 
 | Onderdeel | XML-velden | Al aanwezig in pipeline | Ontbreekt of is nog zwak | Huidige bron |
 |---|---|---|---|---|
@@ -88,9 +122,26 @@ De gewenste eindsituatie is:
 
 #### Beoordeling vlakke plaat
 
-Vlakke plaat is het verst uitgewerkt. Vrijwel alle functionele gegevens bestaan al, maar nog niet als stabiel en formeel resultmodel tussen analysis en reporting.
+Vlakke plaat is het verst uitgewerkt. Ten opzichte van `Voorbeeldxml` kunnen we de meeste productievelden al vullen. De belangrijkste open keuzes zitten niet in detectie, maar in scope:
+
+- welke legacy ERP- en traceability-velden nemen we over in de nieuwe losse controle-XML
+- welke extra gatensemantiek uit onze pipeline ook in de eind-XML hoort, hoewel die niet in `Voorbeeldxml` staat
 
 ### 2. Gezette plaat
+
+#### Vergelijking met Voorbeeldxml
+
+| Groep | In Voorbeeldxml | In huidige pipeline / plan | Besluitrichting |
+|---|---|---|---|
+| Kern sheet velden | `Sheet_PartName`, `Sheet_Name`, `Sheet_Type`, `Sheet_Count`, `Sheet_Material` | Ja | Overnemen |
+| Basismaten | `Sheet_Thickness`, `Sheet_BoxX`, `Sheet_BoxY` | Ja | Overnemen, maar betekenis van `BoxX/Y` expliciet vastleggen |
+| Bend output | `Sheet_NrBends`, `Sheet_BendLength`, `Sheet_BendAngles`, `Sheet_BendInnerRadii` | Ja, vooral in BOM-route | Verplicht maken voor gezette plaat |
+| Hole output | `Sheet_NrHoles`, `Sheet_HoleContours`, `Sheet_HoleRadii` | Ja | Overnemen |
+| Area / contour / volume | `Sheet_TopArea`, `Sheet_Volume`, `Sheet_AreaNoHoles`, `Sheet_TotalArea`, `Sheet_BoxArea`, `Sheet_OuterContour`, `Sheet_TotalContour` | Ja, grotendeels | Overnemen |
+| Unfold-bestanden | `Sheet_UnfoldSuccess`, `Sheet_FilePathDXF`, `Sheet_FilePath` | Gedeeltelijk | `DXF` waarschijnlijk wel; `FilePath` apart beoordelen |
+| Legacy management velden | `Sheet_Time`, `Sheet_Cost`, `Sheet_AP_*`, `Sheet_BendTable`, `Sheet_Machine` | Gedeeltelijk of nee | Alleen meenemen als procesmatig nodig |
+| Id / parent / assembly velden | `Sheet_Id_*`, `Sheet_OriginalName`, `Sheet_AssemblyLevel` | Gedeeltelijk | Waarschijnlijk nuttig voor controle-XML, optioneel voor eind-XML |
+| Extra data die wij al hebben maar niet in voorbeeld staat | `Sheet_HoleTypes`, `Sheet_ThreadedHoles`, `Sheet_CountersunkHoles`, `Sheet_CountersunkAngles`, `Sheet_FeatExtTotL`, `Sheet_BottomArea` | Ja | Expliciet beslissen of dit standaard mee moet |
 
 | Onderdeel | XML-velden | Al aanwezig in pipeline | Ontbreekt of is nog zwak | Huidige bron |
 |---|---|---|---|---|
@@ -106,9 +157,23 @@ Vlakke plaat is het verst uitgewerkt. Vrijwel alle functionele gegevens bestaan 
 
 #### Beoordeling gezette plaat
 
-Gezette plaat heeft al veel inhoudelijke logica, maar die logica leeft nog te veel in de XML-exportlaag. Voor een robuuste pipeline moet bend- en unfold-informatie upstream in het analysis-resultaat landen.
+Gezette plaat is de belangrijkste classificatie voor de nieuwe losse controle-XML. `Voorbeeldxml` bevestigt dat juist hier de meeste velden inhoudelijk gecontroleerd moeten worden. Voor een robuuste pipeline moet bend- en unfold-informatie upstream in het analysis-resultaat landen, waarna de losse controle-XML exact deze veldset kan tonen.
 
 ### 3. Profiel
+
+#### Vergelijking met Voorbeeldxml
+
+| Groep | In Voorbeeldxml | In huidige pipeline / plan | Besluitrichting |
+|---|---|---|---|
+| Kernidentiteit | `Tube_PartName`, `Tube_Name`, `Tube_Type`, `Tube_Count` | Ja | Overnemen |
+| Basisafmetingen | `Tube_Thickness`, `Tube_Width`, `Tube_Heigth`, `Tube_BoxDeltaX`, `Tube_BoxDeltaY`, `Tube_BoxDeltaZ` | Ja, met spelling `Tube_Height` in huidige pipeline | Huidige spelling behouden; voorbeeldspelling corrigeren in nieuw contract |
+| Materiaal / gewicht | `Tube_Material`, `Tube_Weight` | Ja | Overnemen |
+| Radii | `Tube_InnerRadius`, `Tube_OuterRadius` | Ja | Overnemen |
+| Succes / file | `Tube_Succes`, `Tube_FilePath` | Ja, met spelling `Tube_Success` | Huidige spelling behouden; voorbeeldspelling corrigeren |
+| Feature samenvatting | `Tube_NrFeatures`, `Tube_FeatExtTotL`, `Tube_FeatDistToEnd`, `Tube_FeatBox*`, `Tube_FeatExt*`, `Tube_FeatInt*` | Deels | Goede kandidaat voor aparte controle-XML; waarschijnlijk te zwaar voor minimale productie-XML |
+| Top/bottom cut velden | `Tube_TopCut*`, `Tube_BotCut*` | Nee of beperkt | Eerst beslissen of dit echt productie-relevant is |
+| Legacy velden | `Tube_OrderNr`, `Tube_DeliveryDate`, `Tube_Time`, `Tube_Cost`, `Tube_Machine`, `Tube_ProfileExists`, `Tube_MaterialExists`, `Tube_NestedLength`, `Tube_ProfileArea` | Deels | Per veld beoordelen |
+| Extra data die wij al hebben maar niet in voorbeeld staat | `Tube_NrHoles`, `Tube_HoleContours`, `Tube_HoleRadii`, `Tube_HoleTypes`, `Tube_ThreadedHoles`, `Tube_CountersunkHoles`, `Tube_CountersunkAngles` | Ja | Expliciet besluiten of deze mee moeten in eind-XML |
 
 | Onderdeel | XML-velden | Al aanwezig in pipeline | Ontbreekt of is nog zwak | Huidige bron |
 |---|---|---|---|---|
@@ -126,9 +191,22 @@ Gezette plaat heeft al veel inhoudelijke logica, maar die logica leeft nog te ve
 
 #### Beoordeling profiel
 
-Profiel is inhoudelijk verder dan de standaard XML-download laat zien. De feature-extractie bestaat al, maar wordt nog niet via één canonieke Tube-uitvoer beschikbaar gemaakt.
+Profiel vraagt nu twee expliciete keuzes:
+
+- volgen we voor profiel de zware legacy veldset uit `Voorbeeldxml`, of beperken we de eerste versie tot kernmaten plus gaten/feature-samenvatting
+- willen we de extra profile hole-data uit onze pipeline opnemen, ook al staat die niet in het voorbeeldbestand
 
 ### 4. Anders
+
+#### Vergelijking met Voorbeeldxml
+
+| Groep | In Voorbeeldxml | In huidige pipeline / plan | Besluitrichting |
+|---|---|---|---|
+| Kernvelden | `Others_PartName`, `Others_Name`, `Others_Type`, `Others_Count` | Ja | Overnemen |
+| Geometrie | `Others_SurfaceArea`, `Others_Volume` | Nee / beperkt | Beslissen of dit nuttig is voor controle-XML |
+| Bestanden | `Others_FilePath` | Nee | Alleen opnemen indien procesmatig nodig |
+| Traceability | `Others_Id_*`, `Others_OriginalName`, `Others_AssemblyLevel` | Nee / beperkt | Kandidaten voor controle-XML |
+| Gebruikersvelden | `Others_User_*` | Nee | Alleen meenemen bij expliciete ERP-behoefte |
 
 | Onderdeel | XML-velden | Al aanwezig in pipeline | Ontbreekt of is nog zwak | Huidige bron |
 |---|---|---|---|---|
@@ -139,7 +217,7 @@ Profiel is inhoudelijk verder dan de standaard XML-download laat zien. De featur
 
 #### Beoordeling anders
 
-Voor `anders` is de minimale set aanwezig. De belangrijkste open vraag is functioneel: blijft dit bewust een minimale restcategorie, of willen we ook verrijkte data opnemen?
+Voor `anders` laat `Voorbeeldxml` een rijkere legacy-set zien dan ons huidige plan. Hier moeten we expliciet kiezen of `anders` een minimale restcategorie blijft, of ook traceability en eenvoudige geometrie krijgt in de controle-XML.
 
 ### 5. DocumentControl en totale XML
 
@@ -171,6 +249,7 @@ Voor een complete productie-XML moet `DocumentControl` altijd aanwezig zijn. Dat
 - Profiel en `anders` als volwaardige standaard XML-output in de actieve API-route
 - Universele `DocumentControl`
 - Regressietests op veldniveau per classificatie
+- Een expliciet besluitdocument per classificatie voor `extra beschikbare data buiten Voorbeeldxml`
 
 ## Plan van aanpak
 
@@ -186,6 +265,22 @@ Aanpak:
 - begin met `plaat`
 - splits `plaat` direct in `vlakke_plaat` en `gezette_plaat`
 - gebruik de huidige schema-definitie in `xml_exporter.py` als startpunt
+- gebruik `Voorbeeldxml` als referentie voor de minimale losse controle-XML per classificatie
+- markeer per classificatie apart welke extra pipeline-data buiten `Voorbeeldxml` valt
+
+### Fase 1A - Losse controle-XML uitlijnen op Voorbeeldxml
+
+Doel:
+
+- een losse XML genereren die qua veldset aansluit op `Voorbeeldxml`
+- per classificatie zichtbaar maken welke velden gevuld zijn, leeg zijn of nog ontbreken
+- handmatige controle per STEP mogelijk maken zonder direct de definitieve productie-XML te wijzigen
+
+Werkafspraak:
+
+- eerst een `controle-XML` maken op basis van de veldset uit `Voorbeeldxml`
+- daarna een `extra beschikbare data` sectie per classificatie toevoegen
+- pas daarna beslissen welke extra velden promoveren naar de definitieve XML-specificatie
 
 ### Fase 2 - Canoniek resultmodel invoeren
 
@@ -247,18 +342,38 @@ Doel:
 - golden/reference XML vergelijkingen
 - validatie op `DocumentControl`
 
+## Besliskader: data buiten Voorbeeldxml
+
+Wanneer de manufacturing pipeline een veld al kan leveren maar `Voorbeeldxml` dit niet bevat, gelden drie mogelijke uitkomsten:
+
+1. Opnemen in definitieve XML
+	Voor velden die productie-inhoud verbeteren, zoals thread- en countersink-semantiek.
+
+2. Alleen opnemen in losse controle-XML
+	Voor velden die nuttig zijn voor validatie of debugging, maar niet direct nodig zijn voor ERP of productie-uitvoer.
+
+3. Niet opnemen
+	Voor velden zonder duidelijke proceswaarde.
+
+Voorlopige kandidaten per classificatie:
+
+- Plaat: `Sheet_HoleTypes`, `Sheet_ThreadedHoles`, `Sheet_CountersunkHoles`, `Sheet_CountersunkAngles`, `Sheet_FeatExtTotL`, `Sheet_BottomArea`
+- Profiel: `Tube_NrHoles`, `Tube_HoleContours`, `Tube_HoleRadii`, `Tube_HoleTypes`, `Tube_ThreadedHoles`, `Tube_CountersunkHoles`, `Tube_CountersunkAngles`
+- Anders: alleen verrijking toevoegen na expliciet besluit
+
 ## Aanbevolen uitvoervolgorde
 
-1. Detailmatrix voor `vlakke_plaat` uitschrijven
-2. Detailmatrix voor `gezette_plaat` uitschrijven
-3. Canoniek `sheet_data` model invoeren
-4. XML-writer los trekken van exporter-logica voor sheet
-5. Detailmatrix voor `profiel` uitschrijven
-6. Canoniek `profile_data` model invoeren
+1. `Voorbeeldxml` veldset normaliseren per classificatie
+2. Losse controle-XML specificeren voor `vlakke_plaat`
+3. Losse controle-XML specificeren voor `gezette_plaat`
+4. Beslissen welke extra plaatdata buiten `Voorbeeldxml` in scope komt
+5. Losse controle-XML specificeren voor `profiel`
+6. Beslissen welke extra profieldata buiten `Voorbeeldxml` in scope komt
 7. `anders` contract finaliseren
-8. `DocumentControl` universeel maken
-9. Eén exportpad afdwingen
-10. Regressietests per classificatie toevoegen
+8. Canoniek resultmodel invoeren
+9. `DocumentControl` universeel maken
+10. Eén exportpad afdwingen
+11. Regressietests per classificatie toevoegen
 
 ## Open beslissingen
 
@@ -281,4 +396,4 @@ De eerstvolgende praktische stap is het maken van een detailmatrix voor `plaat` 
 - ontbrekende implementatie
 - validatiebestand
 
-Dat document kan vervolgens direct gebruikt worden als implementatievolgorde voor de XML-uitrol.
+Dat document kan vervolgens direct gebruikt worden om een losse controle-XML te bouwen die aansluit op `Voorbeeldxml`, waarna per STEP handmatig gecontroleerd kan worden of de inhoud klopt en welke velden nog ontbreken.
