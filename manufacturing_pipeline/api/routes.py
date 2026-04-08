@@ -6,11 +6,14 @@ import hashlib
 import json
 import io
 import logging
+import math
 import os
 import shutil
 import uuid
 import zipfile
+from copy import deepcopy
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse, Response
@@ -32,7 +35,7 @@ from manufacturing_pipeline.api.schemas import (
     UnfoldResult,
 )
 from manufacturing_pipeline.api.job_manager import jobs
-from manufacturing_pipeline.api.analysis_service import run_step_analysis
+from manufacturing_pipeline.api.analysis_service import _build_sheet_metrics, run_step_analysis
 from manufacturing_pipeline.core.runtime_unfold import canonicalize_unfold_payload, run_unfold_to_step
 from manufacturing_pipeline.analysis.io.step_file_io import extract_solids_to_temp_files
 from manufacturing_pipeline.reporting.xml_exporter import export_to_xml
@@ -205,6 +208,214 @@ def _build_unfold_status(job) -> UnfoldStatus:
     )
 
 
+def _triangle_area(point_a: tuple[float, float, float], point_b: tuple[float, float, float], point_c: tuple[float, float, float]) -> float:
+    ab = (point_b[0] - point_a[0], point_b[1] - point_a[1], point_b[2] - point_a[2])
+    ac = (point_c[0] - point_a[0], point_c[1] - point_a[1], point_c[2] - point_a[2])
+    cross = (
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    )
+    return 0.5 * math.sqrt(cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2])
+
+
+def _mesh_surface_area(mesh: dict | None) -> float:
+    if not isinstance(mesh, dict):
+        return 0.0
+    vertices = mesh.get("vertices") or []
+    indices = mesh.get("indices") or []
+    if len(vertices) < 9 or len(indices) < 3:
+        return 0.0
+
+    def _point(index: int) -> tuple[float, float, float]:
+        offset = index * 3
+        return (
+            float(vertices[offset]),
+            float(vertices[offset + 1]),
+            float(vertices[offset + 2]),
+        )
+
+    total = 0.0
+    for i in range(0, len(indices) - 2, 3):
+        try:
+            p0 = _point(int(indices[i]))
+            p1 = _point(int(indices[i + 1]))
+            p2 = _point(int(indices[i + 2]))
+        except Exception:
+            continue
+        total += _triangle_area(p0, p1, p2)
+    return total
+
+
+def _mesh_volume(mesh: dict | None) -> float:
+    if not isinstance(mesh, dict):
+        return 0.0
+    vertices = mesh.get("vertices") or []
+    indices = mesh.get("indices") or []
+    if len(vertices) < 9 or len(indices) < 3:
+        return 0.0
+
+    def _point(index: int) -> tuple[float, float, float]:
+        offset = index * 3
+        return (
+            float(vertices[offset]),
+            float(vertices[offset + 1]),
+            float(vertices[offset + 2]),
+        )
+
+    total = 0.0
+    for i in range(0, len(indices) - 2, 3):
+        try:
+            p0 = _point(int(indices[i]))
+            p1 = _point(int(indices[i + 1]))
+            p2 = _point(int(indices[i + 2]))
+        except Exception:
+            continue
+        total += (
+            p0[0] * (p1[1] * p2[2] - p1[2] * p2[1])
+            - p0[1] * (p1[0] * p2[2] - p1[2] * p2[0])
+            + p0[2] * (p1[0] * p2[1] - p1[1] * p2[0])
+        )
+    return abs(total) / 6.0
+
+
+def _has_nonzero_sheet_metrics(metrics: dict | None) -> bool:
+    if not isinstance(metrics, dict):
+        return False
+    for key in ("volume", "top_area", "area_no_holes", "total_area", "outer_contour", "total_contour"):
+        try:
+            if abs(float(metrics.get(key) or 0.0)) > 1e-6:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _has_meaningful_bend_geometry(bends: list[dict] | None) -> bool:
+    for bend in bends or []:
+        try:
+            angle = bend.get("angle")
+            radius = bend.get("radius")
+            if angle is not None and abs(float(angle)) > 1e-6:
+                return True
+            if radius is not None and abs(float(radius)) > 1e-6:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _meaningful_bend_candidates(unfold_visuals: dict | None) -> list[dict]:
+    candidates = []
+    for bend in (unfold_visuals or {}).get("bends_logical") or []:
+        try:
+            angle = bend.get("angle")
+            radius = bend.get("radius")
+            if (angle is not None and abs(float(angle)) > 1e-6) or (radius is not None and abs(float(radius)) > 1e-6):
+                candidates.append(bend)
+        except Exception:
+            continue
+    return candidates
+
+
+def _merge_bends_logical(existing_unfold: dict, incoming_unfold: dict) -> list[dict]:
+    incoming_bends = list(incoming_unfold.get("bends_logical") or [])
+    if _has_meaningful_bend_geometry(incoming_bends):
+        return incoming_bends
+
+    meaningful_existing = _meaningful_bend_candidates(existing_unfold)
+    if not incoming_bends:
+        return meaningful_existing or list(existing_unfold.get("bends_logical") or [])
+
+    if not meaningful_existing:
+        return incoming_bends or list(existing_unfold.get("bends_logical") or [])
+
+    merged = []
+    for index, bend in enumerate(incoming_bends):
+        fallback = meaningful_existing[index] if index < len(meaningful_existing) else meaningful_existing[-1]
+        merged.append({
+            **fallback,
+            **bend,
+            "angle": fallback.get("angle") if bend.get("angle") in (None, 0, 0.0, "0", "0.0") else bend.get("angle"),
+            "radius": fallback.get("radius") if bend.get("radius") in (None, 0, 0.0, "0", "0.0") else bend.get("radius"),
+            "type": bend.get("type") or fallback.get("type"),
+            "id": bend.get("id") or fallback.get("id") or (index + 1),
+        })
+    return merged
+
+
+def _merge_unfold_visuals(existing_unfold: dict | None, incoming_unfold: dict | None) -> dict:
+    existing = dict(existing_unfold or {})
+    incoming = dict(incoming_unfold or {})
+    if not incoming:
+        return existing
+
+    merged = {**existing, **incoming}
+    merged_bends = _merge_bends_logical(existing, incoming)
+    if merged_bends:
+        merged["bends_logical"] = merged_bends
+        merged["bend_angles_erp"] = [
+            float(bend["angle"])
+            for bend in merged_bends
+            if bend.get("angle") not in (None, "")
+        ]
+    elif existing.get("bend_angles_erp"):
+        merged["bend_angles_erp"] = list(existing.get("bend_angles_erp") or [])
+
+    if not merged.get("bend_angles_raw") and existing.get("bend_angles_raw"):
+        merged["bend_angles_raw"] = list(existing.get("bend_angles_raw") or [])
+    return merged
+
+
+def _effective_result_dict(job) -> dict:
+    base_result = getattr(job, "result", None) or {}
+    if not base_result:
+        return {}
+
+    result = deepcopy(base_result)
+    visuals = dict(result.get("visuals") or {})
+    merged_unfold = _merge_unfold_visuals(
+        visuals.get("unfold") or {},
+        _build_unfold_result(job.job_id, getattr(job, "unfold_result", None), getattr(job, "unfold_error", None)),
+    )
+    if merged_unfold:
+        visuals["unfold"] = merged_unfold
+        result["visuals"] = visuals
+
+        production = dict(result.get("production") or {})
+        if merged_unfold.get("success"):
+            fold_lines = int(merged_unfold.get("fold_lines") or production.get("bends_total") or 0)
+            production["bends_total"] = fold_lines
+            bends_logical = merged_unfold.get("bends_logical") or []
+            production["bends_up"] = sum(1 for bend in bends_logical if str(bend.get("type") or "").lower() == "up")
+            production["bends_down"] = sum(1 for bend in bends_logical if str(bend.get("type") or "").lower() == "down")
+            result["production"] = production
+
+            flat_length = merged_unfold.get("flat_length")
+            flat_width = merged_unfold.get("flat_width")
+            if flat_length or flat_width:
+                result["flat_dimensions"] = {
+                    "length": flat_length,
+                    "width": flat_width,
+                }
+
+    category = str(result.get("category") or "").upper()
+    if category in {"PLAAT (VLAK)", "GEBOGEN PLAATWERK", "SHEET_METAL"} and not _has_nonzero_sheet_metrics(result.get("sheet_metrics")):
+        mesh = result.get("mesh") or {}
+        volume = _mesh_volume(mesh)
+        surface_area = _mesh_surface_area(mesh)
+        if volume <= 0:
+            dimensions = result.get("dimensions") or {}
+            volume = float(dimensions.get("length") or 0.0) * float(dimensions.get("width") or 0.0) * float(dimensions.get("height") or 0.0)
+        if volume > 0:
+            result["sheet_metrics"] = _build_sheet_metrics(
+                result,
+                SimpleNamespace(volume=volume, surface_area=surface_area),
+            )
+
+    return result
+
+
 def _source_step_available(job) -> bool:
     return bool(getattr(job, "file_path", None)) and os.path.exists(job.file_path)
 
@@ -350,7 +561,7 @@ def _build_xml_response(result: dict) -> Response:
 
 
 def _part_results_for_download(job) -> list[tuple[str, dict]]:
-    result = getattr(job, "result", None) or {}
+    result = _effective_result_dict(job)
     parts = result.get("parts") or []
     if result.get("is_assembly") and parts:
         part_results: list[tuple[str, dict]] = []
@@ -749,10 +960,10 @@ async def get_job(
         raise HTTPException(status_code=404, detail="Job not found")
 
     if format == "csv" and job.status == "completed" and job.result:
-        return _result_to_csv(job.result)
+        return _result_to_csv(_effective_result_dict(job))
 
     if format == "xml" and job.status == "completed" and job.result:
-        return _build_xml_response(job.result)
+        return _build_xml_response(_effective_result_dict(job))
 
 
     timeline_raw, summary_raw = _resolve_job_timeline(job)
@@ -773,7 +984,7 @@ async def get_job(
     )
 
     if job.status == "completed" and job.result:
-        response.result = AnalysisResult(**job.result)
+        response.result = AnalysisResult(**_effective_result_dict(job))
 
     return response
 
@@ -801,7 +1012,7 @@ async def archive_job(job_id: str):
         timeline_events=[TimelineEvent(**e) for e in timeline_raw],
         error=updated.error,
         unfold=_build_unfold_status(updated),
-        result=AnalysisResult(**updated.result) if updated.status == "completed" and updated.result else None,
+        result=AnalysisResult(**_effective_result_dict(updated)) if updated.status == "completed" and updated.result else None,
     )
     return response
 
@@ -829,7 +1040,7 @@ async def restore_job(job_id: str):
         timeline_events=[TimelineEvent(**e) for e in timeline_raw],
         error=updated.error,
         unfold=_build_unfold_status(updated),
-        result=AnalysisResult(**updated.result) if updated.status == "completed" and updated.result else None,
+        result=AnalysisResult(**_effective_result_dict(updated)) if updated.status == "completed" and updated.result else None,
     )
     return response
 
@@ -932,7 +1143,7 @@ async def download_job_bundle(job_id: str, bundle_name: str):
         raise HTTPException(status_code=409, detail="Analysis job is not completed yet")
 
     if bundle_name == "total-xml":
-        return _build_xml_response(job.result)
+        return _build_xml_response(_effective_result_dict(job))
     if bundle_name == "part-xmls":
         return _build_part_xml_zip(job)
     if bundle_name == "part-steps":
