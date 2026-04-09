@@ -38,6 +38,7 @@ DEFAULT_THRESHOLDS: Dict[str, Any] = {
             "fillet_radius_thickness_factor": 0.40,
             "min_fillet_faces_to_defeature": 30,
             "min_cyl_faces_to_trigger": 100,
+            "skip_sheet_tree_cyl_threshold": 120,
         },
         "k_factor": {
             "default": 0.44,
@@ -156,7 +157,7 @@ def validate_thresholds(thresholds: Dict[str, Any]) -> None:
         )
         if not 0 < frf <= 1:
             raise ValueError("Threshold 'unfold.simplification.fillet_radius_thickness_factor' must be in (0, 1]")
-        for int_key in ("min_fillet_faces_to_defeature", "min_cyl_faces_to_trigger"):
+        for int_key in ("min_fillet_faces_to_defeature", "min_cyl_faces_to_trigger", "skip_sheet_tree_cyl_threshold"):
             int_val = simplification[int_key]
             if isinstance(int_val, bool) or not isinstance(int_val, int):
                 raise ValueError(f"Threshold 'unfold.simplification.{int_key}' must be an integer")

@@ -91,6 +91,9 @@ def _get_unfold_runtime_settings(config_path=None):
             "min_cyl_faces_to_trigger": int(
                 unfold_thresholds.get("simplification", {}).get("min_cyl_faces_to_trigger", 100)
             ),
+            "skip_sheet_tree_cyl_threshold": int(
+                unfold_thresholds.get("simplification", {}).get("skip_sheet_tree_cyl_threshold", 120)
+            ),
         },
     }
 
@@ -1302,47 +1305,19 @@ for solid_idx, solid in enumerate(sorted_solids[:_max_solids]):
     detected_thickness = get_thickness_from_solid(solid)
     print(f"DEBUG: detected thickness={{detected_thickness}}")
 
-    # PRE-SIMPLIFICATION: remove small cylindrical fillet faces before SheetTree.
-    # Parts with many edge fillets (e.g. heavily rounded holes/bends) cause
-    # SheetTree.Bend_analysis to traverse hundreds of non-bend cylindrical faces,
-    # leading to extreme slowdowns. Filter them out proportional to thickness.
+    # COMPLEXITY STRATEGY: Count cylindrical faces to decide which unfolders to try.
+    # SheetTree.Bend_analysis() traverses ALL cylindrical faces — on parts with 100+
+    # edge fillets (e.g. heavily filleted laser-cut holes) this becomes O(n²) and
+    # can take 10-40+ minutes. BRepAlgoAPI_Defeaturing (used by solid.defeaturing())
+    # is similarly slow for >30 faces. Instead: skip SheetTree entirely for complex
+    # parts and rely on SheetMetalNewUnfolder which bypasses Bend_analysis.
     _all_cyl = [f for f in solid.Faces if "Cylinder" in f.Surface.TypeId]
     print(f"DEBUG: {{len(_all_cyl)}} cylindrical faces, {{len(solid.Faces)}} total")
-    _min_cyl_trigger = unfold_simplif_settings["min_cyl_faces_to_trigger"]
-    if len(_all_cyl) > _min_cyl_trigger:
-        # GAP-5: guard against zero/negative thickness before using it as a ratio
-        if detected_thickness <= 0:
-            print(f"DEBUG: WARNING: thickness=0 or negative for solid {{solid_idx}}, skipping defeaturing")
-        else:
-            _t_ref = detected_thickness
-            # Bends require radius >= ~thickness; fillets/hole edges are much smaller.
-            # Use fillet_radius_thickness_factor of thickness as the cut-off, floored at 1.5mm.
-            _fillet_factor = unfold_simplif_settings["fillet_radius_thickness_factor"]
-            _min_fillet_faces = unfold_simplif_settings["min_fillet_faces_to_defeature"]
-            _fillet_max_r = max(_t_ref * _fillet_factor, 1.5)
-            _fillet_fs = []
-            for _f in _all_cyl:
-                try:
-                    if _f.Surface.Radius < _fillet_max_r:
-                        _fillet_fs.append(_f)
-                except Exception:
-                    pass
-            print(f"DEBUG: defeature {{len(_fillet_fs)}}/{{len(_all_cyl)}} cyl (r<{{_fillet_max_r:.1f}}mm)")
-            if len(_fillet_fs) >= _min_fillet_faces:
-                try:
-                    _simplified = solid.defeaturing(_fillet_fs)
-                    # GAP-13: also verify defeaturing didn't produce a degenerate solid
-                    if _simplified and _simplified.Faces and len(_simplified.Faces) < len(solid.Faces):
-                        if _simplified.Volume <= 0:
-                            print(f"DEBUG: defeaturing produced degenerate solid (volume={{_simplified.Volume:.1f}}), keeping original")
-                        else:
-                            print(f"DEBUG: defeaturing OK {{len(solid.Faces)}}→{{len(_simplified.Faces)}} faces")
-                            result["simplified_faces"] = len(_simplified.Faces)
-                            solid = _simplified
-                    else:
-                        print(f"DEBUG: defeaturing returned no improvement, keeping original")
-                except Exception as _def_e:
-                    print(f"DEBUG: defeaturing skipped: {{_def_e}}")
+    _skip_tree_threshold = unfold_simplif_settings["skip_sheet_tree_cyl_threshold"]
+    _skip_sheet_tree = False
+    if len(_all_cyl) > _skip_tree_threshold:
+        _skip_sheet_tree = True
+        print(f"DEBUG: {{len(_all_cyl)}} cyl faces > {{_skip_tree_threshold}} → skip SheetTree (Bend_analysis too slow), new unfolder only")
 
     # Find planar faces for base — ranked to hit the main flat face first.
     # Sheet metal has two dominant parallel faces with the largest area and
@@ -1394,7 +1369,9 @@ for solid_idx, solid in enumerate(sorted_solids[:_max_solids]):
         result["attempts"] += 1
         print(f"DEBUG: trying base face {{base_idx}}, area={{base_info['area']:.1f}}")
         try:
-            should_try_new = unfolder_variant_mode in ("auto", "new")
+            # When _skip_sheet_tree is set, only try the new unfolder — SheetTree.Bend_analysis
+            # is O(n²) on parts with many cylindrical faces (edge fillets) and would time out.
+            should_try_new = unfolder_variant_mode in ("auto", "new") or _skip_sheet_tree
             if should_try_new:
                 try:
                     new_result = _attempt_new_unfolder(obj, base_idx, detected_thickness)
@@ -1407,7 +1384,7 @@ for solid_idx, solid in enumerate(sorted_solids[:_max_solids]):
                 except Exception as new_exc:
                     print(f"DEBUG: new unfolder failed on face {{base_idx}}: {{new_exc}}")
                     _record_error(result, base_idx, "new_unfolder", -3, str(new_exc))
-                    if unfolder_variant_mode == "new":
+                    if unfolder_variant_mode == "new" or _skip_sheet_tree:
                         continue
 
             unfold_tree = build_sheet_tree(solid, base_idx, kFactorLookup, obj)
