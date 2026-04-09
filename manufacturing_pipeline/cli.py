@@ -17,7 +17,6 @@ from datetime import datetime
 
 from manufacturing_pipeline.core.paths import PROJECT_ROOT, DATA_DIR, DB_DIR, PARTS_DIR, OUTPUT_DIR
 from manufacturing_pipeline.core.config import diagnose_freecad_setup
-from manufacturing_pipeline.core.file_utils import find_step_files, select_step_file, get_output_dir, process_single_file
 from manufacturing_pipeline.core.runtime_unfold import run_unfold_to_step
 from manufacturing_pipeline.core.cache import get_file_hash, load_cache, save_cache, cache_result, CACHE_FILE
 from manufacturing_pipeline.core.python_dependencies import (
@@ -34,6 +33,7 @@ def run_quick(step_file, args):
     import shutil
     from manufacturing_pipeline.analysis.io.step_file_io import extract_solids_to_temp_files
     from manufacturing_pipeline.core.runtime_analysis import run_analysis
+    from manufacturing_pipeline.core.file_utils import get_output_dir
 
     output_dir, part_name = get_output_dir(step_file)
 
@@ -108,6 +108,8 @@ def run_quick(step_file, args):
 
 def run_unfold_only(step_file, args):
     """Run only the unfold pipeline through the external FreeCAD runtime."""
+    from manufacturing_pipeline.core.file_utils import get_output_dir
+
     output_dir, part_name = get_output_dir(step_file)
     dxf_output = os.path.join(output_dir, f"{part_name}_flat.dxf")
     flat_step_output = os.path.join(output_dir, f"{part_name}_flat.step")
@@ -220,6 +222,8 @@ def print_freecad_setup_check(json_output: bool = False):
 
 def run_batch(step_files, args, cache):
     """Run batch processing over multiple STEP files."""
+    from manufacturing_pipeline.core.file_utils import process_single_file
+
     try:
         import importlib
         tqdm = importlib.import_module("tqdm").tqdm
@@ -391,6 +395,8 @@ Examples - Batch Mode:
 
 def resolve_step_file(args, step_files):
     """Resolve a single STEP file from args and available files."""
+    from manufacturing_pipeline.core.file_utils import select_step_file
+
     if args.file:
         if os.path.exists(args.file):
             return args.file
@@ -423,6 +429,7 @@ def resolve_step_file(args, step_files):
 
 def main():
     args = parse_args()
+    from manufacturing_pipeline.core.file_utils import find_step_files
 
     # Ensure data directories exist
     os.makedirs(PARTS_DIR, exist_ok=True)
@@ -490,6 +497,10 @@ def main():
     if not step_file:
         return
 
+    if args.unfold_only:
+        run_unfold_only(step_file, args)
+        return
+
     dep_result = ensure_host_python_dependencies(
         install_if_missing=auto_install_python_dependencies_enabled(),
     )
@@ -504,10 +515,6 @@ def main():
     if args.debug:
         from manufacturing_pipeline.core.runtime_reporting import run_debug
         run_debug(step_file)
-        return
-
-    if args.unfold_only:
-        run_unfold_only(step_file, args)
         return
 
     run_quick(step_file, args)
