@@ -10,6 +10,16 @@ from typing import Any, Dict
 def run_freecadcmd_script(freecadcmd: str, script: str, timeout_seconds: int = 300) -> Dict[str, Any]:
     tmp_file = None
     try:
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+        env = os.environ.copy()
+        path_sep = ";" if os.name == "nt" else ":"
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        pythonpath_parts = [repo_root] if os.path.isdir(repo_root) else []
+        if existing_pythonpath:
+            pythonpath_parts.append(existing_pythonpath)
+        if pythonpath_parts:
+            env["PYTHONPATH"] = path_sep.join(pythonpath_parts)
+
         with tempfile.NamedTemporaryFile(
             "w", suffix="_freecad_unfold.py", delete=False, encoding="utf-8"
         ) as handle:
@@ -22,6 +32,7 @@ def run_freecadcmd_script(freecadcmd: str, script: str, timeout_seconds: int = 3
             text=True,
             timeout=timeout_seconds,
             check=False,
+            env=env,
         )
 
         output_lines = [line.strip() for line in (proc.stdout or "").splitlines() if line.strip()]

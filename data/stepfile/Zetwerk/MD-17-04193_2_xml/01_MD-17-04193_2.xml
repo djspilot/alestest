@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CalculationResults>
+  <CalculationResult>
+    <Sheet_PartName>MD-17-04193_2</Sheet_PartName>
+    <Sheet_Thickness>1</Sheet_Thickness>
+    <Sheet_NrBends>2</Sheet_NrBends>
+    <Sheet_NrHoles>10</Sheet_NrHoles>
+    <Sheet_HoleTypes>cylindrical_cylindrical_cylindrical_cylindrical_cylindrical_closed_contour_irregular_contour_irregular_contour_irregular_contour_closed_contour</Sheet_HoleTypes>
+    <Sheet_ThreadedHoles>0</Sheet_ThreadedHoles>
+    <Sheet_CountersunkHoles>0</Sheet_CountersunkHoles>
+    <Sheet_CountersunkAngles />
+    <Sheet_Material>Unknown</Sheet_Material>
+    <Sheet_Type>complex</Sheet_Type>
+    <Sheet_BoxX>1626</Sheet_BoxX>
+    <Sheet_BoxY>73.97</Sheet_BoxY>
+    <Sheet_BoxZ>1</Sheet_BoxZ>
+    <Sheet_FlatX>1626</Sheet_FlatX>
+    <Sheet_FlatY>73.97</Sheet_FlatY>
+    <Sheet_UnfoldSuccess>True</Sheet_UnfoldSuccess>
+    <Sheet_BendAngles />
+    <Sheet_BendInnerRadii />
+    <Sheet_HoleContours>8.5_8.5_8.5_9_9</Sheet_HoleContours>
+    <Sheet_HoleRadii>4.25_4.25_4.25_4.5_4.5</Sheet_HoleRadii>
+    <Sheet_HoleContoursXYZ />
+    <Sheet_Volume>120272.9</Sheet_Volume>
+    <Sheet_TopArea>0</Sheet_TopArea>
+    <Sheet_BoxArea>0</Sheet_BoxArea>
+    <Sheet_TotalArea>0</Sheet_TotalArea>
+    <Sheet_OuterContour>0</Sheet_OuterContour>
+    <Sheet_TotalContour>0</Sheet_TotalContour>
+    <Sheet_Weight>944.14</Sheet_Weight>
+  </CalculationResult>
+</CalculationResults>

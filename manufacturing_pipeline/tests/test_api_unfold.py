@@ -1,10 +1,12 @@
 from pathlib import Path
+from xml.etree import ElementTree
 
 from fastapi.testclient import TestClient
 
 from manufacturing_pipeline.api.app import app
 from manufacturing_pipeline.api import routes as routes_module
 from manufacturing_pipeline.api.job_manager import JobManager
+from manufacturing_pipeline.reporting.xml_exporter import _format_float
 
 
 def test_job_archive_roundtrip_and_default_listing(tmp_path):
@@ -217,6 +219,120 @@ def test_unfold_status_filters_zero_length_segments_before_counting(tmp_path, mo
     step_path = upload_dir / "job-filter" / "part.step"
     step_path.parent.mkdir(parents=True, exist_ok=True)
     step_path.write_text("ISO-10303-21;")
+
+
+def test_job_json_and_xml_share_core_sheet_fields(tmp_path, monkeypatch):
+    db_path = tmp_path / "api.db"
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+
+    test_jobs = JobManager(str(db_path))
+    monkeypatch.setattr(routes_module, "jobs", test_jobs)
+    monkeypatch.setattr(routes_module, "UPLOAD_DIR", str(upload_dir))
+
+    step_path = upload_dir / "job-consistency" / "part.step"
+    step_path.parent.mkdir(parents=True, exist_ok=True)
+    step_path.write_text("ISO-10303-21;")
+
+    job = test_jobs.create("job-consistency", str(step_path), file_name="part.step")
+    test_jobs.mark_completed(
+        job.job_id,
+        {
+            "file": "part.step",
+            "success": True,
+            "category": "SHEET_METAL",
+            "part_type": "plaat",
+            "thickness": 2.0,
+            "dimensions": {"length": 100.0, "width": 50.0, "height": 2.0},
+            "production": {"holes_total": 0, "bends_total": 0, "bends_up": 0, "bends_down": 0},
+            "flat_dimensions": {"length": 90.0, "width": 45.0},
+            "sheet_metrics": {
+                "volume": 0.0,
+                "top_area": 0.0,
+                "area_no_holes": 0.0,
+                "total_area": 0.0,
+                "outer_contour": 0.0,
+                "total_contour": 0.0,
+            },
+            "visuals": {
+                "holes": {
+                    "items": [
+                        {
+                            "id": "hole-1",
+                            "status": "accepted",
+                            "type": "round",
+                            "diameter": 10.0,
+                            "perimeter": 31.4159265359,
+                        }
+                    ]
+                },
+                "unfold": {
+                    "success": True,
+                    "flat_length": 90.0,
+                    "flat_width": 45.0,
+                    "fold_lines": 2,
+                    "bends_logical": [
+                        {"id": 1, "type": "up", "angle": 90.0, "radius": 5.0},
+                        {"id": 2, "type": "down", "angle": 45.0, "radius": 3.0},
+                    ],
+                },
+            },
+        },
+    )
+    test_jobs.mark_unfold_completed(
+        job.job_id,
+        {
+            "success": True,
+            "flat_length": 120.0,
+            "flat_width": 55.0,
+            "fold_lines": 2,
+            "bends_logical": [
+                {"id": 1, "type": "up", "angle": 0.0, "radius": 0.0},
+                {"id": 2, "type": "down", "angle": 0.0, "radius": 0.0},
+            ],
+        },
+    )
+
+    client = TestClient(app)
+
+    json_response = client.get(f"/api/v1/jobs/{job.job_id}")
+    assert json_response.status_code == 200
+    json_result = json_response.json()["result"]
+
+    assert json_result["production"]["bends_total"] == 2
+    assert json_result["production"]["bends_up"] == 1
+    assert json_result["production"]["bends_down"] == 1
+    assert json_result["flat_dimensions"] == {"length": 120.0, "width": 55.0}
+    assert json_result["visuals"]["unfold"]["bends_logical"] == [
+        {"id": 1, "type": "up", "angle": 90.0, "radius": 5.0},
+        {"id": 2, "type": "down", "angle": 45.0, "radius": 3.0},
+    ]
+
+    xml_response = client.get(f"/api/v1/jobs/{job.job_id}?format=xml")
+    assert xml_response.status_code == 200
+
+    xml_root = ElementTree.fromstring(xml_response.content)
+    calc = xml_root.find("CalculationResult")
+    assert calc is not None
+
+    sheet_metrics = json_result["sheet_metrics"]
+    bends = json_result["visuals"]["unfold"]["bends_logical"]
+    expected_fields = {
+        "Sheet_NrBends": str(json_result["production"]["bends_total"]),
+        "Sheet_BendAngles": "_".join(_format_float(bend["angle"]) for bend in bends),
+        "Sheet_BendInnerRadii": "_".join(_format_float(bend["radius"]) for bend in bends),
+        "Sheet_FlatX": _format_float(json_result["flat_dimensions"]["length"]),
+        "Sheet_FlatY": _format_float(json_result["flat_dimensions"]["width"]),
+        "Sheet_Volume": _format_float(sheet_metrics["volume"]),
+        "Sheet_TopArea": _format_float(sheet_metrics["top_area"]),
+        "Sheet_AreaNoHoles": _format_float(sheet_metrics["area_no_holes"]),
+        "Sheet_TotalArea": _format_float(sheet_metrics["total_area"]),
+        "Sheet_OuterContour": _format_float(sheet_metrics["outer_contour"]),
+        "Sheet_TotalContour": _format_float(sheet_metrics["total_contour"]),
+    }
+
+    for field_name, expected_value in expected_fields.items():
+        assert calc.findtext(field_name, "") == expected_value
 
     job = test_jobs.create("job-filter", str(step_path), file_name="part.step")
     test_jobs.mark_completed(job.job_id, {"file": "part.step", "success": True})

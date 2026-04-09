@@ -7,7 +7,6 @@ import json
 import subprocess
 import threading
 import queue
-import time
 import uuid
 import atexit
 from types import SimpleNamespace
@@ -81,315 +80,6 @@ def _get_unfold_runtime_settings(config_path=None):
     }
 
 
-def _merge_fold_segments_runtime(bend_line_segments, bends_logical, fold_merge_settings=None):
-    settings = fold_merge_settings or _get_unfold_runtime_settings()["fold_merge"]
-    normalized_segments = []
-    logical_by_index = {}
-    max_index = -1
-
-    for segment in bend_line_segments or []:
-        try:
-            axis = str(segment.get("axis") or "").upper()
-            idx = int(segment.get("index", -1))
-            center = segment.get("center") or [0.0, 0.0, 0.0]
-            axis_span = segment.get("axis_span") or [0.0, 0.0]
-            if axis not in ("X", "Y") or idx < 0 or len(axis_span) < 2:
-                continue
-
-            line_offset = float(center[1] if axis == "X" else center[0])
-            normalized_segments.append(
-                {
-                    "index": idx,
-                    "axis": axis,
-                    "line_offset": line_offset,
-                    "axis_span": [float(axis_span[0]), float(axis_span[1])],
-                    "center": [float(center[0]), float(center[1]), float(center[2])],
-                    "length": float(segment.get("length") or 0.0),
-                    "start": segment.get("start"),
-                    "end": segment.get("end"),
-                }
-            )
-            logical_by_index[idx] = bends_logical[idx] if idx < len(bends_logical) else {}
-            max_index = max(max_index, idx)
-        except Exception:
-            continue
-
-    if not normalized_segments:
-        return [], [], []
-
-    bend_angles = [0.0] * (max_index + 1)
-    bend_radii = [0.0] * (max_index + 1)
-    bend_lengths = [0.0] * (max_index + 1)
-    for segment in normalized_segments:
-        idx = segment["index"]
-        logical = logical_by_index.get(idx) or {}
-        angle = logical.get("angle")
-        radius = logical.get("radius")
-        bend_angles[idx] = float(angle) if angle is not None else 0.0
-        bend_radii[idx] = float(radius) if radius is not None else 0.0
-        bend_lengths[idx] = float(segment.get("length") or 0.0)
-
-    merged_angles, merged_radii, _, merged_groups = freecad_unfold._merge_bends_by_collinear_segments(
-        bend_angles,
-        bend_radii,
-        bend_lengths,
-        normalized_segments,
-        offset_tol=settings["offset_tol_mm"],
-        gap_tol=settings["gap_tol_mm"],
-        overlap_tol=settings["overlap_tol_mm"],
-        angle_tol=settings["angle_tol_deg"],
-        radius_tol=settings["radius_tol_mm"],
-    )
-    if not merged_groups:
-        return [], [], []
-
-    segments_by_index = {segment["index"]: segment for segment in normalized_segments}
-    merged_details = []
-    merged_bends = []
-
-    for group_pos, group in enumerate(merged_groups):
-        members = sorted(int(idx) for idx in group.get("segment_indices") or [])
-        cluster_segments = [segments_by_index[idx] for idx in members if idx in segments_by_index]
-        if not cluster_segments:
-            continue
-
-        axis = str(group.get("axis") or cluster_segments[0].get("axis") or "X").upper()
-        centers = [segment["center"] for segment in cluster_segments]
-        span_min = min(float(min(segment["axis_span"])) for segment in cluster_segments)
-        span_max = max(float(max(segment["axis_span"])) for segment in cluster_segments)
-
-        points = []
-        for segment in cluster_segments:
-            for point_key in ("start", "end"):
-                point = segment.get(point_key)
-                if isinstance(point, (list, tuple)) and len(point) >= 3:
-                    points.append((float(point[0]), float(point[1]), float(point[2])))
-
-        avg_x = sum(float(center[0]) for center in centers) / len(centers)
-        avg_y = sum(float(center[1]) for center in centers) / len(centers)
-        avg_z = sum(float(center[2]) for center in centers) / len(centers)
-
-        if axis == "X":
-            coords = [point[0] for point in points] if points else [span_min, span_max]
-            start = (min(coords), avg_y, avg_z)
-            end = (max(coords), avg_y, avg_z)
-            center = ((start[0] + end[0]) / 2.0, avg_y, avg_z)
-        else:
-            coords = [point[1] for point in points] if points else [span_min, span_max]
-            start = (avg_x, min(coords), avg_z)
-            end = (avg_x, max(coords), avg_z)
-            center = (avg_x, (start[1] + end[1]) / 2.0, avg_z)
-
-        line_length = math.dist(start, end)
-        source_idx = members[0]
-        logical = logical_by_index.get(source_idx) or {}
-
-        merged_details.append(
-            {
-                "id": len(merged_details) + 1,
-                "length": line_length,
-                "center": center,
-                "axis": axis.lower(),
-                "axis_span": (span_min, span_max),
-                "start": start,
-                "end": end,
-                "segment_indices": [idx + 1 for idx in members],
-            }
-        )
-        merged_bends.append(
-            {
-                "id": len(merged_bends) + 1,
-                "type": logical.get("type"),
-                "angle": merged_angles[group_pos] if group_pos < len(merged_angles) else logical.get("angle"),
-                "radius": merged_radii[group_pos] if group_pos < len(merged_radii) else logical.get("radius"),
-            }
-        )
-
-    return merged_details, merged_bends, merged_groups
-
-
-def _segment_measured_length(segment):
-    start = segment.get("start")
-    end = segment.get("end")
-    if isinstance(start, (list, tuple)) and isinstance(end, (list, tuple)) and len(start) >= 3 and len(end) >= 3:
-        try:
-            return math.dist(
-                (float(start[0]), float(start[1]), float(start[2])),
-                (float(end[0]), float(end[1]), float(end[2])),
-            )
-        except Exception:
-            pass
-
-    axis_span = segment.get("axis_span") or []
-    if len(axis_span) >= 2:
-        try:
-            return abs(float(axis_span[1]) - float(axis_span[0]))
-        except Exception:
-            pass
-
-    try:
-        return abs(float(segment.get("length") or 0.0))
-    except Exception:
-        return 0.0
-
-
-def _filter_fold_segments_runtime(bend_line_segments, min_length=0.1):
-    filtered_segments = []
-    discarded_count = 0
-
-    for fallback_index, segment in enumerate(bend_line_segments or []):
-        try:
-            axis = str(segment.get("axis") or "").upper()
-            idx = int(segment.get("index", fallback_index))
-            axis_span = segment.get("axis_span") or []
-            center = segment.get("center") or [0.0, 0.0, 0.0]
-            if axis not in ("X", "Y") or len(axis_span) < 2:
-                discarded_count += 1
-                continue
-
-            span_min = float(min(axis_span[0], axis_span[1]))
-            span_max = float(max(axis_span[0], axis_span[1]))
-            measured_length = _segment_measured_length(segment)
-            if measured_length <= float(min_length) or abs(span_max - span_min) <= float(min_length):
-                discarded_count += 1
-                continue
-
-            filtered_segments.append(
-                {
-                    "index": idx,
-                    "axis": axis,
-                    "center": [
-                        float(center[0]) if len(center) > 0 else 0.0,
-                        float(center[1]) if len(center) > 1 else 0.0,
-                        float(center[2]) if len(center) > 2 else 0.0,
-                    ],
-                    "length": float(segment.get("length") or measured_length),
-                    "axis_span": [span_min, span_max],
-                    "start": segment.get("start"),
-                    "end": segment.get("end"),
-                }
-            )
-        except Exception:
-            discarded_count += 1
-
-    return filtered_segments, discarded_count
-
-
-def _build_fold_detail_from_group_runtime(group, segments, index):
-    member_indexes = []
-    for value in group.get("segment_indices") or []:
-        try:
-            member_indexes.append(int(value))
-        except Exception:
-            continue
-
-    members = []
-    for member_index in member_indexes:
-        for fallback_index, segment in enumerate(segments or []):
-            try:
-                segment_index = int(segment.get("index", fallback_index))
-            except Exception:
-                segment_index = fallback_index
-            if segment_index == member_index:
-                members.append(segment)
-                break
-
-    if not members:
-        return None
-
-    first = members[0]
-    center = first.get("center") or [0.0, 0.0, 0.0]
-    fixed_x = float(center[0]) if len(center) > 0 else 0.0
-    fixed_y = float(center[1]) if len(center) > 1 else 0.0
-    fixed_z = float(center[2]) if len(center) > 2 else 0.0
-    axis = str(group.get("axis") or first.get("axis") or "Y").upper()
-    span_values = []
-    for segment in members:
-        axis_span = segment.get("axis_span") or []
-        if len(axis_span) >= 2:
-            try:
-                span_values.extend([float(axis_span[0]), float(axis_span[1])])
-            except Exception:
-                continue
-    if not span_values:
-        return None
-
-    if axis == "X":
-        start = [min(span_values), fixed_y, fixed_z]
-        end = [max(span_values), fixed_y, fixed_z]
-    else:
-        start = [fixed_x, min(span_values), fixed_z]
-        end = [fixed_x, max(span_values), fixed_z]
-
-    return {
-        "id": int(group.get("id") or (index + 1)),
-        "axis": axis.lower(),
-        "center": [
-            (float(start[0]) + float(end[0])) / 2.0,
-            (float(start[1]) + float(end[1])) / 2.0,
-            (float(start[2]) + float(end[2])) / 2.0,
-        ],
-        "start": start,
-        "end": end,
-        "length": _segment_measured_length({"start": start, "end": end}),
-        "segment_indices": [member_index + 1 for member_index in member_indexes],
-    }
-
-
-def canonicalize_unfold_payload(result, fold_merge_settings=None):
-    payload = dict(result or {})
-    original_segments = list(payload.get("bend_line_segments") or [])
-    filtered_segments, discarded_count = _filter_fold_segments_runtime(original_segments)
-    if original_segments and not filtered_segments:
-        # Backward-compatibility path for minimal/mock payloads that expose raw
-        # bend_line_segments without geometric merge metadata like axis_span.
-        has_merge_geometry = any(
-            (segment.get("axis") or "").upper() in {"X", "Y"} or len(segment.get("axis_span") or []) >= 2
-            for segment in original_segments
-            if isinstance(segment, dict)
-        )
-        if not has_merge_geometry:
-            filtered_segments = original_segments
-            discarded_count = 0
-    payload["bend_line_segments"] = filtered_segments
-
-    existing_raw_fold_lines = payload.get("raw_fold_lines")
-    if existing_raw_fold_lines is None:
-        payload["raw_fold_lines"] = len(original_segments)
-
-    if discarded_count:
-        payload["discarded_fold_segment_count"] = discarded_count
-
-    merged_details, merged_bends, merged_groups = _merge_fold_segments_runtime(
-        filtered_segments,
-        payload.get("bends_logical") or [],
-        fold_merge_settings=fold_merge_settings,
-    )
-
-    if merged_details:
-        payload["fold_details"] = merged_details
-        payload["bends_logical"] = merged_bends
-        payload["bend_line_groups"] = merged_groups
-        payload["fold_lines"] = len(merged_details)
-        return payload
-
-    groups = payload.get("bend_line_groups") or []
-    if not payload.get("fold_details") and groups and filtered_segments:
-        payload["fold_details"] = [
-            detail
-            for index, group in enumerate(groups)
-            if (detail := _build_fold_detail_from_group_runtime(group, filtered_segments, index)) is not None
-        ]
-
-    if not payload.get("bends_logical") and payload.get("fold_details"):
-        payload["bends_logical"] = [{"id": detail.get("id")} for detail in payload["fold_details"]]
-
-    if payload.get("fold_lines") in (None, 0) and payload.get("fold_details"):
-        payload["fold_lines"] = len(payload["fold_details"])
-
-    return payload
-
-
 _PERSISTENT_FREECAD_WORKERS = {}
 _PERSISTENT_FREECAD_WORKERS_LOCK = threading.Lock()
 
@@ -411,7 +101,8 @@ class _PersistentFreeCADWorkerClient:
         env = _build_freecad_subprocess_env(self._sys_config)
         env["FREECAD_UNFOLD_MODE"] = "direct"
         env["FREECAD_UNFOLDER_VARIANT"] = _unfolder_variant_mode()
-        popen_kwargs: dict = dict(
+        self._process = subprocess.Popen(
+            [freecad_python, "-m", "manufacturing_pipeline.tools.freecad_unfold_worker"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -419,30 +110,15 @@ class _PersistentFreeCADWorkerClient:
             env=env,
             bufsize=1,
         )
-        if sys.platform == "win32":
-            # Suppress the console window that Windows would otherwise open
-            popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
-        self._process = subprocess.Popen(
-            [freecad_python, "-m", "manufacturing_pipeline.tools.freecad_unfold_worker"],
-            **popen_kwargs,
-        )
-        # FreeCAD may print non-JSON startup messages (e.g. "Sheet Metal workbench loaded")
-        # before the JSON ready handshake — skip them.
-        ready = None
-        for _ in range(50):
-            raw = self._process.stdout.readline() if self._process.stdout else ""
-            line = raw.strip()
-            if not line:
-                break
-            try:
-                msg = json.loads(line)
-                if msg.get("type") == "ready":
-                    ready = msg
-                    break
-            except Exception:
-                continue
-        if ready is None:
+        ready_line = self._process.stdout.readline().strip() if self._process.stdout else ""
+        if not ready_line:
             raise RuntimeError("FreeCAD worker gaf geen startup handshake terug")
+        try:
+            ready = json.loads(ready_line)
+        except Exception as exc:
+            raise RuntimeError(f"Ongeldige worker handshake: {ready_line}") from exc
+        if ready.get("type") != "ready":
+            raise RuntimeError(f"Onverwachte worker handshake: {ready_line}")
         self._reader_thread = threading.Thread(target=self._read_stdout_loop, daemon=True)
         self._reader_thread.start()
 
@@ -546,6 +222,7 @@ def _get_persistent_freecad_worker(sys_config: SystemConfig) -> _PersistentFreeC
 def _build_freecad_subprocess_env(sys_config: SystemConfig) -> dict:
     """Build an env that can resolve managed FreeCAD binaries and DLLs."""
     env = os.environ.copy()
+    repo_root = os.path.dirname(PIPELINE_DIR)
 
     extra_path_parts = []
     runtime_root = ""
@@ -568,6 +245,14 @@ def _build_freecad_subprocess_env(sys_config: SystemConfig) -> dict:
         path_sep = ";" if sys.platform.startswith("win") else ":"
         existing = env.get("PATH", "")
         env["PATH"] = path_sep.join(extra_path_parts + ([existing] if existing else []))
+
+    python_path_sep = ";" if sys.platform.startswith("win") else ":"
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    pythonpath_parts = [repo_root] if os.path.isdir(repo_root) else []
+    if existing_pythonpath:
+        pythonpath_parts.append(existing_pythonpath)
+    if pythonpath_parts:
+        env["PYTHONPATH"] = python_path_sep.join(pythonpath_parts)
 
     env_updates = {
         "FREECAD_PATH": sys_config.freecad_path,
@@ -742,8 +427,6 @@ unfolder_variant_mode = os.environ.get("FREECAD_UNFOLDER_VARIANT", "auto").strip
 
 if platform.system() == "Darwin":
     freecad_user_mod = os.path.expanduser("~/Library/Application Support/FreeCAD/Mod")
-elif platform.system() == "Windows":
-    freecad_user_mod = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "FreeCAD", "Mod")
 else:
     freecad_user_mod = os.path.expanduser("~/.local/share/FreeCAD/Mod")
 
@@ -882,16 +565,6 @@ def _merge_fold_segments(bend_line_segments, bends_logical):
 
     usable.sort(key=lambda item: (item["axis"], round(item["line_offset"], 3), item["span_min"]))
 
-    def _effective_gap_tol(prev_span, next_span):
-        prev_len = max(0.0, float(prev_span[1]) - float(prev_span[0]))
-        next_len = max(0.0, float(next_span[1]) - float(next_span[0]))
-        dynamic_tol = max(
-            float({unfold_settings["fold_merge"]["gap_tol_mm"]}),
-            2.0 * max(prev_len, next_len),
-            5.0 * min(prev_len, next_len),
-        )
-        return min(dynamic_tol, 500.0)
-
     clusters = []
     current = None
     for item in usable:
@@ -912,11 +585,7 @@ def _merge_fold_segments(bend_line_segments, bends_logical):
         last_item = current["items"][-1]
         overlap = max(0.0, min(last_item["span_max"], item["span_max"]) - max(last_item["span_min"], item["span_min"]))
         gap = max(0.0, item["span_min"] - last_item["span_max"])
-        gap_limit = _effective_gap_tol(
-            (last_item["span_min"], last_item["span_max"]),
-            (item["span_min"], item["span_max"]),
-        )
-        extension_ok = overlap <= {unfold_settings["fold_merge"]["overlap_tol_mm"]} and gap <= gap_limit
+        extension_ok = overlap <= {unfold_settings["fold_merge"]["overlap_tol_mm"]} and gap <= {unfold_settings["fold_merge"]["gap_tol_mm"]}
 
         if same_line and angle_ok and radius_ok and extension_ok:
             current["items"].append(item)
@@ -1185,43 +854,16 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
     detected_thickness = get_thickness_from_solid(solid)
     print(f"DEBUG: detected thickness={{detected_thickness}}")
 
-    # Find planar faces for base — ranked to hit the main flat face first.
-    # Sheet metal has two dominant parallel faces with the largest area and
-    # matching normals (roughly antiparallel). Prefer faces whose normals are
-    # near-parallel to the dominant cluster; deprioritise thin edge/side faces.
+    # Find planar faces for base
     planar_faces = []
     for i, face in enumerate(solid.Faces):
         try:
             if "Plane" in face.Surface.TypeId:
-                n = face.Surface.Axis
-                planar_faces.append({{"index": i, "area": face.Area, "normal": (n.x, n.y, n.z)}})
+                planar_faces.append({{"index": i, "area": face.Area}})
         except:
             pass
-
-    if planar_faces:
-        max_area = planar_faces[0]["area"] if planar_faces else 1
-        # Find the dominant normal: the normal of the single largest face
-        planar_faces.sort(key=lambda x: x["area"], reverse=True)
-        max_area = planar_faces[0]["area"]
-        dom = planar_faces[0]["normal"]
-
-        def _normal_score(f):
-            # dot product with dominant normal — faces that are parallel (|dot|≈1)
-            # to the largest face score highest; edge faces (dot≈0) score low
-            nx, ny, nz = f["normal"]
-            dot = abs(nx * dom[0] + ny * dom[1] + nz * dom[2])
-            return dot
-
-        # Sort: first by normal alignment (main flat faces first), then by area
-        planar_faces.sort(key=lambda f: (_normal_score(f), f["area"]), reverse=True)
-    print(f"DEBUG: {{len(planar_faces)}} planar faces (ranked by normal alignment + area)")
-
-    # Create FreeCAD document ONCE per solid — reused across all face attempts.
-    # obj.Shape only needs to be assigned once since the solid doesn't change.
-    doc = FreeCAD.newDocument("UnfoldDoc")
-    obj = doc.addObject("Part::Feature", "SheetPart")
-    obj.Shape = solid
-    doc.recompute()
+    planar_faces.sort(key=lambda x: x["area"], reverse=True)
+    print(f"DEBUG: {{len(planar_faces)}} planar faces")
 
     # Try the configured number of largest faces to find the best base for unfolding
     for base_info in planar_faces[:{unfold_settings["candidate_limits"]["max_base_faces_per_solid"]}]:
@@ -1229,6 +871,11 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
         result["attempts"] += 1
         print(f"DEBUG: trying base face {{base_idx}}, area={{base_info['area']:.1f}}")
         try:
+            doc = FreeCAD.newDocument("UnfoldDoc")
+            obj = doc.addObject("Part::Feature", "SheetPart")
+            obj.Shape = solid
+            doc.recompute()
+
             should_try_new = unfolder_variant_mode in ("auto", "new")
             if should_try_new:
                 try:
@@ -1238,11 +885,13 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
                     new_result["first_traceback"] = result.get("first_traceback")
                     result = new_result
                     best_score = max(best_score, len(new_result.get("bend_line_segments") or []))
+                    FreeCAD.closeDocument("UnfoldDoc")
                     continue
                 except Exception as new_exc:
                     print(f"DEBUG: new unfolder failed on face {{base_idx}}: {{new_exc}}")
                     _record_error(result, base_idx, "new_unfolder", -3, str(new_exc))
                     if unfolder_variant_mode == "new":
+                        FreeCAD.closeDocument("UnfoldDoc")
                         continue
 
             unfold_tree = build_sheet_tree(solid, base_idx, kFactorLookup, obj)
@@ -1255,6 +904,7 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
                     unfold_tree.error_code,
                     UNFOLD_ERROR_MESSAGES.get(unfold_tree.error_code, f"Onbekende fout ({{unfold_tree.error_code}})"),
                 )
+                FreeCAD.closeDocument("UnfoldDoc")
                 continue
 
             unfold_tree.Bend_analysis(base_idx, None)
@@ -1422,22 +1072,19 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
                         -2,
                         "Unfold leverde geen vlak patroon op voor dit basisvlak",
                     )
-
+                            
+            FreeCAD.closeDocument("UnfoldDoc")
         except Exception as e:
             print(f"DEBUG EXCEPTION on face {{base_idx}}: {{type(e).__name__}}: {{e}}")
             tb = traceback.format_exc()
             if not result.get("first_traceback"):
                 result["first_traceback"] = tb
             _record_error(result, base_idx, "exception", -1, f"{{type(e).__name__}}: {{e}}", tb=tb)
-
-        # Stop as soon as we have a successful result
-        if result.get("success"):
-            break
-
-    try:
-        FreeCAD.closeDocument("UnfoldDoc")
-    except:
-        pass
+            try:
+                FreeCAD.closeDocument("UnfoldDoc")
+            except:
+                pass
+            continue
 
 if not result.get("success"):
     exception_details = [d for d in result["error_details"] if d.get("stage") == "exception"]
@@ -1708,14 +1355,315 @@ def _run_direct_python_worker_attempt(step_file, output_dir, part_name, sys_conf
             "worker_transport_error": True,
         }
 
-    # If worker ran but made 0 attempts, its internal routing failed (e.g. it
-    # re-launched FreeCADCmd as a subprocess which can't find manufacturing_pipeline).
-    # Treat this as a transport error so the caller falls back to the embedded script.
-    if not payload.get("success") and (payload.get("attempts") or 0) == 0:
-        payload["worker_transport_error"] = True
-
     payload.setdefault("runtime_source", "direct-freecad-python")
     payload["worker_mode"] = "persistent"
+    return payload
+
+
+def _merge_fold_segments_runtime(bend_line_segments, bends_logical, fold_merge_settings=None):
+    settings = fold_merge_settings or _get_unfold_runtime_settings()["fold_merge"]
+    normalized_segments = []
+    logical_by_index = {}
+    max_index = -1
+
+    for segment in bend_line_segments or []:
+        try:
+            axis = str(segment.get("axis") or "").upper()
+            idx = int(segment.get("index", -1))
+            center = segment.get("center") or [0.0, 0.0, 0.0]
+            axis_span = segment.get("axis_span") or [0.0, 0.0]
+            if axis not in ("X", "Y") or idx < 0 or len(axis_span) < 2:
+                continue
+
+            line_offset = float(center[1] if axis == "X" else center[0])
+            normalized_segments.append(
+                {
+                    "index": idx,
+                    "axis": axis,
+                    "line_offset": line_offset,
+                    "axis_span": [float(axis_span[0]), float(axis_span[1])],
+                    "center": [float(center[0]), float(center[1]), float(center[2])],
+                    "length": float(segment.get("length") or 0.0),
+                    "start": segment.get("start"),
+                    "end": segment.get("end"),
+                }
+            )
+            logical_by_index[idx] = bends_logical[idx] if idx < len(bends_logical) else {}
+            max_index = max(max_index, idx)
+        except Exception:
+            continue
+
+    if not normalized_segments:
+        return [], [], []
+
+    bend_angles = [0.0] * (max_index + 1)
+    bend_radii = [0.0] * (max_index + 1)
+    bend_lengths = [0.0] * (max_index + 1)
+    for segment in normalized_segments:
+        idx = segment["index"]
+        logical = logical_by_index.get(idx) or {}
+        angle = logical.get("angle")
+        radius = logical.get("radius")
+        bend_angles[idx] = float(angle) if angle is not None else 0.0
+        bend_radii[idx] = float(radius) if radius is not None else 0.0
+        bend_lengths[idx] = float(segment.get("length") or 0.0)
+
+    merged_angles, merged_radii, _, merged_groups = freecad_unfold._merge_bends_by_collinear_segments(
+        bend_angles,
+        bend_radii,
+        bend_lengths,
+        normalized_segments,
+        offset_tol=settings["offset_tol_mm"],
+        gap_tol=settings["gap_tol_mm"],
+        overlap_tol=settings["overlap_tol_mm"],
+        angle_tol=settings["angle_tol_deg"],
+        radius_tol=settings["radius_tol_mm"],
+    )
+    if not merged_groups:
+        return [], [], []
+
+    segments_by_index = {segment["index"]: segment for segment in normalized_segments}
+    merged_details = []
+    merged_bends = []
+
+    for group_pos, group in enumerate(merged_groups):
+        members = sorted(int(idx) for idx in group.get("segment_indices") or [])
+        cluster_segments = [segments_by_index[idx] for idx in members if idx in segments_by_index]
+        if not cluster_segments:
+            continue
+
+        axis = str(group.get("axis") or cluster_segments[0].get("axis") or "X").upper()
+        centers = [segment["center"] for segment in cluster_segments]
+        span_min = min(float(min(segment["axis_span"])) for segment in cluster_segments)
+        span_max = max(float(max(segment["axis_span"])) for segment in cluster_segments)
+
+        points = []
+        for segment in cluster_segments:
+            for point_key in ("start", "end"):
+                point = segment.get(point_key)
+                if isinstance(point, (list, tuple)) and len(point) >= 3:
+                    points.append((float(point[0]), float(point[1]), float(point[2])))
+
+        avg_x = sum(float(center[0]) for center in centers) / len(centers)
+        avg_y = sum(float(center[1]) for center in centers) / len(centers)
+        avg_z = sum(float(center[2]) for center in centers) / len(centers)
+
+        if axis == "X":
+            coords = [point[0] for point in points] if points else [span_min, span_max]
+            start = (min(coords), avg_y, avg_z)
+            end = (max(coords), avg_y, avg_z)
+            center = ((start[0] + end[0]) / 2.0, avg_y, avg_z)
+        else:
+            coords = [point[1] for point in points] if points else [span_min, span_max]
+            start = (avg_x, min(coords), avg_z)
+            end = (avg_x, max(coords), avg_z)
+            center = (avg_x, (start[1] + end[1]) / 2.0, avg_z)
+
+        line_length = math.dist(start, end)
+        source_idx = members[0]
+        logical = logical_by_index.get(source_idx) or {}
+
+        merged_details.append(
+            {
+                "id": len(merged_details) + 1,
+                "length": line_length,
+                "center": center,
+                "axis": axis.lower(),
+                "axis_span": (span_min, span_max),
+                "start": start,
+                "end": end,
+                "segment_indices": [idx + 1 for idx in members],
+            }
+        )
+        merged_bends.append(
+            {
+                "id": len(merged_bends) + 1,
+                "type": logical.get("type"),
+                "angle": merged_angles[group_pos] if group_pos < len(merged_angles) else logical.get("angle"),
+                "radius": merged_radii[group_pos] if group_pos < len(merged_radii) else logical.get("radius"),
+            }
+        )
+
+    return merged_details, merged_bends, merged_groups
+
+
+def _segment_measured_length(segment):
+    start = segment.get("start")
+    end = segment.get("end")
+    if isinstance(start, (list, tuple)) and isinstance(end, (list, tuple)) and len(start) >= 3 and len(end) >= 3:
+        try:
+            return math.dist(
+                (float(start[0]), float(start[1]), float(start[2])),
+                (float(end[0]), float(end[1]), float(end[2])),
+            )
+        except Exception:
+            pass
+
+    axis_span = segment.get("axis_span") or []
+    if len(axis_span) >= 2:
+        try:
+            return abs(float(axis_span[1]) - float(axis_span[0]))
+        except Exception:
+            pass
+
+    try:
+        return abs(float(segment.get("length") or 0.0))
+    except Exception:
+        return 0.0
+
+
+def _filter_fold_segments_runtime(bend_line_segments, min_length=0.1):
+    filtered_segments = []
+    discarded_count = 0
+
+    for fallback_index, segment in enumerate(bend_line_segments or []):
+        try:
+            axis = str(segment.get("axis") or "").upper()
+            idx = int(segment.get("index", fallback_index))
+            axis_span = segment.get("axis_span") or []
+            center = segment.get("center") or [0.0, 0.0, 0.0]
+            if axis not in ("X", "Y") or len(axis_span) < 2:
+                discarded_count += 1
+                continue
+
+            span_min = float(min(axis_span[0], axis_span[1]))
+            span_max = float(max(axis_span[0], axis_span[1]))
+            measured_length = _segment_measured_length(segment)
+            if measured_length <= float(min_length) or abs(span_max - span_min) <= float(min_length):
+                discarded_count += 1
+                continue
+
+            filtered_segments.append(
+                {
+                    "index": idx,
+                    "axis": axis,
+                    "center": [
+                        float(center[0]) if len(center) > 0 else 0.0,
+                        float(center[1]) if len(center) > 1 else 0.0,
+                        float(center[2]) if len(center) > 2 else 0.0,
+                    ],
+                    "length": float(segment.get("length") or measured_length),
+                    "axis_span": [span_min, span_max],
+                    "start": segment.get("start"),
+                    "end": segment.get("end"),
+                }
+            )
+        except Exception:
+            discarded_count += 1
+
+    return filtered_segments, discarded_count
+
+
+def _build_fold_detail_from_group_runtime(group, segments, index):
+    member_indexes = []
+    for value in group.get("segment_indices") or []:
+        try:
+            member_indexes.append(int(value))
+        except Exception:
+            continue
+
+    members = []
+    for member_index in member_indexes:
+        for fallback_index, segment in enumerate(segments or []):
+            try:
+                segment_index = int(segment.get("index", fallback_index))
+            except Exception:
+                segment_index = fallback_index
+            if segment_index == member_index:
+                members.append(segment)
+                break
+
+    if not members:
+        return None
+
+    first = members[0]
+    center = first.get("center") or [0.0, 0.0, 0.0]
+    fixed_x = float(center[0]) if len(center) > 0 else 0.0
+    fixed_y = float(center[1]) if len(center) > 1 else 0.0
+    fixed_z = float(center[2]) if len(center) > 2 else 0.0
+    axis = str(group.get("axis") or first.get("axis") or "Y").upper()
+    span_values = []
+    for segment in members:
+        axis_span = segment.get("axis_span") or []
+        if len(axis_span) >= 2:
+            try:
+                span_values.extend([float(axis_span[0]), float(axis_span[1])])
+            except Exception:
+                continue
+    if not span_values:
+        return None
+
+    if axis == "X":
+        start = [min(span_values), fixed_y, fixed_z]
+        end = [max(span_values), fixed_y, fixed_z]
+    else:
+        start = [fixed_x, min(span_values), fixed_z]
+        end = [fixed_x, max(span_values), fixed_z]
+
+    return {
+        "id": int(group.get("id") or (index + 1)),
+        "axis": axis.lower(),
+        "center": [
+            (float(start[0]) + float(end[0])) / 2.0,
+            (float(start[1]) + float(end[1])) / 2.0,
+            (float(start[2]) + float(end[2])) / 2.0,
+        ],
+        "start": start,
+        "end": end,
+        "length": _segment_measured_length({"start": start, "end": end}),
+        "segment_indices": [member_index + 1 for member_index in member_indexes],
+    }
+
+
+def canonicalize_unfold_payload(result, fold_merge_settings=None):
+    payload = dict(result or {})
+    original_segments = list(payload.get("bend_line_segments") or [])
+    filtered_segments, discarded_count = _filter_fold_segments_runtime(original_segments)
+    if original_segments and not filtered_segments:
+        has_merge_geometry = any(
+            (segment.get("axis") or "").upper() in {"X", "Y"} or len(segment.get("axis_span") or []) >= 2
+            for segment in original_segments
+            if isinstance(segment, dict)
+        )
+        if not has_merge_geometry:
+            filtered_segments = original_segments
+            discarded_count = 0
+    payload["bend_line_segments"] = filtered_segments
+
+    existing_raw_fold_lines = payload.get("raw_fold_lines")
+    if existing_raw_fold_lines is None:
+        payload["raw_fold_lines"] = len(original_segments)
+
+    if discarded_count:
+        payload["discarded_fold_segment_count"] = discarded_count
+
+    merged_details, merged_bends, merged_groups = _merge_fold_segments_runtime(
+        filtered_segments,
+        payload.get("bends_logical") or [],
+        fold_merge_settings=fold_merge_settings,
+    )
+
+    if merged_details:
+        payload["fold_details"] = merged_details
+        payload["bends_logical"] = merged_bends
+        payload["bend_line_groups"] = merged_groups
+        payload["fold_lines"] = len(merged_details)
+        return payload
+
+    groups = payload.get("bend_line_groups") or []
+    if not payload.get("fold_details") and groups and filtered_segments:
+        payload["fold_details"] = [
+            detail
+            for index, group in enumerate(groups)
+            if (detail := _build_fold_detail_from_group_runtime(group, filtered_segments, index)) is not None
+        ]
+
+    if not payload.get("bends_logical") and payload.get("fold_details"):
+        payload["bends_logical"] = [{"id": detail.get("id")} for detail in payload["fold_details"]]
+
+    if payload.get("fold_lines") in (None, 0) and payload.get("fold_details"):
+        payload["fold_lines"] = len(payload["fold_details"])
+
     return payload
 
 
@@ -1727,37 +1675,24 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     - flat_step_path: path to flat STEP file
     - flat_length, flat_width: dimensions
     - fold_lines: number of bends
-    - unfold_timings_ms: per-phase timings in milliseconds
     """
-    _t_total = time.perf_counter()
-    timings: dict = {}
-
     mode = os.getenv("FREECAD_UNFOLD_MODE", "auto").strip().lower()
 
     direct_result = {"success": False, "error": "Host direct mode skipped"}
     if mode not in {"direct-python", "python"}:
-        _t0 = time.perf_counter()
         direct_result = _run_direct_unfold_attempt(step_file, output_dir, part_name)
-        timings["direct_attempt_ms"] = round((time.perf_counter() - _t0) * 1000)
         if direct_result.get("success"):
-            timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
-            timings["route"] = "direct"
-            direct_result = canonicalize_unfold_payload(direct_result)
-            direct_result["unfold_timings_ms"] = timings
-            return direct_result
+            return canonicalize_unfold_payload(direct_result)
 
     sys_config = SystemConfig.from_env()
     if _persistent_freecad_worker_enabled():
-        _t0 = time.perf_counter()
         python_runtime_result = _run_direct_python_worker_attempt(
             step_file,
             output_dir,
             part_name,
             sys_config,
         )
-        timings["worker_attempt_ms"] = round((time.perf_counter() - _t0) * 1000)
         if python_runtime_result.get("worker_transport_error"):
-            _t0 = time.perf_counter()
             python_runtime_result = _run_unfold_subprocess_attempt(
                 step_file,
                 output_dir,
@@ -1765,9 +1700,7 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
                 sys_config,
                 runtime_label="direct-freecad-python",
             )
-            timings["subprocess_fallback_ms"] = round((time.perf_counter() - _t0) * 1000)
     else:
-        _t0 = time.perf_counter()
         python_runtime_result = _run_unfold_subprocess_attempt(
             step_file,
             output_dir,
@@ -1775,49 +1708,27 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
             sys_config,
             runtime_label="direct-freecad-python",
         )
-        timings["subprocess_attempt_ms"] = round((time.perf_counter() - _t0) * 1000)
-
     if python_runtime_result.get("success"):
         python_runtime_result.setdefault("runtime_source", "direct-freecad-python")
         python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
-        timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
-        timings["route"] = "worker" if _persistent_freecad_worker_enabled() else "subprocess"
-        python_runtime_result = canonicalize_unfold_payload(python_runtime_result)
-        python_runtime_result["unfold_timings_ms"] = timings
-        _print_unfold_timings(part_name, timings)
-        return python_runtime_result
+        return canonicalize_unfold_payload(python_runtime_result)
 
     if os.getenv("FREECAD_UNFOLD_DISABLE_FALLBACK", "").strip().lower() in {"1", "true", "yes", "on"}:
-        result = python_runtime_result if python_runtime_result.get("error") else direct_result
-        timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
-        timings["route"] = "disabled-fallback"
-        result["unfold_timings_ms"] = timings
-        return result
+        return python_runtime_result if python_runtime_result.get("error") else direct_result
 
     if not sys.platform.startswith("win"):
         python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
-        timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
-        timings["route"] = "failed"
-        python_runtime_result["unfold_timings_ms"] = timings
-        _print_unfold_timings(part_name, timings)
         return python_runtime_result
 
     desktop_config = _resolve_windows_desktop_freecad_config()
     if not desktop_config:
         python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
-        timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
-        timings["route"] = "failed-no-desktop"
-        python_runtime_result["unfold_timings_ms"] = timings
         return python_runtime_result
     if os.path.abspath(str(desktop_config.freecad_cmd or "")) == os.path.abspath(str(sys_config.freecad_cmd or "")):
         python_runtime_result.setdefault("direct_runtime_error", direct_result.get("error"))
-        timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
-        timings["route"] = "failed-same-desktop"
-        python_runtime_result["unfold_timings_ms"] = timings
         return python_runtime_result
 
     print("    [runtime-fallback] Direct FreeCAD Python runtime failed; retrying with desktop FreeCAD installation.")
-    _t0 = time.perf_counter()
     fallback_result = _run_unfold_subprocess_attempt(
         step_file,
         output_dir,
@@ -1825,34 +1736,17 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
         desktop_config,
         runtime_label="desktop-freecad",
     )
-    timings["desktop_fallback_ms"] = round((time.perf_counter() - _t0) * 1000)
-    timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
-
     if fallback_result.get("success"):
         fallback_result["runtime_source"] = "desktop-freecad"
         fallback_result.setdefault("direct_runtime_error", direct_result.get("error"))
         fallback_result.setdefault("python_runtime_error", python_runtime_result.get("error"))
-        timings["route"] = "desktop-fallback"
-        fallback_result["unfold_timings_ms"] = timings
-        _print_unfold_timings(part_name, timings)
-        return fallback_result
+        return canonicalize_unfold_payload(fallback_result)
 
     fallback_result.setdefault("runtime_source", "desktop-freecad")
     fallback_result.setdefault("managed_runtime_error", python_runtime_result.get("error"))
     fallback_result.setdefault("direct_runtime_error", direct_result.get("error"))
     fallback_result.setdefault("python_runtime_error", python_runtime_result.get("error"))
-    timings["route"] = "all-failed"
-    fallback_result["unfold_timings_ms"] = timings
-    _print_unfold_timings(part_name, timings)
     return fallback_result
-
-
-def _print_unfold_timings(part_name: str, timings: dict) -> None:
-    total = timings.get("total_ms", "?")
-    route = timings.get("route", "?")
-    phases = {k: v for k, v in timings.items() if k not in {"total_ms", "route"}}
-    phase_str = "  ".join(f"{k}={v}ms" for k, v in phases.items())
-    print(f"  [unfold-timing] {part_name}  total={total}ms  route={route}  {phase_str}")
 
 
 
