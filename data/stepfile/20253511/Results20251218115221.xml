@@ -1,0 +1,369 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<DocumentElement>
+  <CalculationResult>
+    <Sheet_PartName>MD-16-03698_R2</Sheet_PartName>
+    <Sheet_Name>MD-16-03781_R1.1</Sheet_Name>
+    <Sheet_Type>3D</Sheet_Type>
+    <Sheet_Thickness>3</Sheet_Thickness>
+    <Sheet_Count>2</Sheet_Count>
+    <Sheet_NrBends>2</Sheet_NrBends>
+    <Sheet_NrHoles>3</Sheet_NrHoles>
+    <Sheet_NrMarkingLines>0</Sheet_NrMarkingLines>
+    <Sheet_TopArea>35509.11</Sheet_TopArea>
+    <Sheet_Volume>106527.33</Sheet_Volume>
+    <Sheet_AreaNoHoles>35699.96</Sheet_AreaNoHoles>
+    <Sheet_TotalArea>74564.37</Sheet_TotalArea>
+    <Sheet_BoxArea>36126</Sheet_BoxArea>
+    <Sheet_BoxX>405</Sheet_BoxX>
+    <Sheet_BoxY>89.2</Sheet_BoxY>
+    <Sheet_OuterContour>1097.23</Sheet_OuterContour>
+    <Sheet_TotalContour>1182.05</Sheet_TotalContour>
+    <Sheet_HoleContours>28.3_28.3_28.3</Sheet_HoleContours>
+    <Sheet_HoleRadii>3x4,5</Sheet_HoleRadii>
+    <Sheet_MarkingLength>0</Sheet_MarkingLength>
+    <Sheet_BendLength>405_405</Sheet_BendLength>
+    <Sheet_BendAngles>90_90</Sheet_BendAngles>
+    <Sheet_BendInnerRadii>3_3</Sheet_BendInnerRadii>
+    <Sheet_UnfoldSuccess>True</Sheet_UnfoldSuccess>
+    <Sheet_FilePath />
+    <Sheet_Material>blgkw&lt;4_N &lt;3 #3</Sheet_Material>
+    <Sheet_OrderNr />
+    <Sheet_DeliveryDate />
+    <Sheet_Weight>836</Sheet_Weight>
+    <Sheet_Time>00:00:19</Sheet_Time>
+    <Sheet_Cost />
+    <Sheet_NrHolesCS>0</Sheet_NrHolesCS>
+    <Sheet_HolesCS />
+    <Sheet_FilePathDXF>S:\Results\DXF\MD-16-03781_R1.1.dxf</Sheet_FilePathDXF>
+    <Sheet_AP_Queue />
+    <Sheet_AP_POLP />
+    <Sheet_AP_Machine>AutoPOL</Sheet_AP_Machine>
+    <Sheet_AP_PDF />
+    <Sheet_AP_Priority />
+    <Sheet_AP_Status />
+    <Sheet_ProfileExists>true</Sheet_ProfileExists>
+    <Sheet_Id_Object>22-3026</Sheet_Id_Object>
+    <Sheet_Id_Source>34-34</Sheet_Id_Source>
+    <Sheet_Id_ParentObject>2-2</Sheet_Id_ParentObject>
+    <Sheet_Id_ParentSource>2-2</Sheet_Id_ParentSource>
+    <Sheet_FilePathPNG />
+    <Sheet_FilePathPNG_Unfold />
+    <Sheet_FilePathPNG_BendDrawing />
+    <Sheet_BendTable>AM_Zettabel_S235</Sheet_BendTable>
+    <Sheet_IsLocked />
+    <Sheet_ContourString> 0,-32.23 0,5.77 0,12.37 0,21.37 -1.59,26.78 -5.85,30.47 -10,31.37 -10,31.37 -395,31.37 -400,30.03 -403.66,26.37 -405,21.37 -405,21.37 -405,12.37 -405,5.77 -405,-10.53 -342,-10.53 -342,-15.93 -405,-15.93 -405,-32.23 -405,-38.83 -405,-47.83 -403.66,-52.83 -400,-56.49 -395,-57.83 -395,-57.83 -10,-57.83 -4.59,-56.24 -0.9,-51.98 0,-47.83 0,-47.83 0,-38.83 0,-32.23&amp; -145,-17.73 -141.82,-16.41 -140.54,-12.64 -142.75,-9.33 -146.72,-9.07 -149.35,-12.06 -148.57,-15.97 -145,-17.73&amp; -110.5,-17.73 -107.32,-16.41 -106.04,-12.64 -108.25,-9.33 -112.22,-9.07 -114.85,-12.06 -114.07,-15.97 -110.5,-17.73&amp; -11,-8.73 -14.18,-10.04 -15.46,-13.81 -13.25,-17.12 -9.28,-17.38 -6.65,-14.39 -7.43,-10.49 -11,-8.73</Sheet_ContourString>
+    <Sheet_NestedArea />
+    <Sheet_FilePathPDF_BendDrawing />
+    <Sheet_OriginalName>MD-16-03781_R1.1 @ MD-16-03698_R2</Sheet_OriginalName>
+    <Sheet_AddedDocument />
+    <Sheet_MaterialPriceKg />
+    <Sheet_MaterialPrice />
+    <Sheet_Machine>M1</Sheet_Machine>
+    <Sheet_AssemblyLevel>1-1</Sheet_AssemblyLevel>
+    <Sheet_HasBevel>False</Sheet_HasBevel>
+    <Sheet_BBox3D />
+    <Sheet_Notes />
+    <Sheet_Thread />
+    <Sheet_SmallHoles>0</Sheet_SmallHoles>
+    <Sheet_Warning />
+    <Sheet_User_Poedercoaten>False</Sheet_User_Poedercoaten>
+    <Sheet_User_Gewicht_Bruto />
+  </CalculationResult>
+  <CalculationResult>
+    <Sheet_PartName>MD-16-03698_R2</Sheet_PartName>
+    <Sheet_Name>MD-16-03672_R2</Sheet_Name>
+    <Sheet_Type>3D</Sheet_Type>
+    <Sheet_Thickness>5</Sheet_Thickness>
+    <Sheet_Count>1</Sheet_Count>
+    <Sheet_NrBends>2</Sheet_NrBends>
+    <Sheet_NrHoles>24</Sheet_NrHoles>
+    <Sheet_NrMarkingLines>0</Sheet_NrMarkingLines>
+    <Sheet_TopArea>111573.96</Sheet_TopArea>
+    <Sheet_Volume>557869.8</Sheet_Volume>
+    <Sheet_AreaNoHoles>114001.2</Sheet_AreaNoHoles>
+    <Sheet_TotalArea>243227.62</Sheet_TotalArea>
+    <Sheet_BoxArea>309475.35</Sheet_BoxArea>
+    <Sheet_BoxX>996.7</Sheet_BoxX>
+    <Sheet_BoxY>310.5</Sheet_BoxY>
+    <Sheet_OuterContour>2977.39</Sheet_OuterContour>
+    <Sheet_TotalContour>4015.94</Sheet_TotalContour>
+    <Sheet_HoleContours>40.8_40.8_42_42_51.4_51.4_82_82_22_36.3_36.3_22_22_36.3_36.3_82_74.8_74.8_22_28.3_28.3_28.3_28.3_28.3</Sheet_HoleContours>
+    <Sheet_HoleRadii>4x3,5_5x4,5_2x6,5</Sheet_HoleRadii>
+    <Sheet_MarkingLength>0</Sheet_MarkingLength>
+    <Sheet_BendLength>113.33_209</Sheet_BendLength>
+    <Sheet_BendAngles>-90_90</Sheet_BendAngles>
+    <Sheet_BendInnerRadii>5_5</Sheet_BendInnerRadii>
+    <Sheet_UnfoldSuccess>True</Sheet_UnfoldSuccess>
+    <Sheet_FilePath />
+    <Sheet_Material>WGWgeolied&gt;3_N #68</Sheet_Material>
+    <Sheet_OrderNr />
+    <Sheet_DeliveryDate />
+    <Sheet_Weight>4379</Sheet_Weight>
+    <Sheet_Time>00:02:28</Sheet_Time>
+    <Sheet_Cost />
+    <Sheet_NrHolesCS>0</Sheet_NrHolesCS>
+    <Sheet_HolesCS />
+    <Sheet_FilePathDXF>S:\Results\DXF\MD-16-03672_R2.dxf</Sheet_FilePathDXF>
+    <Sheet_AP_Queue />
+    <Sheet_AP_POLP />
+    <Sheet_AP_Machine>AutoPOL</Sheet_AP_Machine>
+    <Sheet_AP_PDF />
+    <Sheet_AP_Priority />
+    <Sheet_AP_Status />
+    <Sheet_ProfileExists>true</Sheet_ProfileExists>
+    <Sheet_Id_Object>23</Sheet_Id_Object>
+    <Sheet_Id_Source>327</Sheet_Id_Source>
+    <Sheet_Id_ParentObject>2</Sheet_Id_ParentObject>
+    <Sheet_Id_ParentSource>2</Sheet_Id_ParentSource>
+    <Sheet_FilePathPNG />
+    <Sheet_FilePathPNG_Unfold />
+    <Sheet_FilePathPNG_BendDrawing />
+    <Sheet_BendTable>AM_Zettabel_S235</Sheet_BendTable>
+    <Sheet_IsLocked />
+    <Sheet_ContourString> -988.27,2.31 -752.42,-39.28 -752.42,-39.28 -735.06,-40.8 -41.91,-40.8 -38.37,-39.33 -38.37,-39.33 -1.3,-2.26 0.16,1.27 0.16,1.27 0.16,14.2 0.16,37.2 -1.3,40.74 -4.84,42.2 -4.84,42.2 -108.16,42.2 -108.16,42.2 -111.7,40.74 -113.16,37.2 -113.16,14.2 -113.16,3.2 -114.16,3.2 -114.16,6.2 -114.16,6.2 -114.18,6.46 -116.16,8.2 -152.66,8.2 -154.64,9.94 -154.66,10.2 -154.66,10.2 -154.66,12.54 -154.66,12.54 -154.26,13.73 -50.3,153.47 -50.3,153.47 -49.03,155.5 -47.34,162.42 -47.34,264.7 -48.8,268.24 -52.34,269.7 -52.34,269.7 -256.34,269.7 -256.34,229.7 -256.34,218.7 -256.34,198.7 -241.34,198.7 -235.1,197.35 -230,193.53 -226.94,187.93 -226.34,183.7 -226.34,183.7 -226.34,153.7 -226.34,153.7 -226.94,149.48 -230,143.88 -235.1,140.06 -241.34,138.7 -256.34,138.7 -256.34,125.7 -261.34,125.7 -261.34,115.28 -261.34,115.28 -261.79,113.19 -296.35,38.03 -296.35,38.03 -300.04,33.78 -305.43,32.2 -512.34,32.2 -512.34,32.2 -515.87,33.67 -517.34,37.2 -517.34,42.2 -519.06,45.98 -522.34,47.2 -522.34,47.2 -548.34,47.2 -551.87,45.74 -553.34,42.2 -553.34,42.2 -553.34,37.2 -553.34,37.2 -554.56,33.93 -558.34,32.2 -685.97,32.2 -685.97,32.2 -689.25,33.42 -690.97,37.2 -690.97,42.2 -692.7,45.98 -695.97,47.2 -695.97,47.2 -721.97,47.2 -725.51,45.74 -726.97,42.2 -726.97,42.2 -726.97,37.2 -726.97,37.2 -728.44,33.67 -731.97,32.2 -938.24,32.2 -938.24,32.2 -943.63,33.78 -947.32,38.03 -973.38,94.7 -982.14,94.7 -982.14,64.7 -985.54,64.7 -985.54,94.7 -991.54,94.7 -995.07,93.24 -996.54,89.7 -996.54,89.7 -996.54,12.16 -995.02,6.86 -990.92,3.17 -988.27,2.31 -988.27,2.31&amp; -67.34,256.2 -71.93,254.3 -73.84,249.7 -71.93,245.11 -67.34,243.2 -62.74,245.11 -60.84,249.7 -62.74,254.3 -67.34,256.2&amp; -147.34,256.2 -151.93,254.3 -153.84,249.7 -151.93,245.11 -147.34,243.2 -142.74,245.11 -140.84,249.7 -142.74,254.3 -147.34,256.2&amp; -100.84,3.2 -100.84,14.2 -90.84,14.2 -90.84,3.2 -100.84,3.2&amp; -20.84,3.2 -20.84,14.2 -10.84,14.2 -10.84,3.2 -20.84,3.2&amp; -20.9,22.2 -20.9,22.2 -24.44,23.67 -25.9,27.2 -24.44,30.74 -20.9,32.2 -10.9,32.2 -7.25,30.62 -5.91,26.86 -7.75,23.32 -10.9,22.2 -10.9,22.2 -20.9,22.2&amp; -100.9,22.2 -100.9,22.2 -104.44,23.67 -105.9,27.2 -104.44,30.74 -100.9,32.2 -90.9,32.2 -87.25,30.62 -85.91,26.86 -87.75,23.32 -90.9,22.2 -90.9,22.2 -100.9,22.2&amp; -187.87,193.81 -188.84,194.56 -188.84,194.56 -189.84,194.56 -190.84,193.56 -190.84,193.56 -190.84,187.56 -189.84,186.56 -189.84,186.56 -188.77,186.56 -187.8,187.31 -187.8,187.31 -187.8,187.31 -186.84,188.06 -180.34,188.06 -179.34,187.06 -179.34,187.06 -179.34,184.56 -179.34,184.56 -180.34,183.56 -193.34,183.56 -193.34,183.56 -194.34,184.56 -194.34,196.56 -193.34,197.56 -193.34,197.56 -180.34,197.56 -180.34,197.56 -179.34,196.56 -179.34,194.06 -179.34,194.06 -180.34,193.06 -186.9,193.06 -186.9,193.06 -187.87,193.81&amp; -90.84,187.56 -89.84,186.56 -89.84,186.56 -88.77,186.56 -87.8,187.31 -87.8,187.31 -87.8,187.31 -86.84,188.06 -80.34,188.06 -79.34,187.06 -79.34,187.06 -79.34,184.56 -79.34,184.56 -80.34,183.56 -93.34,183.56 -93.34,183.56 -94.34,184.56 -94.34,196.56 -93.34,197.56 -93.34,197.56 -80.34,197.56 -80.34,197.56 -79.34,196.56 -79.34,194.06 -79.34,194.06 -80.34,193.06 -86.9,193.06 -86.9,193.06 -87.87,193.81 -88.84,194.56 -88.84,194.56 -89.84,194.56 -90.84,193.56 -90.84,193.56 -90.84,187.56&amp; -543.34,34.7 -546.37,36.45 -546.37,39.95 -543.34,41.7 -540.3,39.95 -540.3,36.45 -543.34,34.7&amp; -918.97,12.7 -922.97,12.7 -922.97,12.7 -924.19,12.87 -927.21,15.7 -926.65,19.8 -922.97,21.7 -918.97,21.7 -918.97,21.7 -917.25,21.36 -914.63,18.37 -915.4,14.46 -918.97,12.7&amp; -882.97,12.7 -886.97,12.7 -886.97,12.7 -888.19,12.87 -891.21,15.7 -890.65,19.8 -886.97,21.7 -882.97,21.7 -882.97,21.7 -881.25,21.36 -878.63,18.37 -879.4,14.46 -882.97,12.7&amp; -716.97,34.7 -720,36.45 -720,39.95 -716.97,41.7 -713.94,39.95 -713.94,36.45 -716.97,34.7&amp; -700.97,34.7 -704,36.45 -704,39.95 -700.97,41.7 -697.94,39.95 -697.94,36.45 -700.97,34.7&amp; -320.97,12.7 -324.97,12.7 -324.97,12.7 -326.7,13.04 -329.32,16.04 -328.54,19.94 -324.97,21.7 -320.97,21.7 -320.97,21.7 -319.76,21.54 -316.73,18.71 -317.3,14.61 -320.97,12.7&amp; -360.97,12.7 -360.97,12.7 -362.7,13.04 -365.32,16.04 -364.54,19.94 -360.97,21.7 -356.97,21.7 -356.97,21.7 -355.76,21.54 -352.73,18.71 -353.3,14.61 -356.97,12.7 -360.97,12.7&amp; -139.84,194.56 -140.84,193.56 -140.84,193.56 -140.84,187.56 -139.84,186.56 -139.84,186.56 -138.77,186.56 -137.8,187.31 -137.8,187.31 -137.8,187.31 -136.84,188.06 -130.34,188.06 -129.34,187.06 -129.34,187.06 -129.34,184.56 -129.34,184.56 -130.34,183.56 -143.34,183.56 -143.34,183.56 -144.34,184.56 -144.34,196.56 -143.34,197.56 -143.34,197.56 -130.34,197.56 -130.34,197.56 -129.34,196.56 -129.34,194.06 -129.34,194.06 -130.34,193.06 -136.9,193.06 -136.9,193.06 -137.87,193.81 -138.84,194.56 -138.84,194.56 -139.84,194.56&amp; -125.84,-21.8 -135.84,-21.8 -135.84,-21.8 -136.84,-20.8 -136.84,-16.8 -136.84,-16.8 -135.84,-15.8 -133.84,-15.8 -133.84,-15.8 -132.84,-16.8 -131.84,-17.8 -131.84,-17.8 -129.84,-17.8 -128.84,-16.8 -128.84,-16.8 -128.84,-10.8 -129.84,-9.8 -129.84,-9.8 -131.84,-9.8 -132.84,-10.8 -132.84,-10.8 -132.84,-10.8 -133.84,-11.8 -135.84,-11.8 -135.84,-11.8 -136.84,-10.8 -136.84,-6.8 -136.84,-6.8 -135.84,-5.8 -125.84,-5.8 -125.84,-5.8 -124.84,-6.8 -124.84,-20.8 -124.84,-20.8 -125.84,-21.8&amp; -56.84,-20.8 -56.84,-16.8 -56.84,-16.8 -55.84,-15.8 -53.84,-15.8 -53.84,-15.8 -52.84,-16.8 -51.84,-17.8 -51.84,-17.8 -49.84,-17.8 -48.84,-16.8 -48.84,-16.8 -48.84,-10.8 -49.84,-9.8 -49.84,-9.8 -51.84,-9.8 -52.84,-10.8 -52.84,-10.8 -52.84,-10.8 -53.84,-11.8 -55.84,-11.8 -55.84,-11.8 -56.84,-10.8 -56.84,-6.8 -56.84,-6.8 -55.84,-5.8 -45.84,-5.8 -45.84,-5.8 -44.84,-6.8 -44.84,-20.8 -44.84,-20.8 -45.84,-21.8 -55.84,-21.8 -55.84,-21.8 -56.84,-20.8&amp; -527.34,34.7 -530.37,36.45 -530.37,39.95 -527.34,41.7 -524.3,39.95 -524.3,36.45 -527.34,34.7&amp; -225.47,10.2 -226.79,13.38 -230.56,14.66 -233.87,12.45 -234.13,8.48 -231.14,5.86 -227.23,6.63 -225.47,10.2&amp; -611.47,10.2 -612.79,13.38 -616.56,14.66 -619.87,12.45 -620.13,8.48 -617.14,5.86 -613.23,6.63 -611.47,10.2&amp; -387.47,10.2 -388.79,13.38 -392.56,14.66 -395.87,12.45 -396.13,8.48 -393.14,5.86 -389.23,6.63 -387.47,10.2&amp; -835.47,10.2 -836.79,13.38 -840.56,14.66 -843.87,12.45 -844.13,8.48 -841.14,5.86 -837.23,6.63 -835.47,10.2&amp; -285.47,10.2 -286.79,13.38 -290.56,14.66 -293.87,12.45 -294.13,8.48 -291.14,5.86 -287.23,6.63 -285.47,10.2</Sheet_ContourString>
+    <Sheet_NestedArea />
+    <Sheet_FilePathPDF_BendDrawing />
+    <Sheet_OriginalName>MD-16-03672_R2 @ MD-16-03698_R2</Sheet_OriginalName>
+    <Sheet_AddedDocument />
+    <Sheet_MaterialPriceKg />
+    <Sheet_MaterialPrice />
+    <Sheet_Machine>M1</Sheet_Machine>
+    <Sheet_AssemblyLevel>1</Sheet_AssemblyLevel>
+    <Sheet_HasBevel>False</Sheet_HasBevel>
+    <Sheet_BBox3D />
+    <Sheet_Notes />
+    <Sheet_Thread />
+    <Sheet_SmallHoles>0</Sheet_SmallHoles>
+    <Sheet_Warning />
+    <Sheet_User_Poedercoaten>False</Sheet_User_Poedercoaten>
+    <Sheet_User_Gewicht_Bruto />
+  </CalculationResult>
+  <CalculationResult>
+    <Sheet_PartName>MD-16-03698_R2</Sheet_PartName>
+    <Sheet_Name>MD-16-03688_R2</Sheet_Name>
+    <Sheet_Type>3D</Sheet_Type>
+    <Sheet_Thickness>5</Sheet_Thickness>
+    <Sheet_Count>1</Sheet_Count>
+    <Sheet_NrBends>1</Sheet_NrBends>
+    <Sheet_NrHoles>18</Sheet_NrHoles>
+    <Sheet_NrMarkingLines>0</Sheet_NrMarkingLines>
+    <Sheet_TopArea>100361.46</Sheet_TopArea>
+    <Sheet_Volume>501807.3</Sheet_Volume>
+    <Sheet_AreaNoHoles>101925.34</Sheet_AreaNoHoles>
+    <Sheet_TotalArea>217160.07</Sheet_TotalArea>
+    <Sheet_BoxArea>294726.6</Sheet_BoxArea>
+    <Sheet_BoxX>949.2</Sheet_BoxX>
+    <Sheet_BoxY>310.5</Sheet_BoxY>
+    <Sheet_OuterContour>2585.42</Sheet_OuterContour>
+    <Sheet_TotalContour>3287.43</Sheet_TotalContour>
+    <Sheet_HoleContours>40.8_40.8_36.3_36.3_22_22_22_22_36.3_36.3_82_82_82_28.3_28.3_28.3_28.3_28.3</Sheet_HoleContours>
+    <Sheet_HoleRadii>4x3,5_5x4,5_2x6,5</Sheet_HoleRadii>
+    <Sheet_MarkingLength>0</Sheet_MarkingLength>
+    <Sheet_BendLength>209</Sheet_BendLength>
+    <Sheet_BendAngles>-90</Sheet_BendAngles>
+    <Sheet_BendInnerRadii>5</Sheet_BendInnerRadii>
+    <Sheet_UnfoldSuccess>True</Sheet_UnfoldSuccess>
+    <Sheet_FilePath />
+    <Sheet_Material>WGWgeolied&gt;3_N #68</Sheet_Material>
+    <Sheet_OrderNr />
+    <Sheet_DeliveryDate />
+    <Sheet_Weight>3939</Sheet_Weight>
+    <Sheet_Time>00:01:53</Sheet_Time>
+    <Sheet_Cost />
+    <Sheet_NrHolesCS>0</Sheet_NrHolesCS>
+    <Sheet_HolesCS />
+    <Sheet_FilePathDXF>S:\Results\DXF\MD-16-03688_R2.dxf</Sheet_FilePathDXF>
+    <Sheet_AP_Queue />
+    <Sheet_AP_POLP />
+    <Sheet_AP_Machine>AutoPOL</Sheet_AP_Machine>
+    <Sheet_AP_PDF />
+    <Sheet_AP_Priority />
+    <Sheet_AP_Status />
+    <Sheet_ProfileExists>true</Sheet_ProfileExists>
+    <Sheet_Id_Object>24</Sheet_Id_Object>
+    <Sheet_Id_Source>3030</Sheet_Id_Source>
+    <Sheet_Id_ParentObject>2</Sheet_Id_ParentObject>
+    <Sheet_Id_ParentSource>2</Sheet_Id_ParentSource>
+    <Sheet_FilePathPNG />
+    <Sheet_FilePathPNG_Unfold />
+    <Sheet_FilePathPNG_BendDrawing />
+    <Sheet_BendTable>AM_Zettabel_S235</Sheet_BendTable>
+    <Sheet_IsLocked />
+    <Sheet_ContourString> 264.56,-57.51 58.3,-57.51 52.9,-55.93 49.21,-51.69 49.21,-51.69 23.16,4.99 14.4,4.99 14.4,-25.01 11,-25.01 11,4.99 5,4.99 5,4.99 1.46,3.52 0,-0.01 0,-77.56 0,-77.56 0.39,-80.32 3.31,-84.99 8.26,-87.41 244.11,-129 244.11,-129 261.48,-130.51 751.46,-130.51 763.07,-129.84 774.53,-127.82 785.67,-124.48 796.35,-119.87 806.42,-114.05 815.75,-107.11 824.21,-99.12 831.69,-90.21 831.69,-90.21 946.23,63.75 946.23,63.75 947.51,65.78 949.2,72.7 949.2,174.99 947.74,178.52 944.2,179.99 944.2,179.99 740.2,179.99 740.2,128.99 740.2,108.99 755.2,108.99 761.43,107.63 766.54,103.81 769.59,98.21 770.2,93.99 770.2,93.99 770.2,63.99 770.2,63.99 769.06,58.25 765.81,53.38 760.94,50.13 755.2,48.99 740.2,48.99 740.2,35.99 735.2,35.99 735.2,25.57 734.74,23.48 734.74,23.48 700.19,-51.69 700.19,-51.69 696.5,-55.93 691.1,-57.51 484.2,-57.51 484.2,-57.51 480.93,-56.29 479.2,-52.51 479.2,-47.51 477.47,-43.74 474.2,-42.51 474.2,-42.51 448.2,-42.51 444.42,-44.24 443.2,-47.51 443.2,-47.51 443.2,-52.51 443.2,-52.51 441.74,-56.05 438.2,-57.51 310.56,-57.51 310.56,-57.51 307.29,-56.29 305.56,-52.51 305.56,-47.51 303.84,-43.74 300.56,-42.51 300.56,-42.51 274.56,-42.51 271.03,-43.98 269.56,-47.51 269.56,-47.51 269.56,-52.51 269.56,-52.51 268.1,-56.05 264.56,-57.51&amp; 929.2,166.49 924.6,164.58 922.7,159.99 924.6,155.39 929.2,153.49 933.8,155.39 935.7,159.99 933.8,164.58 929.2,166.49&amp; 849.2,166.49 844.6,164.58 842.7,159.99 844.6,155.39 849.2,153.49 853.8,155.39 855.7,159.99 853.8,164.58 849.2,166.49&amp; 671.56,-68.01 675.56,-68.01 679.24,-69.92 679.8,-74.02 676.78,-76.85 675.56,-77.01 675.56,-77.01 671.56,-77.01 667.99,-75.25 667.21,-71.35 669.84,-68.36 671.56,-68.01 671.56,-68.01&amp; 639.56,-77.01 635.56,-77.01 631.99,-75.25 631.21,-71.35 633.84,-68.36 635.56,-68.01 635.56,-68.01 639.56,-68.01 643.24,-69.92 643.8,-74.02 640.78,-76.85 639.56,-77.01 639.56,-77.01&amp; 279.56,-55.01 276.53,-53.26 276.53,-49.76 279.56,-48.01 282.59,-49.76 282.59,-53.26 279.56,-55.01&amp; 295.56,-55.01 292.53,-53.26 292.53,-49.76 295.56,-48.01 298.59,-49.76 298.59,-53.26 295.56,-55.01&amp; 469.2,-55.01 466.17,-53.26 466.17,-49.76 469.2,-48.01 472.23,-49.76 472.23,-53.26 469.2,-55.01&amp; 453.2,-55.01 450.17,-53.26 450.17,-49.76 453.2,-48.01 456.23,-49.76 456.23,-53.26 453.2,-55.01&amp; 113.56,-77.01 109.56,-77.01 105.99,-75.25 105.21,-71.35 107.84,-68.36 109.56,-68.01 109.56,-68.01 113.56,-68.01 117.24,-69.92 117.8,-74.02 114.78,-76.85 113.56,-77.01 113.56,-77.01&amp; 73.56,-68.01 77.56,-68.01 81.24,-69.92 81.8,-74.02 78.78,-76.85 77.56,-77.01 77.56,-77.01 73.56,-77.01 69.99,-75.25 69.21,-71.35 71.84,-68.36 73.56,-68.01 73.56,-68.01&amp; 816.2,98.34 817.2,97.34 817.2,97.34 817.2,94.84 817.2,94.84 816.2,93.84 803.2,93.84 803.2,93.84 802.2,94.84 802.2,106.84 803.2,107.84 803.2,107.84 816.2,107.84 816.2,107.84 817.2,106.84 817.2,104.34 817.2,104.34 816.2,103.34 809.64,103.34 809.64,103.34 808.67,104.09 807.7,104.84 807.7,104.84 806.7,104.84 805.7,103.84 805.7,103.84 805.7,97.84 806.7,96.84 806.7,96.84 807.76,96.84 808.73,97.59 808.73,97.59 808.73,97.59 809.7,98.34 816.2,98.34&amp; 917.2,106.84 917.2,104.34 917.2,104.34 916.2,103.34 909.64,103.34 909.64,103.34 908.67,104.09 907.7,104.84 907.7,104.84 906.7,104.84 905.7,103.84 905.7,103.84 905.7,97.84 906.7,96.84 906.7,96.84 907.76,96.84 908.73,97.59 908.73,97.59 908.73,97.59 909.7,98.34 916.2,98.34 917.2,97.34 917.2,97.34 917.2,94.84 917.2,94.84 916.2,93.84 903.2,93.84 903.2,93.84 902.2,94.84 902.2,106.84 903.2,107.84 903.2,107.84 916.2,107.84 916.2,107.84 917.2,106.84&amp; 866.2,98.34 867.2,97.34 867.2,97.34 867.2,94.84 867.2,94.84 866.2,93.84 853.2,93.84 853.2,93.84 852.2,94.84 852.2,106.84 853.2,107.84 853.2,107.84 866.2,107.84 866.2,107.84 867.2,106.84 867.2,104.34 867.2,104.34 866.2,103.34 859.64,103.34 859.64,103.34 858.67,104.09 857.7,104.84 857.7,104.84 856.7,104.84 855.7,103.84 855.7,103.84 855.7,97.84 856.7,96.84 856.7,96.84 857.76,96.84 858.73,97.59 858.73,97.59 858.73,97.59 859.7,98.34 866.2,98.34&amp; 609.06,-79.51 607.74,-76.33 603.97,-75.05 600.66,-77.26 600.4,-81.24 603.4,-83.86 607.3,-83.08 609.06,-79.51&amp; 771.06,-79.51 769.74,-76.33 765.97,-75.05 762.66,-77.26 762.4,-81.24 765.4,-83.86 769.3,-83.08 771.06,-79.51&amp; 711.06,-79.51 709.74,-76.33 705.97,-75.05 702.66,-77.26 702.4,-81.24 705.4,-83.86 709.3,-83.08 711.06,-79.51&amp; 385.06,-79.51 383.74,-76.33 379.97,-75.05 376.66,-77.26 376.4,-81.24 379.4,-83.86 383.3,-83.08 385.06,-79.51&amp; 161.06,-79.51 159.74,-76.33 155.97,-75.05 152.66,-77.26 152.4,-81.24 155.4,-83.86 159.3,-83.08 161.06,-79.51</Sheet_ContourString>
+    <Sheet_NestedArea />
+    <Sheet_FilePathPDF_BendDrawing />
+    <Sheet_OriginalName>MD-16-03688_R2 @ MD-16-03698_R2</Sheet_OriginalName>
+    <Sheet_AddedDocument />
+    <Sheet_MaterialPriceKg />
+    <Sheet_MaterialPrice />
+    <Sheet_Machine>M1</Sheet_Machine>
+    <Sheet_AssemblyLevel>1</Sheet_AssemblyLevel>
+    <Sheet_HasBevel>False</Sheet_HasBevel>
+    <Sheet_BBox3D />
+    <Sheet_Notes />
+    <Sheet_Thread />
+    <Sheet_SmallHoles>0</Sheet_SmallHoles>
+    <Sheet_Warning />
+    <Sheet_User_Poedercoaten>False</Sheet_User_Poedercoaten>
+    <Sheet_User_Gewicht_Bruto />
+  </CalculationResult>
+  <CalculationResult>
+    <Sheet_PartName>MD-16-03698_R2</Sheet_PartName>
+    <Sheet_Name>MD-16-03780_R2</Sheet_Name>
+    <Sheet_Type>3D</Sheet_Type>
+    <Sheet_Thickness>5</Sheet_Thickness>
+    <Sheet_Count>1</Sheet_Count>
+    <Sheet_NrBends>4</Sheet_NrBends>
+    <Sheet_NrHoles>24</Sheet_NrHoles>
+    <Sheet_NrMarkingLines>0</Sheet_NrMarkingLines>
+    <Sheet_TopArea>123419.87</Sheet_TopArea>
+    <Sheet_Volume>617099.35</Sheet_Volume>
+    <Sheet_AreaNoHoles>125202.23</Sheet_AreaNoHoles>
+    <Sheet_TotalArea>268453.69</Sheet_TotalArea>
+    <Sheet_BoxArea>260775</Sheet_BoxArea>
+    <Sheet_BoxX>855</Sheet_BoxX>
+    <Sheet_BoxY>305</Sheet_BoxY>
+    <Sheet_OuterContour>3411.3</Sheet_OuterContour>
+    <Sheet_TotalContour>4322.79</Sheet_TotalContour>
+    <Sheet_HoleContours>28.3_28.3_28.3_28.3_28.3_82_82_34_34_34_34_22_22_15.7_15.7_29.8_29.8_29.8_29.8_28.3_41.6_82_82_41.6</Sheet_HoleContours>
+    <Sheet_HoleRadii>2x2,5_2x3,5_6x4,5_4x4,75</Sheet_HoleRadii>
+    <Sheet_MarkingLength>0</Sheet_MarkingLength>
+    <Sheet_BendLength>142_157_157_142</Sheet_BendLength>
+    <Sheet_BendAngles>-90_-90_-90_-90</Sheet_BendAngles>
+    <Sheet_BendInnerRadii>5_5_5_5</Sheet_BendInnerRadii>
+    <Sheet_UnfoldSuccess>True</Sheet_UnfoldSuccess>
+    <Sheet_FilePath />
+    <Sheet_Material>WGWgeolied&gt;3_N #68</Sheet_Material>
+    <Sheet_OrderNr />
+    <Sheet_DeliveryDate />
+    <Sheet_Weight>4844</Sheet_Weight>
+    <Sheet_Time>00:02:29</Sheet_Time>
+    <Sheet_Cost />
+    <Sheet_NrHolesCS>0</Sheet_NrHolesCS>
+    <Sheet_HolesCS />
+    <Sheet_FilePathDXF>S:\Results\DXF\MD-16-03780_R2.dxf</Sheet_FilePathDXF>
+    <Sheet_AP_Queue />
+    <Sheet_AP_POLP />
+    <Sheet_AP_Machine>AutoPOL</Sheet_AP_Machine>
+    <Sheet_AP_PDF />
+    <Sheet_AP_Priority />
+    <Sheet_AP_Status />
+    <Sheet_ProfileExists>true</Sheet_ProfileExists>
+    <Sheet_Id_Object>25</Sheet_Id_Object>
+    <Sheet_Id_Source>4763</Sheet_Id_Source>
+    <Sheet_Id_ParentObject>2</Sheet_Id_ParentObject>
+    <Sheet_Id_ParentSource>2</Sheet_Id_ParentSource>
+    <Sheet_FilePathPNG />
+    <Sheet_FilePathPNG_Unfold />
+    <Sheet_FilePathPNG_BendDrawing />
+    <Sheet_BendTable>AM_Zettabel_S235</Sheet_BendTable>
+    <Sheet_IsLocked />
+    <Sheet_ContourString> 81,668 81.89,669.46 81,670 81,670 0,668 0,625.75 0,625.75 1.22,622.48 5,620.75 24.5,620.75 24.5,620.75 28.04,619.29 29.5,615.75 29.5,595.25 29.5,595.25 28.28,591.98 24.5,590.25 5,590.25 1.46,588.79 0,585.25 0,585.25 0,579 0,579 -0.9,574.85 -4.59,570.59 -10,569 -37.36,569 -37.36,569 -42.36,567.66 -46.02,564 -47.36,559 -47.36,429 -45.77,423.59 -41.51,419.9 -37.36,419 -37.36,419 40,419 40,419 44.15,418.1 48.41,414.41 50,409 50,259 50,259 48.66,254 45,250.34 40,249 -37.36,249 -37.36,249 -42.36,247.66 -46.02,244 -47.36,239 -47.36,116.5 -45.77,111.09 -41.51,107.4 -37.36,106.5 -37.36,106.5 -10,106.5 -10,106.5 -5.85,105.6 -1.59,101.91 0,96.5 0,82.75 0,82.75 1.22,79.48 5,77.75 24.5,77.75 24.5,77.75 27.77,76.53 29.5,72.75 29.5,52.25 29.5,52.25 28.04,48.71 24.5,47.25 5,47.25 1.46,45.79 0,42.25 0,42.25 0,0 70,0 81,0 81,0 81.89,-0.54 81,-2 76,-2 76,-17.5 76,-17.5 74.54,-21.04 71,-22.5 -102,-22.5 -105.78,-24.23 -107,-27.5 -107,-27.5 -107,-62.5 -107,-73.5 -107,-88.5 -107,-88.5 -105.78,-91.77 -102,-93.5 193,-93.5 193,-93.5 196.27,-92.28 198,-88.5 198,-73.5 198,-50.2 173,-50.2 173,-44.8 198,-44.8 198,-36.21 196.86,-30.47 193.61,-25.61 193.61,-25.61 112.39,55.61 109.14,60.47 108,66.21 108,66.21 108,293 107,294 107,294 88,294 88,294 87,295 87,373 88,374 88,374 107,374 107,374 108,375 108,601.79 108,601.79 108.73,606.42 112.39,612.39 193.61,693.61 193.61,693.61 196.37,697.4 198,704.21 198,712.8 173,712.8 173,718.2 198,718.2 198,741.5 198,756.5 196.27,760.28 193,761.5 193,761.5 -102,761.5 -105.78,759.77 -107,756.5 -107,756.5 -107,741.5 -107,730.5 -107,695.5 -105.54,691.96 -102,690.5 -102,690.5 71,690.5 71,690.5 74.54,689.04 76,685.5 76,670 81,670&amp; -25,-43 -28.18,-44.32 -29.46,-48.09 -27.25,-51.4 -23.28,-51.66 -20.65,-48.66 -21.43,-44.76 -25,-43&amp; -25,720 -28.18,718.68 -29.46,714.91 -27.25,711.6 -23.28,711.34 -20.65,714.34 -21.43,718.24 -25,720&amp; 38,-43 34.82,-44.32 33.54,-48.09 35.75,-51.4 39.72,-51.66 42.35,-48.66 41.57,-44.76 38,-43&amp; -96,-43 -99.18,-44.32 -100.46,-48.09 -98.25,-51.4 -94.28,-51.66 -91.65,-48.66 -92.43,-44.76 -96,-43&amp; -96,711 -92.82,712.32 -91.54,716.09 -93.75,719.4 -97.72,719.66 -100.35,716.66 -99.57,712.76 -96,711&amp; 102,208 102,208 101,207 88,207 88,207 87,208 87,210.5 87,210.5 88,211.5 94.56,211.5 94.56,211.5 95.53,210.75 96.5,210 96.5,210 97.5,210 98.5,211 98.5,211 98.5,217 97.5,218 97.5,218 96.44,218 95.47,217.25 95.47,217.25 95.47,217.25 94.5,216.5 88,216.5 88,216.5 87,217.5 87,220 87,220 88,221 101,221 101,221 102,220 102,208&amp; 88,581 101,581 101,581 102,580 102,568 102,568 101,567 88,567 88,567 87,568 87,570.5 87,570.5 88,571.5 94.56,571.5 94.56,571.5 95.53,570.75 96.5,570 96.5,570 97.5,570 98.5,571 98.5,571 98.5,577 97.5,578 97.5,578 96.44,578 95.47,577.25 95.47,577.25 95.47,577.25 94.5,576.5 88,576.5 88,576.5 87,577.5 87,580 87,580 88,581&amp; -99,-62.5 -93,-62.5 -93,-73.5 -93,-73.5 -99,-62.5&amp; 35,-62.5 41,-62.5 41,-73.5 35,-73.5 35,-62.5&amp; -93,730.5 -99,730.5 -99,741.5 -93,741.5 -93,730.5&amp; 41,730.5 35,730.5 35,741.5 41,741.5 41,730.5&amp; 1.14,183.85 4.17,185.6 4.17,189.1 1.14,190.85 -1.89,189.1 -1.89,185.6 1.14,183.85&amp; 1.14,133.85 4.17,135.6 4.17,139.1 1.14,140.85 -1.89,139.1 -1.89,135.6 1.14,133.85&amp; 1.14,506.05 0.18,505.86 -1.36,503.55 0.18,501.24 2.91,501.78 3.45,504.51 1.14,506.05&amp; 1.14,486.95 0.18,486.76 -1.36,484.45 0.18,482.14 2.91,482.68 3.45,485.41 1.14,486.95&amp; -25.25,219 -26.64,222.36 -30.62,223.71 -34.11,221.38 -34.39,217.18 -31.23,214.41 -27.11,215.23 -25.25,219&amp; -25.25,449 -26.64,452.36 -30.62,453.71 -34.11,451.38 -34.39,447.18 -31.23,444.41 -27.11,445.23 -25.25,449&amp; -25.25,539 -26.64,542.36 -30.62,543.71 -34.11,541.38 -34.39,537.18 -31.23,534.41 -27.11,535.23 -25.25,539&amp; -25.25,129 -26.64,132.36 -30.62,133.71 -34.11,131.38 -34.39,127.18 -31.23,124.41 -27.11,125.23 -25.25,129&amp; 38,711 41.18,712.32 42.46,716.09 40.25,719.4 36.28,719.66 33.65,716.66 34.43,712.76 38,711&amp; 97.8,613.2 103.2,613.2 103.2,597.8 97.8,597.8 97.8,613.2&amp; 88,101 101,101 101,101 102,100 102,88 102,88 101,87 88,87 88,87 87,88 87,90.5 87,90.5 88,91.5 94.56,91.5 94.56,91.5 95.53,90.75 96.5,90 96.5,90 97.5,90 98.5,91 98.5,91 98.5,97 97.5,98 97.5,98 96.44,98 95.47,97.25 95.47,97.25 95.47,97.25 94.5,96.5 88,96.5 88,96.5 87,97.5 87,100 87,100 88,101&amp; 96.5,450 97.5,450 98.5,451 98.5,451 98.5,457 97.5,458 97.5,458 96.44,458 95.47,457.25 95.47,457.25 95.47,457.25 94.5,456.5 88,456.5 88,456.5 87,457.5 87,460 87,460 88,461 101,461 101,461 102,460 102,448 102,448 101,447 88,447 88,447 87,448 87,450.5 87,450.5 88,451.5 94.56,451.5 94.56,451.5 95.53,450.75 96.5,450 96.5,450&amp; 103.2,54.8 97.8,54.8 97.8,70.2 103.2,70.2 103.2,54.8</Sheet_ContourString>
+    <Sheet_NestedArea />
+    <Sheet_FilePathPDF_BendDrawing />
+    <Sheet_OriginalName>MD-16-03780_R2 @ MD-16-03698_R2</Sheet_OriginalName>
+    <Sheet_AddedDocument />
+    <Sheet_MaterialPriceKg />
+    <Sheet_MaterialPrice />
+    <Sheet_Machine>M1</Sheet_Machine>
+    <Sheet_AssemblyLevel>1</Sheet_AssemblyLevel>
+    <Sheet_HasBevel>False</Sheet_HasBevel>
+    <Sheet_BBox3D />
+    <Sheet_Notes />
+    <Sheet_Thread />
+    <Sheet_SmallHoles>0</Sheet_SmallHoles>
+    <Sheet_Warning />
+    <Sheet_User_Poedercoaten>False</Sheet_User_Poedercoaten>
+    <Sheet_User_Gewicht_Bruto />
+  </CalculationResult>
+  <CalculationResult>
+    <Sheet_PartName>MD-16-03698_R2</Sheet_PartName>
+    <Sheet_Name>MD-16-03673_R1.1</Sheet_Name>
+    <Sheet_Type>3D</Sheet_Type>
+    <Sheet_Thickness>5</Sheet_Thickness>
+    <Sheet_Count>2</Sheet_Count>
+    <Sheet_NrBends>2</Sheet_NrBends>
+    <Sheet_NrHoles>1</Sheet_NrHoles>
+    <Sheet_NrMarkingLines>0</Sheet_NrMarkingLines>
+    <Sheet_TopArea>6331.38</Sheet_TopArea>
+    <Sheet_Volume>31656.9</Sheet_Volume>
+    <Sheet_AreaNoHoles>6395</Sheet_AreaNoHoles>
+    <Sheet_TotalArea>14385.56</Sheet_TotalArea>
+    <Sheet_BoxArea>6708</Sheet_BoxArea>
+    <Sheet_BoxX>86</Sheet_BoxX>
+    <Sheet_BoxY>78</Sheet_BoxY>
+    <Sheet_OuterContour>316.28</Sheet_OuterContour>
+    <Sheet_TotalContour>344.56</Sheet_TotalContour>
+    <Sheet_HoleContours>28.3</Sheet_HoleContours>
+    <Sheet_HoleRadii>1x4,5</Sheet_HoleRadii>
+    <Sheet_MarkingLength>0</Sheet_MarkingLength>
+    <Sheet_BendLength>75_75</Sheet_BendLength>
+    <Sheet_BendAngles>90_90</Sheet_BendAngles>
+    <Sheet_BendInnerRadii>5_5</Sheet_BendInnerRadii>
+    <Sheet_UnfoldSuccess>True</Sheet_UnfoldSuccess>
+    <Sheet_FilePath />
+    <Sheet_Material>WGWgeolied&gt;3_N #68</Sheet_Material>
+    <Sheet_OrderNr />
+    <Sheet_DeliveryDate />
+    <Sheet_Weight>248</Sheet_Weight>
+    <Sheet_Time>00:00:12</Sheet_Time>
+    <Sheet_Cost />
+    <Sheet_NrHolesCS>0</Sheet_NrHolesCS>
+    <Sheet_HolesCS />
+    <Sheet_FilePathDXF>S:\Results\DXF\MD-16-03673_R1.1.dxf</Sheet_FilePathDXF>
+    <Sheet_AP_Queue />
+    <Sheet_AP_POLP />
+    <Sheet_AP_Machine>AutoPOL</Sheet_AP_Machine>
+    <Sheet_AP_PDF />
+    <Sheet_AP_Priority />
+    <Sheet_AP_Status />
+    <Sheet_ProfileExists>true</Sheet_ProfileExists>
+    <Sheet_Id_Object>26-7686</Sheet_Id_Object>
+    <Sheet_Id_Source>7435-7435</Sheet_Id_Source>
+    <Sheet_Id_ParentObject>2-2</Sheet_Id_ParentObject>
+    <Sheet_Id_ParentSource>2-2</Sheet_Id_ParentSource>
+    <Sheet_FilePathPNG />
+    <Sheet_FilePathPNG_Unfold />
+    <Sheet_FilePathPNG_BendDrawing />
+    <Sheet_BendTable>AM_Zettabel_S235</Sheet_BendTable>
+    <Sheet_IsLocked />
+    <Sheet_ContourString> 7.5,75 -18,75 -28,65 -28,0 58,0 58,65 48,75 22.5,75 22.5,78 7.5,78 7.5,75&amp; 19.5,20 18.18,23.18 14.41,24.46 11.1,22.25 10.84,18.28 13.84,15.65 17.74,16.43 19.5,20</Sheet_ContourString>
+    <Sheet_NestedArea />
+    <Sheet_FilePathPDF_BendDrawing />
+    <Sheet_OriginalName>MD-16-03673_R1.1 @ MD-16-03698_R2</Sheet_OriginalName>
+    <Sheet_AddedDocument />
+    <Sheet_MaterialPriceKg />
+    <Sheet_MaterialPrice />
+    <Sheet_Machine>M1</Sheet_Machine>
+    <Sheet_AssemblyLevel>1-1</Sheet_AssemblyLevel>
+    <Sheet_HasBevel>False</Sheet_HasBevel>
+    <Sheet_BBox3D />
+    <Sheet_Notes />
+    <Sheet_Thread />
+    <Sheet_SmallHoles>0</Sheet_SmallHoles>
+    <Sheet_Warning>DXF Engrave Name: md-16-03673_r1.1 does not fit.</Sheet_Warning>
+    <Sheet_User_Poedercoaten>False</Sheet_User_Poedercoaten>
+    <Sheet_User_Gewicht_Bruto />
+  </CalculationResult>
+  <CalculationResult>
+    <Assembly_PartName>MD-16-03698_R2</Assembly_PartName>
+    <Assembly_Name>MD-16-03698_R2</Assembly_Name>
+    <Assembly_Type>(sub)assembly</Assembly_Type>
+    <Assembly_Count>1</Assembly_Count>
+    <Assembly_Id_Object>2</Assembly_Id_Object>
+    <Assembly_Id_Source>2</Assembly_Id_Source>
+    <Assembly_Id_ParentObject />
+    <Assembly_Id_ParentSource />
+    <Assy_User_Finish>False</Assy_User_Finish>
+  </CalculationResult>
+  <Job>
+    <Name></Name>
+    <NrParts>7</NrParts>
+    <Weigth>15,33</Weigth>
+    <Time>00:07:52</Time>
+    <CostSheet>€ 0,00</CostSheet>
+    <CostTube>€ 0,00</CostTube>
+    <CostOther>€ 0,00</CostOther>
+    <CostTotal>€ 0,00</CostTotal>
+  </Job>
+</DocumentElement>

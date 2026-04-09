@@ -1,0 +1,162 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<DocumentElement>
+  <CalculationResult>
+    <Sheet_PartName>MD-17-04194_2</Sheet_PartName>
+    <Sheet_Name>MD-16-07575_1</Sheet_Name>
+    <Sheet_Type>3D</Sheet_Type>
+    <Sheet_Thickness>1.5</Sheet_Thickness>
+    <Sheet_Count>3</Sheet_Count>
+    <Sheet_NrBends>0</Sheet_NrBends>
+    <Sheet_NrHoles>2</Sheet_NrHoles>
+    <Sheet_NrMarkingLines>0</Sheet_NrMarkingLines>
+    <Sheet_TopArea>813.71</Sheet_TopArea>
+    <Sheet_Volume>1220.565</Sheet_Volume>
+    <Sheet_AreaNoHoles>890.68</Sheet_AreaNoHoles>
+    <Sheet_TotalArea>1877.2</Sheet_TotalArea>
+    <Sheet_BoxArea>940.87</Sheet_BoxArea>
+    <Sheet_BoxX>43.76</Sheet_BoxX>
+    <Sheet_BoxY>21.5</Sheet_BoxY>
+    <Sheet_OuterContour>122.54</Sheet_OuterContour>
+    <Sheet_TotalContour>166.52</Sheet_TotalContour>
+    <Sheet_HoleContours>22_22</Sheet_HoleContours>
+    <Sheet_HoleRadii>2x3,5</Sheet_HoleRadii>
+    <Sheet_MarkingLength>0</Sheet_MarkingLength>
+    <Sheet_BendLength />
+    <Sheet_BendAngles />
+    <Sheet_BendInnerRadii />
+    <Sheet_UnfoldSuccess>True</Sheet_UnfoldSuccess>
+    <Sheet_FilePath />
+    <Sheet_Material>blgkw&lt;4_N &lt;3 #3</Sheet_Material>
+    <Sheet_OrderNr />
+    <Sheet_DeliveryDate />
+    <Sheet_Weight>10</Sheet_Weight>
+    <Sheet_Time>00:00:09</Sheet_Time>
+    <Sheet_Cost />
+    <Sheet_NrHolesCS>0</Sheet_NrHolesCS>
+    <Sheet_HolesCS />
+    <Sheet_FilePathDXF>S:\Results\DXF\MD-16-07575_1.dxf</Sheet_FilePathDXF>
+    <Sheet_AP_Queue />
+    <Sheet_AP_POLP />
+    <Sheet_AP_Machine>AutoPOL</Sheet_AP_Machine>
+    <Sheet_AP_PDF />
+    <Sheet_AP_Priority />
+    <Sheet_AP_Status />
+    <Sheet_ProfileExists>true</Sheet_ProfileExists>
+    <Sheet_Id_Object>22-216-645</Sheet_Id_Object>
+    <Sheet_Id_Source>28-28-28</Sheet_Id_Source>
+    <Sheet_Id_ParentObject>2-2-2</Sheet_Id_ParentObject>
+    <Sheet_Id_ParentSource>2-2-2</Sheet_Id_ParentSource>
+    <Sheet_FilePathPNG />
+    <Sheet_FilePathPNG_Unfold />
+    <Sheet_FilePathPNG_BendDrawing />
+    <Sheet_BendTable>AM_Zettabel_S235</Sheet_BendTable>
+    <Sheet_IsLocked />
+    <Sheet_ContourString> 1.26,14.78 0.02,0.59 0.02,0.59 1.31,-3.23 5,-4.85 38.76,-4.85 38.76,-4.85 42.45,-3.23 43.74,0.59 42.5,14.78 42.5,14.78 41,16.15 26.88,16.15 26.88,16.65 16.88,16.65 16.88,16.15 2.75,16.15 2.75,16.15 1.26,14.78&amp; 29.88,1.65 26.85,3.4 26.85,6.9 29.88,8.65 32.91,6.9 32.91,3.4 29.88,1.65&amp; 13.88,1.65 10.85,3.4 10.85,6.9 13.88,8.65 16.91,6.9 16.91,3.4 13.88,1.65</Sheet_ContourString>
+    <Sheet_NestedArea />
+    <Sheet_FilePathPDF_BendDrawing />
+    <Sheet_OriginalName>MD-16-07575_1 @ MD-17-04194_2</Sheet_OriginalName>
+    <Sheet_AddedDocument />
+    <Sheet_MaterialPriceKg />
+    <Sheet_MaterialPrice />
+    <Sheet_Machine>M1</Sheet_Machine>
+    <Sheet_AssemblyLevel>1-1-1</Sheet_AssemblyLevel>
+    <Sheet_HasBevel>False</Sheet_HasBevel>
+    <Sheet_BBox3D />
+    <Sheet_Notes />
+    <Sheet_Thread />
+    <Sheet_SmallHoles>0</Sheet_SmallHoles>
+    <Sheet_Warning>DXF Engrave Name: md-16-07575_1 does not fit in the DXF.</Sheet_Warning>
+    <Sheet_User_Poedercoaten>False</Sheet_User_Poedercoaten>
+    <Sheet_User_Gewicht_Bruto />
+  </CalculationResult>
+  <CalculationResult>
+    <Sheet_PartName>MD-17-04194_2</Sheet_PartName>
+    <Sheet_Name>MD-17-04193_2</Sheet_Name>
+    <Sheet_Type>3D</Sheet_Type>
+    <Sheet_Thickness>1</Sheet_Thickness>
+    <Sheet_Count>1</Sheet_Count>
+    <Sheet_NrBends>2</Sheet_NrBends>
+    <Sheet_NrHoles>10</Sheet_NrHoles>
+    <Sheet_NrMarkingLines>0</Sheet_NrMarkingLines>
+    <Sheet_TopArea>120639.57</Sheet_TopArea>
+    <Sheet_Volume>120639.57</Sheet_Volume>
+    <Sheet_AreaNoHoles>121099.38</Sheet_AreaNoHoles>
+    <Sheet_TotalArea>244931.2</Sheet_TotalArea>
+    <Sheet_BoxArea>121144.02</Sheet_BoxArea>
+    <Sheet_BoxX>1626</Sheet_BoxX>
+    <Sheet_BoxY>74.5</Sheet_BoxY>
+    <Sheet_OuterContour>3390.71</Sheet_OuterContour>
+    <Sheet_TotalContour>3652.06</Sheet_TotalContour>
+    <Sheet_HoleContours>26.7_26.7_26.7_25.4_24.6_24.6_24.6_25.4_28.3_28.3</Sheet_HoleContours>
+    <Sheet_HoleRadii>3x4,25_2x4,5</Sheet_HoleRadii>
+    <Sheet_MarkingLength>0</Sheet_MarkingLength>
+    <Sheet_BendLength>1626_1626</Sheet_BendLength>
+    <Sheet_BendAngles>85_85</Sheet_BendAngles>
+    <Sheet_BendInnerRadii>1_1</Sheet_BendInnerRadii>
+    <Sheet_UnfoldSuccess>True</Sheet_UnfoldSuccess>
+    <Sheet_FilePath />
+    <Sheet_Material>blgkw&lt;4_N &lt;3 #3</Sheet_Material>
+    <Sheet_OrderNr />
+    <Sheet_DeliveryDate />
+    <Sheet_Weight>947</Sheet_Weight>
+    <Sheet_Time>00:00:39</Sheet_Time>
+    <Sheet_Cost />
+    <Sheet_NrHolesCS>2</Sheet_NrHolesCS>
+    <Sheet_HolesCS>5.05&amp;4.05&amp;90_5.05&amp;4.05&amp;90</Sheet_HolesCS>
+    <Sheet_FilePathDXF>S:\Results\DXF\MD-17-04193_2.dxf</Sheet_FilePathDXF>
+    <Sheet_AP_Queue />
+    <Sheet_AP_POLP />
+    <Sheet_AP_Machine>AutoPOL</Sheet_AP_Machine>
+    <Sheet_AP_PDF />
+    <Sheet_AP_Priority />
+    <Sheet_AP_Status />
+    <Sheet_ProfileExists>true</Sheet_ProfileExists>
+    <Sheet_Id_Object>23</Sheet_Id_Object>
+    <Sheet_Id_Source>220</Sheet_Id_Source>
+    <Sheet_Id_ParentObject>2</Sheet_Id_ParentObject>
+    <Sheet_Id_ParentSource>2</Sheet_Id_ParentSource>
+    <Sheet_FilePathPNG />
+    <Sheet_FilePathPNG_Unfold />
+    <Sheet_FilePathPNG_BendDrawing />
+    <Sheet_BendTable>AM_Zettabel_S235</Sheet_BendTable>
+    <Sheet_IsLocked />
+    <Sheet_ContourString> 0,-54.89 0,15.61 0,15.61 -0.02,15.89 -2,17.61 -1616,17.61 -1621,16.27 -1624.66,12.61 -1626,7.61 -1626,7.61 -1626,-46.89 -1624.66,-51.89 -1621,-55.55 -1616,-56.89 -1616,-56.89 -2,-56.89 -0.02,-55.16 0,-54.89 0,-54.89&amp; -654.75,12.49 -655.99,9.48 -659.55,8.27 -662.68,10.36 -662.93,14.11 -660.1,16.59 -656.41,15.86 -654.75,12.49&amp; -1264.75,12.49 -1265.99,9.48 -1269.55,8.27 -1272.68,10.36 -1272.93,14.11 -1270.1,16.59 -1266.41,15.86 -1264.75,12.49&amp; -959.75,12.49 -960.99,9.48 -964.55,8.27 -967.68,10.36 -967.93,14.11 -965.1,16.59 -961.41,15.86 -959.75,12.49&amp; -1552,-3.62 -1549.14,-4.8 -1547.98,-8.19 -1549.97,-11.17 -1553.55,-11.41 -1555.91,-8.71 -1555.21,-5.2 -1552,-3.62&amp; -52.8,-14.47 -52.8,-24.87 -54.7,-24.87 -54.7,-14.47 -52.8,-14.47&amp; -1347.8,-14.47 -1347.8,-24.87 -1349.7,-24.87 -1349.7,-14.47 -1347.8,-14.47&amp; -586.7,-14.47 -584.8,-14.47 -584.8,-24.87 -586.7,-24.87 -586.7,-14.47&amp; -1552,-27.62 -1549.14,-28.8 -1547.98,-32.19 -1549.97,-35.17 -1553.55,-35.41 -1555.91,-32.71 -1555.21,-29.2 -1552,-27.62&amp; -24.5,-19.67 -23.18,-16.48 -19.41,-15.2 -16.1,-17.42 -15.84,-21.39 -18.84,-24.01 -22.74,-23.24 -24.5,-19.67&amp; -1610.5,-19.67 -1609.18,-16.48 -1605.41,-15.2 -1602.1,-17.42 -1601.84,-21.39 -1604.84,-24.01 -1608.74,-23.24 -1610.5,-19.67</Sheet_ContourString>
+    <Sheet_NestedArea />
+    <Sheet_FilePathPDF_BendDrawing />
+    <Sheet_OriginalName>MD-17-04193_2 @ MD-17-04194_2</Sheet_OriginalName>
+    <Sheet_AddedDocument />
+    <Sheet_MaterialPriceKg />
+    <Sheet_MaterialPrice />
+    <Sheet_Machine>M1</Sheet_Machine>
+    <Sheet_AssemblyLevel>1</Sheet_AssemblyLevel>
+    <Sheet_HasBevel>False</Sheet_HasBevel>
+    <Sheet_BBox3D />
+    <Sheet_Notes />
+    <Sheet_Thread />
+    <Sheet_SmallHoles>0</Sheet_SmallHoles>
+    <Sheet_Warning />
+    <Sheet_User_Poedercoaten>False</Sheet_User_Poedercoaten>
+    <Sheet_User_Gewicht_Bruto />
+  </CalculationResult>
+  <CalculationResult>
+    <Assembly_PartName>MD-17-04194_2</Assembly_PartName>
+    <Assembly_Name>MD-17-04194_2</Assembly_Name>
+    <Assembly_Type>(sub)assembly</Assembly_Type>
+    <Assembly_Count>1</Assembly_Count>
+    <Assembly_Id_Object>2</Assembly_Id_Object>
+    <Assembly_Id_Source>2</Assembly_Id_Source>
+    <Assembly_Id_ParentObject />
+    <Assembly_Id_ParentSource />
+    <Assy_User_Finish>False</Assy_User_Finish>
+  </CalculationResult>
+  <Job>
+    <Name></Name>
+    <NrParts>4</NrParts>
+    <Weigth>0,98</Weigth>
+    <Time>00:01:06</Time>
+    <CostSheet>€ 0,00</CostSheet>
+    <CostTube>€ 0,00</CostTube>
+    <CostOther>€ 0,00</CostOther>
+    <CostTotal>€ 0,00</CostTotal>
+  </Job>
+</DocumentElement>
