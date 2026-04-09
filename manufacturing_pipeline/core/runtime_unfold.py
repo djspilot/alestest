@@ -197,6 +197,10 @@ def _vps_unfold_mode() -> str:
     # Keep tests deterministic and offline.
     if os.getenv("PYTEST_CURRENT_TEST"):
         return "off"
+    # Guard against recursive self-calls when running inside the API server:
+    # API jobs already execute unfold locally in the server process.
+    if os.getenv("API_KEYS", "").strip():
+        return "off"
     return "always" if os.path.exists(os.path.join(PROJECT_ROOT, ".vps.env")) else "off"
 
 
