@@ -22,13 +22,40 @@ function toLocalPoint(point, center, normalVector, epsilon) {
   )
 }
 
-function toOverlayPoint(point, center, normalVector, epsilon) {
+function toOverlayPoint(point, center, normalVector, epsilon, coordinatesAreCentered = false) {
   if (!Array.isArray(point) || point.length < 3) return null
+  const cx = coordinatesAreCentered ? 0 : center?.x || 0
+  const cy = coordinatesAreCentered ? 0 : center?.y || 0
+  const cz = coordinatesAreCentered ? 0 : center?.z || 0
   return new THREE.Vector3(
-    Number(point[0] || 0) - (center?.x || 0) + normalVector.x * epsilon,
-    Number(point[1] || 0) - (center?.y || 0) + normalVector.y * epsilon,
-    Number(point[2] || 0) - (center?.z || 0) + normalVector.z * epsilon,
+    Number(point[0] || 0) - cx + normalVector.x * epsilon,
+    Number(point[1] || 0) - cy + normalVector.y * epsilon,
+    Number(point[2] || 0) - cz + normalVector.z * epsilon,
   )
+}
+
+function axisComponent(point, axisKey) {
+  if (!point) return 0
+  if (axisKey === 'x') return Number(point.x ?? point[0] ?? 0)
+  if (axisKey === 'y') return Number(point.y ?? point[1] ?? 0)
+  return Number(point.z ?? point[2] ?? 0)
+}
+
+function scoreOverlayPlacement({ start, end, midpoint, primaryAxis, secondaryAxis, thicknessAxis, primarySize, secondarySize, thicknessSize }) {
+  const tolerance = 8
+  const maxPrimary = Math.max(primarySize / 2, 1)
+  const maxSecondary = Math.max(secondarySize / 2, 1)
+  const maxThickness = Math.max(thicknessSize * 4, 6)
+  const points = [start, end, midpoint].filter(Boolean)
+  if (points.length === 0) return Number.POSITIVE_INFINITY
+
+  let penalty = 0
+  for (const point of points) {
+    penalty += Math.max(0, Math.abs(axisComponent(point, primaryAxis)) - maxPrimary - tolerance)
+    penalty += Math.max(0, Math.abs(axisComponent(point, secondaryAxis)) - maxSecondary - tolerance)
+    penalty += Math.max(0, Math.abs(axisComponent(point, thicknessAxis)) - maxThickness)
+  }
+  return penalty
 }
 
 function averagePoint(points) {
@@ -1449,20 +1476,49 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
       const varyingVector = axisVectorForKey(varyingAxis)
       const basis = new THREE.Matrix4().makeBasis(lineVector, varyingVector, normalVector)
       const quaternion = new THREE.Quaternion().setFromRotationMatrix(basis)
-      // Always subtract modelInfo.center so fold-line coordinates align with
-      // the flat mesh, which StepModel renders at -center (centered at origin).
-      // A previous score-based "centered vs world" toggle was removed because
-      // it incorrectly chose raw FreeCAD coordinates when a fold line happened
-      // to be close to the FreeCAD origin but the flat mesh was far from it.
-      const localStart = toOverlayPoint(segment?.start || detail.start, modelInfo?.center, normalVector, epsilon, false)
-      const localEnd = toOverlayPoint(segment?.end || detail.end, modelInfo?.center, normalVector, epsilon, false)
-      const position = modelInfo?.center
+      const centeredStart = toOverlayPoint(segment?.start || detail.start, modelInfo?.center, normalVector, epsilon, true)
+      const centeredEnd = toOverlayPoint(segment?.end || detail.end, modelInfo?.center, normalVector, epsilon, true)
+      const worldStart = toOverlayPoint(segment?.start || detail.start, modelInfo?.center, normalVector, epsilon, false)
+      const worldEnd = toOverlayPoint(segment?.end || detail.end, modelInfo?.center, normalVector, epsilon, false)
+      const centeredMidpoint = centeredStart && centeredEnd ? centeredStart.clone().add(centeredEnd).multiplyScalar(0.5) : null
+      const worldMidpoint = worldStart && worldEnd ? worldStart.clone().add(worldEnd).multiplyScalar(0.5) : null
+      const centeredPosition = [
+        Number(detailCenter[0] || 0) + normalVector.x * epsilon,
+        Number(detailCenter[1] || 0) + normalVector.y * epsilon,
+        Number(detailCenter[2] || 0) + normalVector.z * epsilon,
+      ]
+      const worldPosition = modelInfo?.center
         ? [
             Number(detailCenter[0] || 0) - modelInfo.center.x + normalVector.x * epsilon,
             Number(detailCenter[1] || 0) - modelInfo.center.y + normalVector.y * epsilon,
             Number(detailCenter[2] || 0) - modelInfo.center.z + normalVector.z * epsilon,
           ]
         : [0, 0, 0]
+      const centeredScore = scoreOverlayPlacement({
+        start: centeredStart,
+        end: centeredEnd,
+        midpoint: centeredMidpoint || centeredPosition,
+        primaryAxis,
+        secondaryAxis,
+        thicknessAxis,
+        primarySize,
+        secondarySize,
+        thicknessSize,
+      })
+      const worldScore = scoreOverlayPlacement({
+        start: worldStart,
+        end: worldEnd,
+        midpoint: worldMidpoint || worldPosition,
+        primaryAxis,
+        secondaryAxis,
+        thicknessAxis,
+        primarySize,
+        secondarySize,
+        thicknessSize,
+      })
+      const coordinatesAreCentered = centeredScore <= worldScore
+      const localStart = coordinatesAreCentered ? centeredStart : worldStart
+      const localEnd = coordinatesAreCentered ? centeredEnd : worldEnd
       const requestedLength =
         Number(segment?.length || detail.length || logical.length) || Math.max(Math.min(length, width) * 0.9, 10)
       const shouldPreferPrimaryAxis = requestedLength > secondarySize * 1.35 && primarySize > secondarySize * 1.2
@@ -1471,6 +1527,7 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
         new THREE.Vector3(1, 0, 0),
         axisVectorForKey(fallbackAxis),
       )
+      const position = coordinatesAreCentered ? centeredPosition : worldPosition
       return {
         id,
         position,
@@ -1484,6 +1541,7 @@ function UnfoldFoldOverlay({ unfoldVisuals, modelInfo, selectedFoldId, onFoldSel
         direction: logical.type || null,
         segmentIndex: Number.isFinite(Number(segment?.index)) ? Number(segment.index) + 1 : idx + 1,
         logicalFoldId: normalizeFoldId(detail.id || logical.id || null),
+        coordinatesAreCentered,
       }
     })
   }, [bendSegments, bends, foldCount, foldDetails, length, modelInfo, width])
