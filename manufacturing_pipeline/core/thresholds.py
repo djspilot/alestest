@@ -32,7 +32,12 @@ DEFAULT_THRESHOLDS: Dict[str, Any] = {
             "angle_tol_deg": 1.0,
             "radius_tol_mm": 0.5,
             "overlap_tol_mm": 5.0,
-            "gap_tol_mm": 120.0,
+            "gap_tol_mm": 10.0,
+        },
+        "simplification": {
+            "fillet_radius_thickness_factor": 0.40,
+            "min_fillet_faces_to_defeature": 30,
+            "min_cyl_faces_to_trigger": 100,
         },
         "k_factor": {
             "default": 0.44,
@@ -142,6 +147,21 @@ def validate_thresholds(thresholds: Dict[str, Any]) -> None:
             raise ValueError(f"Threshold 'unfold.fold_merge.{key}' must be >= 0")
     if _require_number("unfold.fold_merge.angle_tol_deg", fold_merge["angle_tol_deg"]) > 180:
         raise ValueError("Threshold 'unfold.fold_merge.angle_tol_deg' must be <= 180")
+
+    simplification = unfold.get("simplification", {})
+    if simplification:
+        frf = _require_number(
+            "unfold.simplification.fillet_radius_thickness_factor",
+            simplification["fillet_radius_thickness_factor"],
+        )
+        if not 0 < frf <= 1:
+            raise ValueError("Threshold 'unfold.simplification.fillet_radius_thickness_factor' must be in (0, 1]")
+        for int_key in ("min_fillet_faces_to_defeature", "min_cyl_faces_to_trigger"):
+            int_val = simplification[int_key]
+            if isinstance(int_val, bool) or not isinstance(int_val, int):
+                raise ValueError(f"Threshold 'unfold.simplification.{int_key}' must be an integer")
+            if int_val < 1:
+                raise ValueError(f"Threshold 'unfold.simplification.{int_key}' must be >= 1")
 
     default_k = _require_number("unfold.k_factor.default", k_factor["default"])
     if not 0 < default_k <= 1:

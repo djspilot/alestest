@@ -81,6 +81,17 @@ def _get_unfold_runtime_settings(config_path=None):
             float(bucket): float(value)
             for bucket, value in unfold_thresholds["k_factor"]["thickness_buckets_mm"].items()
         },
+        "simplification": {
+            "fillet_radius_thickness_factor": float(
+                unfold_thresholds.get("simplification", {}).get("fillet_radius_thickness_factor", 0.40)
+            ),
+            "min_fillet_faces_to_defeature": int(
+                unfold_thresholds.get("simplification", {}).get("min_fillet_faces_to_defeature", 30)
+            ),
+            "min_cyl_faces_to_trigger": int(
+                unfold_thresholds.get("simplification", {}).get("min_cyl_faces_to_trigger", 100)
+            ),
+        },
     }
 
 
@@ -203,13 +214,22 @@ def _merge_fold_segments_runtime(bend_line_segments, bends_logical, fold_merge_s
         bend_radii[idx] = float(radius) if radius is not None else 0.0
         bend_lengths[idx] = float(segment.get("length") or 0.0)
 
+    # GAP-19: Adaptive merge tolerance — cap gap_tol at 15% of the longest fold
+    # line to prevent merging distant segments on small parts.
+    raw_gap_tol = settings["gap_tol_mm"]
+    fold_line_lengths = [s["length"] for s in normalized_segments if s.get("length", 0) > 0]
+    if fold_line_lengths:
+        effective_gap_tol = min(raw_gap_tol, max(fold_line_lengths) * 0.15)
+    else:
+        effective_gap_tol = raw_gap_tol
+
     merged_angles, merged_radii, _, merged_groups = freecad_unfold._merge_bends_by_collinear_segments(
         bend_angles,
         bend_radii,
         bend_lengths,
         normalized_segments,
         offset_tol=settings["offset_tol_mm"],
-        gap_tol=settings["gap_tol_mm"],
+        gap_tol=effective_gap_tol,
         overlap_tol=settings["overlap_tol_mm"],
         angle_tol=settings["angle_tol_deg"],
         radius_tol=settings["radius_tol_mm"],
@@ -876,6 +896,9 @@ shape.read(step_path)
 # K-factor lookup
 kFactorLookup = {repr(unfold_settings["k_factor_lookup"])}
 
+# Simplification config (injected from thresholds)
+unfold_simplif_settings = {repr(unfold_settings["simplification"])}
+
 def build_sheet_tree(shape, face_idx, k_factor_lookup, obj):
     try:
         return SheetMetalUnfolder.SheetTree(shape, face_idx, k_factor_lookup, obj)
@@ -907,12 +930,17 @@ def get_thickness_from_solid(solid):
         # For bent plates the largest cylindrical face can be much larger than
         # the projected plate area and underestimates thickness.
         if solid.Volume > 0:
+            all_solid_areas = [f.Area for f in solid.Faces if f.Area > 0]
+            total_surface_area = sum(all_solid_areas) if all_solid_areas else 0.0
             planar_areas = [f.Area for f in solid.Faces if "Plane" in f.Surface.TypeId and f.Area > 0]
             if planar_areas:
                 top_area = max(planar_areas)
             else:
-                all_areas = [f.Area for f in solid.Faces if f.Area > 0]
-                top_area = max(all_areas) if all_areas else 0.0
+                top_area = max(all_solid_areas) if all_solid_areas else 0.0
+
+            # GAP-6: warn when largest face is tiny compared to total surface area
+            if total_surface_area > 0 and top_area / total_surface_area < 0.03:
+                print(f"DEBUG: WARNING: top_area/total_surface_area = {{top_area/total_surface_area:.3f}} < 0.03 — thickness estimate may be unreliable")
 
             if top_area > 0:
                 estimated = solid.Volume / top_area
@@ -1255,8 +1283,17 @@ print(f"DEBUG: shape has {{len(shape.Solids)}} solids, {{len(shape.Faces)}} face
 solids = shape.Solids if shape.Solids else [shape]
 sorted_solids = sorted(solids, key=lambda s: s.Volume, reverse=True)
 
-for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_limits"]["max_solids"]}]):
+# GAP-3: Warn if more solids exist than will be processed
+_max_solids = {unfold_settings["candidate_limits"]["max_solids"]}
+if len(sorted_solids) > _max_solids:
+    print(f"DEBUG: WARNING: shape has {{len(sorted_solids)}} solids but only {{_max_solids}} will be attempted (remaining bodies dropped)")
+
+for solid_idx, solid in enumerate(sorted_solids[:_max_solids]):
     print(f"DEBUG: trying solid {{solid_idx}}, volume={{solid.Volume:.1f}}")
+    # GAP-4: Skip degenerate solids that have no usable geometry
+    if solid.Volume <= 0 or len(solid.Faces) < 2:
+        print(f"DEBUG: solid {{solid_idx}} is degenerate (volume={{solid.Volume:.1f}}, faces={{len(solid.Faces)}}), skipping")
+        continue
     # Calculate thickness first
     detected_thickness = get_thickness_from_solid(solid)
     print(f"DEBUG: detected thickness={{detected_thickness}}")
@@ -1267,29 +1304,40 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
     # leading to extreme slowdowns. Filter them out proportional to thickness.
     _all_cyl = [f for f in solid.Faces if "Cylinder" in f.Surface.TypeId]
     print(f"DEBUG: {{len(_all_cyl)}} cylindrical faces, {{len(solid.Faces)}} total")
-    if len(_all_cyl) > 100:
-        _t_ref = detected_thickness if (detected_thickness and detected_thickness > 0) else 3.0
-        # Bends require radius >= ~thickness; fillets/hole edges are much smaller.
-        # Use 40% of thickness as the cut-off, floored at 1.5mm.
-        _fillet_max_r = max(_t_ref * 0.40, 1.5)
-        _fillet_fs = []
-        for _f in _all_cyl:
-            try:
-                if _f.Surface.Radius < _fillet_max_r:
-                    _fillet_fs.append(_f)
-            except Exception:
-                pass
-        print(f"DEBUG: defeature {{len(_fillet_fs)}}/{{len(_all_cyl)}} cyl (r<{{_fillet_max_r:.1f}}mm)")
-        if len(_fillet_fs) >= 30:
-            try:
-                _simplified = solid.defeaturing(_fillet_fs)
-                if _simplified and _simplified.Faces and len(_simplified.Faces) < len(solid.Faces):
-                    print(f"DEBUG: defeaturing OK {{len(solid.Faces)}}→{{len(_simplified.Faces)}} faces")
-                    solid = _simplified
-                else:
-                    print(f"DEBUG: defeaturing returned no improvement, keeping original")
-            except Exception as _def_e:
-                print(f"DEBUG: defeaturing skipped: {{_def_e}}")
+    _min_cyl_trigger = unfold_simplif_settings["min_cyl_faces_to_trigger"]
+    if len(_all_cyl) > _min_cyl_trigger:
+        # GAP-5: guard against zero/negative thickness before using it as a ratio
+        if detected_thickness <= 0:
+            print(f"DEBUG: WARNING: thickness=0 or negative for solid {{solid_idx}}, skipping defeaturing")
+        else:
+            _t_ref = detected_thickness
+            # Bends require radius >= ~thickness; fillets/hole edges are much smaller.
+            # Use fillet_radius_thickness_factor of thickness as the cut-off, floored at 1.5mm.
+            _fillet_factor = unfold_simplif_settings["fillet_radius_thickness_factor"]
+            _min_fillet_faces = unfold_simplif_settings["min_fillet_faces_to_defeature"]
+            _fillet_max_r = max(_t_ref * _fillet_factor, 1.5)
+            _fillet_fs = []
+            for _f in _all_cyl:
+                try:
+                    if _f.Surface.Radius < _fillet_max_r:
+                        _fillet_fs.append(_f)
+                except Exception:
+                    pass
+            print(f"DEBUG: defeature {{len(_fillet_fs)}}/{{len(_all_cyl)}} cyl (r<{{_fillet_max_r:.1f}}mm)")
+            if len(_fillet_fs) >= _min_fillet_faces:
+                try:
+                    _simplified = solid.defeaturing(_fillet_fs)
+                    # GAP-13: also verify defeaturing didn't produce a degenerate solid
+                    if _simplified and _simplified.Faces and len(_simplified.Faces) < len(solid.Faces):
+                        if _simplified.Volume <= 0:
+                            print(f"DEBUG: defeaturing produced degenerate solid (volume={{_simplified.Volume:.1f}}), keeping original")
+                        else:
+                            print(f"DEBUG: defeaturing OK {{len(solid.Faces)}}→{{len(_simplified.Faces)}} faces")
+                            solid = _simplified
+                    else:
+                        print(f"DEBUG: defeaturing returned no improvement, keeping original")
+                except Exception as _def_e:
+                    print(f"DEBUG: defeaturing skipped: {{_def_e}}")
 
     # Find planar faces for base — ranked to hit the main flat face first.
     # Sheet metal has two dominant parallel faces with the largest area and
@@ -1321,6 +1369,12 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
         # Sort: first by normal alignment (main flat faces first), then by area
         planar_faces.sort(key=lambda f: (_normal_score(f), f["area"]), reverse=True)
     print(f"DEBUG: {{len(planar_faces)}} planar faces (ranked by normal alignment + area)")
+
+    # GAP-10: Early exit if there are no planar faces — cannot unfold
+    if not planar_faces:
+        print(f"DEBUG: solid {{solid_idx}} has no planar faces, cannot unfold")
+        _record_error(result, -1, "no_planar_faces", -2, f"Solid{{solid_idx}}: Geen vlakke oppervlakken gevonden; onderdeel heeft geen geschikte basisvlakken voor ontbuigen")
+        continue
 
     # Create FreeCAD document ONCE per solid — reused across all face attempts.
     # obj.Shape only needs to be assigned once since the solid doesn't change.
@@ -1393,21 +1447,57 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
                         # Weight folds heavily to prefer complete unfolds
                         score = (num_folds * 1000000) + area
                         
+                        # GAP-17: Check flat pattern Z-extent (warning only)
+                        _bbox_check = flat_compound.BoundBox
+                        _z_extent = getattr(_bbox_check, 'ZLength', 0) or getattr(_bbox_check, 'ZSize', 0)
+                        if _z_extent > 1.0:
+                            print(f"DEBUG: flat pattern is not flat: Z-extent = {{_z_extent:.2f}} mm")
+
+                        # GAP-18: Flat area sanity check (warning only)
+                        try:
+                            _flat_area = sum(f.Area for f in flat_faces)
+                            _original_area = max((f.Area for f in solid.Faces if "Plane" in f.Surface.TypeId), default=0)
+                            if _original_area > 0:
+                                _area_ratio = _flat_area / _original_area
+                                if _area_ratio < 0.5 or _area_ratio > 3.0:
+                                    print(f"DEBUG: flat area ratio suspicious: {{_area_ratio:.2f}} (flat={{_flat_area:.0f}}, original={{_original_area:.0f}})")
+                        except Exception:
+                            pass
+
                         if score > best_score:
                             best_score = score
-                            
+
                             # Get dimensions
                             bbox = flat_compound.BoundBox
                             dims = sorted([bbox.XLength, bbox.YLength, bbox.ZLength], reverse=True)
+                            flat_length = dims[0] if len(dims) > 0 else 0.0
+                            flat_width = dims[1] if len(dims) > 1 else 0.0
+
+                            # GAP-27: Degenerate flat dimension check
+                            if flat_length < 1.0 or flat_width < 1.0:
+                                print(f"DEBUG: degenerate flat pattern dimensions: {{flat_length:.2f}} x {{flat_width:.2f}} mm")
+                                _record_error(result, base_idx, "dimensions", -4, f"Solid{{solid_idx}} Face{{base_idx}}: Uitslag heeft onrealistische afmetingen: {{flat_length:.1f}} x {{flat_width:.1f}} mm")
+                                continue
 
                             # Export STEP
                             flat_step_path = os.path.join({repr(output_dir)}, {repr(part_name)} + "_flat.step")
                             flat_compound.exportStep(flat_step_path)
 
+                            # GAP-16: Validate STEP export is non-trivial
+                            if not os.path.exists(flat_step_path) or os.path.getsize(flat_step_path) < 500:
+                                print(f"DEBUG: STEP export appears empty or missing: {{flat_step_path}}")
+                                _record_error(result, base_idx, "export", -5, f"Solid{{solid_idx}} Face{{base_idx}}: STEP export is leeg of ontbreekt")
+                                continue
+
                             # Export DXF
                             dxf_path = os.path.join({repr(output_dir)}, {repr(part_name)} + "_flat.dxf")
                             import importDXF
                             importDXF.export([flat_compound], dxf_path)
+
+                            # GAP-16: Validate DXF export is non-trivial
+                            if not os.path.exists(dxf_path) or os.path.getsize(dxf_path) < 100:
+                                print(f"DEBUG: DXF export appears empty or missing: {{dxf_path}}")
+                                # DXF is optional; warn but do not abort
 
                             # Extract fold details from geometry
                             fold_details = []
@@ -1480,6 +1570,12 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
                             
                             traverse_bends(unfold_tree.root)
 
+                            # GAP-29: Validate bend angles and radii
+                            bends_logical = [
+                                b for b in bends_logical
+                                if 0 <= abs(b.get("angle") or 0) <= 180 and (b.get("radius") is None or b.get("radius", 0) > 0)
+                            ]
+
                             merged_fold_details, merged_bends_logical, bend_line_groups = _merge_fold_segments(
                                 bend_line_segments,
                                 bends_logical,
@@ -1496,8 +1592,8 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
                             result = {{
                                 "success": True,
                                 "flat_step_path": flat_step_path,
-                                "flat_length": dims[0],
-                                "flat_width": dims[1],
+                                "flat_length": flat_length,
+                                "flat_width": flat_width,
                                 "fold_lines": display_fold_lines,
                                 "raw_fold_lines": num_folds,
                                 "thickness": detected_thickness,
@@ -1590,7 +1686,7 @@ print("UNFOLD_RESULT:" + json.dumps(result))
 
         if timed_out:
             _print_runtime_debug_snapshot("    [runtime-timeout]", debug_snapshot)
-            return {"success": False, "error": f"Timeout (>{timeout_seconds}s)", "timeout": True, "timeout_seconds": timeout_seconds}
+            return {"success": False, "error": f"Timeout in subprocess (>{timeout_seconds}s) [{runtime_label}]", "timeout": True, "timeout_seconds": timeout_seconds}
 
         if returncode != 0:
             stderr_str = (stderr or "").strip()
@@ -1771,7 +1867,7 @@ print("DIRECT_UNFOLD_RESULT:" + json.dumps(payload))
 
     if timed_out:
         _print_runtime_debug_snapshot("    [direct-python-timeout]", debug_snapshot)
-        return {"success": False, "error": f"Timeout (>{timeout_seconds}s) in FreeCAD Python runtime", "timeout": True, "timeout_seconds": timeout_seconds}
+        return {"success": False, "error": f"Timeout in subprocess (>{timeout_seconds}s) [direct-freecad-python]", "timeout": True, "timeout_seconds": timeout_seconds}
 
     for line in reversed((stdout or "").splitlines()):
         if not line.startswith("DIRECT_UNFOLD_RESULT:"):
@@ -1898,6 +1994,28 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
                 timeout_seconds=timeout_seconds,
             )
             timings["subprocess_fallback_ms"] = round((time.perf_counter() - _t0) * 1000)
+            # GAP-22: If subprocess also returned no result JSON (transport-level failure),
+            # retry once more with a fresh subprocess call.
+            # Transport errors are identified by: no error_details, no attempts recorded,
+            # and error message indicates no result was returned (not a normal SheetMetal failure).
+            _is_transport = (
+                not python_runtime_result.get("success")
+                and not python_runtime_result.get("error_details")
+                and python_runtime_result.get("attempts") is None
+                and "No result returned" in (python_runtime_result.get("error") or "")
+            )
+            if _is_transport:
+                print("    [retry] subprocess returned no result JSON; retrying once")
+                _t0 = time.perf_counter()
+                python_runtime_result = _run_unfold_subprocess_attempt(
+                    step_file,
+                    output_dir,
+                    part_name,
+                    sys_config,
+                    runtime_label="direct-freecad-python-retry",
+                    timeout_seconds=timeout_seconds,
+                )
+                timings["subprocess_retry_ms"] = round((time.perf_counter() - _t0) * 1000)
     else:
         _t0 = time.perf_counter()
         python_runtime_result = _run_unfold_subprocess_attempt(
@@ -1932,6 +2050,19 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
         timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
         timings["route"] = "failed"
         python_runtime_result["unfold_timings_ms"] = timings
+        # GAP-24: theoretical unfold as final fallback when all FreeCAD attempts fail
+        try:
+            _t0 = time.perf_counter()
+            _theoretical = run_theoretical_unfold_standalone(step_file)
+            timings["theoretical_fallback_ms"] = round((time.perf_counter() - _t0) * 1000)
+            if _theoretical:
+                python_runtime_result.setdefault("estimated_length", _theoretical.get("estimated_length"))
+                python_runtime_result.setdefault("estimated_width", _theoretical.get("estimated_width"))
+                python_runtime_result["theoretical"] = True
+                python_runtime_result["theoretical_data"] = _theoretical
+                print(f"  [unfold] Theoretical fallback: ~{_theoretical.get('estimated_length', 0):.0f} x {_theoretical.get('estimated_width', 0):.0f} mm (indicatief)")
+        except Exception as _th_exc:
+            print(f"  [unfold] Theoretical fallback failed: {_th_exc}")
         _print_unfold_timings(part_name, timings)
         return python_runtime_result
 
@@ -1976,6 +2107,19 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     fallback_result.setdefault("direct_runtime_error", direct_result.get("error"))
     fallback_result.setdefault("python_runtime_error", python_runtime_result.get("error"))
     timings["route"] = "all-failed"
+    # GAP-24: theoretical unfold as final fallback when all FreeCAD attempts fail
+    try:
+        _t0 = time.perf_counter()
+        _theoretical = run_theoretical_unfold_standalone(step_file)
+        timings["theoretical_fallback_ms"] = round((time.perf_counter() - _t0) * 1000)
+        if _theoretical:
+            fallback_result.setdefault("estimated_length", _theoretical.get("estimated_length"))
+            fallback_result.setdefault("estimated_width", _theoretical.get("estimated_width"))
+            fallback_result["theoretical"] = True
+            fallback_result["theoretical_data"] = _theoretical
+            print(f"  [unfold] Theoretical fallback: ~{_theoretical.get('estimated_length', 0):.0f} x {_theoretical.get('estimated_width', 0):.0f} mm (indicatief)")
+    except Exception as _th_exc:
+        print(f"  [unfold] Theoretical fallback failed: {_th_exc}")
     fallback_result["unfold_timings_ms"] = timings
     _print_unfold_timings(part_name, timings)
     return fallback_result
@@ -2012,7 +2156,9 @@ def run_unfold(step_file, output_dir, part_name, analysis):
         )
 
         if timed_out:
-            print(f"  ✗ Unfold timeout (>{timeout_seconds}s)")
+            print(f"  ✗ Unfold timeout (>{timeout_seconds}s) [legacy-unfold]")
+            unfold_result["error"] = f"Timeout in subprocess (>{timeout_seconds}s) [legacy-unfold]"
+            unfold_result["timeout"] = True
             return unfold_result
 
         if returncode == 0:
@@ -2110,4 +2256,45 @@ print("THEORETICAL_RESULT:" + json.dumps(result))
 
     except Exception as e:
         print(f"  [!] Theoretische berekening gefaald: {e}")
+        return None
+
+
+def run_theoretical_unfold_standalone(step_file):
+    """Calculate theoretical unfold dimensions without requiring an analysis object.
+
+    Used as a final fallback in run_unfold_to_step when all FreeCAD attempts fail.
+    Returns a dict with estimated_length, estimated_width, and bend info, or None on failure.
+    """
+    try:
+        sys_config = SystemConfig.from_env()
+        freecad_python = sys_config.freecad_python
+        freecad_env = _build_freecad_subprocess_env(sys_config)
+
+        calc_code = f'''
+import sys
+sys.path.insert(0, {repr(PIPELINE_DIR)})
+from manufacturing_pipeline.analysis.freecad_unfold import calculate_theoretical_unfold
+import json
+
+result = calculate_theoretical_unfold({repr(step_file)})
+print("THEORETICAL_RESULT:" + json.dumps(result))
+'''
+        result = subprocess.run(
+            [freecad_python, "-c", calc_code],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=freecad_env,
+        )
+
+        for line in result.stdout.split('\n'):
+            if 'THEORETICAL_RESULT:' in line:
+                data = json.loads(line.split('THEORETICAL_RESULT:')[1])
+                if data.get('success') or data.get('estimated_length'):
+                    return data
+
+        return None
+
+    except Exception as e:
+        print(f"  [!] Standalone theoretische berekening gefaald: {e}")
         return None
