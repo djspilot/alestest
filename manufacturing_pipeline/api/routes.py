@@ -194,7 +194,18 @@ def _build_unfold_result(job_id: str, result: dict | None, error: str | None = N
         else None
     )
     # Pass through debug/timing fields from the unfold result
-    for key in ("unfold_timings_ms", "route", "error_details", "theoretical", "attempts", "simplified_faces"):
+    for key in (
+        "unfold_timings_ms",
+        "route",
+        "error_details",
+        "theoretical",
+        "attempts",
+        "simplified_faces",
+        "selected_strategy",
+        "skip_sheet_tree_reason",
+        "complexity_score",
+        "geometry_diagnostics",
+    ):
         if result and key in result and key not in payload:
             payload[key] = result[key]
     return payload

@@ -491,6 +491,10 @@ def _build_timeline(result: dict, analysis, total_holes: int, timing_data: dict 
                     "flat_length": unfold_result.get("flat_length"),
                     "flat_width": unfold_result.get("flat_width"),
                     "fold_lines": unfold_result.get("fold_lines"),
+                    "selected_strategy": unfold_result.get("selected_strategy"),
+                    "skip_sheet_tree_reason": unfold_result.get("skip_sheet_tree_reason"),
+                    "complexity_score": unfold_result.get("complexity_score"),
+                    "geometry_diagnostics": unfold_result.get("geometry_diagnostics"),
                     "fold_details": unfold_result.get("fold_details", []),
                     "bends_logical": unfold_result.get("bends_logical", []),
                     "error": unfold_result.get("error"),
@@ -774,6 +778,10 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
                 "flat_length": unfold_result.get("flat_length") if unfold_result else None,
                 "flat_width": unfold_result.get("flat_width") if unfold_result else None,
                 "fold_lines": unfold_result.get("fold_lines") if unfold_result else 0,
+                "selected_strategy": unfold_result.get("selected_strategy") if unfold_result else None,
+                "skip_sheet_tree_reason": unfold_result.get("skip_sheet_tree_reason") if unfold_result else None,
+                "complexity_score": unfold_result.get("complexity_score") if unfold_result else None,
+                "geometry_diagnostics": unfold_result.get("geometry_diagnostics") if unfold_result else None,
                 "fold_details": unfold_result.get("fold_details", []) if unfold_result else [],
                 "bends_logical": [
                     {

@@ -518,6 +518,10 @@ class JobManager:
                             "bend_line_groups": unfold_result.get("bend_line_groups", []),
                             "flat_step_url": unfold_result.get("flat_step_url"),
                             "dxf_url": unfold_result.get("dxf_url"),
+                            "selected_strategy": unfold_result.get("selected_strategy"),
+                            "skip_sheet_tree_reason": unfold_result.get("skip_sheet_tree_reason"),
+                            "complexity_score": unfold_result.get("complexity_score"),
+                            "geometry_diagnostics": unfold_result.get("geometry_diagnostics"),
                         }
                     except Exception:
                         pass

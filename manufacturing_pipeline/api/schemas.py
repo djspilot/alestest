@@ -134,7 +134,11 @@ class UnfoldResult(BaseModel):
     error_details: list[dict] = Field(default_factory=list)
     theoretical: bool = False             # true when only estimated dims returned
     attempts: Optional[int] = None        # how many base faces were tried
-    simplified_faces: Optional[int] = None  # face count after defeaturing (None = not simplified)
+    simplified_faces: Optional[int] = None  # reserved for any future simplification pass (currently unused)
+    selected_strategy: Optional[str] = None  # "auto" | "new_only" | "old_only"
+    skip_sheet_tree_reason: Optional[str] = None
+    complexity_score: Optional[float] = None
+    geometry_diagnostics: Optional[dict] = None
 
 
 class UnfoldStatus(BaseModel):

@@ -285,6 +285,10 @@ def _run_old_unfolder(step_path: str, output_dir: str, part_name: str, k_factor:
         "bend_line_groups": result.get("bend_line_groups", []),
         "raw_fold_lines": result.get("raw_fold_lines"),
         "used_face_idx": result.get("used_face_idx"),
+        "selected_strategy": result.get("selected_strategy"),
+        "skip_sheet_tree_reason": result.get("skip_sheet_tree_reason"),
+        "complexity_score": result.get("complexity_score"),
+        "geometry_diagnostics": result.get("geometry_diagnostics"),
         "unfolder_variant": "old",
         "sheetmetal_source": result.get("sheetmetal_source"),
     }

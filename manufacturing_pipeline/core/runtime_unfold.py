@@ -11,6 +11,7 @@ import queue
 import time
 import uuid
 import atexit
+from urllib.parse import urlencode
 from types import SimpleNamespace
 
 from manufacturing_pipeline.analysis import freecad_unfold
@@ -18,7 +19,7 @@ from manufacturing_pipeline.core.config import SystemConfig
 from manufacturing_pipeline.core.thresholds import get_unfold_thresholds
 from manufacturing_pipeline.core.freecad_vendor import ensure_vendor_sheetmetal_on_sys_path
 
-from manufacturing_pipeline.core.paths import PIPELINE_DIR, SCRIPTS_DIR
+from manufacturing_pipeline.core.paths import PIPELINE_DIR, PROJECT_ROOT, SCRIPTS_DIR
 
 UNFOLD_ERROR_MESSAGES = {
     1: "Volume onbruikbaar - geen echt 3D sheet metal met uniforme dikte",
@@ -167,6 +168,173 @@ def _run_process_with_timeout(cmd, *, env, timeout_seconds, text=True):
         _kill_process_tree(proc)
         stdout, stderr = proc.communicate()
         return None, stdout or "", stderr or "", True
+
+
+def _load_dotenv_file(path: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path or not os.path.exists(path):
+        return values
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            for raw in handle:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key:
+                    values[key] = value
+    except Exception:
+        return {}
+    return values
+
+
+def _vps_unfold_mode() -> str:
+    explicit = os.getenv("FREECAD_UNFOLD_VPS_MODE", "").strip().lower()
+    if explicit:
+        return explicit
+    # Keep tests deterministic and offline.
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return "off"
+    return "always" if os.path.exists(os.path.join(PROJECT_ROOT, ".vps.env")) else "off"
+
+
+def _resolve_vps_api_config() -> tuple[str | None, str | None]:
+    domain = os.getenv("VPS_DOMAIN_API", "").strip()
+    api_key = os.getenv("API_KEY", "").strip()
+    if domain and api_key:
+        return domain, api_key
+
+    dotenv = _load_dotenv_file(os.path.join(PROJECT_ROOT, ".vps.env"))
+    domain = domain or str(dotenv.get("VPS_DOMAIN_API", "")).strip()
+    api_key = api_key or str(dotenv.get("API_KEY", "")).strip()
+    if not domain or not api_key:
+        return None, None
+    return domain, api_key
+
+
+def _normalize_vps_url(domain: str, path: str, query: dict | None = None) -> str:
+    base = domain.strip()
+    if base.startswith("http://") or base.startswith("https://"):
+        root = base.rstrip("/")
+    else:
+        root = f"https://{base.rstrip('/')}"
+    path_part = path if path.startswith("/") else f"/{path}"
+    query_part = f"?{urlencode(query)}" if query else ""
+    return f"{root}{path_part}{query_part}"
+
+
+def _curl_json(url: str, api_key: str, *, method: str = "GET", form_file: str | None = None, timeout_seconds: int = 60):
+    cmd = [
+        "curl",
+        "--max-time",
+        str(max(10, int(timeout_seconds))),
+        "-sS",
+        "-H",
+        f"X-API-Key: {api_key}",
+    ]
+    if method.upper() != "GET":
+        cmd.extend(["-X", method.upper()])
+    if form_file:
+        cmd.extend(["-F", f"file=@{form_file}"])
+    cmd.append(url)
+    returncode, stdout, stderr, timed_out = _run_process_with_timeout(
+        cmd,
+        env=os.environ.copy(),
+        timeout_seconds=max(20, int(timeout_seconds) + 5),
+    )
+    if timed_out:
+        raise RuntimeError(f"VPS API timeout for {url}")
+    if returncode != 0:
+        raise RuntimeError(f"VPS API curl error ({returncode}): {(stderr or stdout).strip()[:300]}")
+    try:
+        return json.loads((stdout or "").strip() or "{}")
+    except Exception as exc:
+        raise RuntimeError(f"VPS API gaf geen geldige JSON terug: {(stdout or '').strip()[:300]}") from exc
+
+
+def _curl_download(url: str, api_key: str, output_path: str, timeout_seconds: int = 120) -> bool:
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    cmd = [
+        "curl",
+        "--max-time",
+        str(max(20, int(timeout_seconds))),
+        "-sS",
+        "-H",
+        f"X-API-Key: {api_key}",
+        "-o",
+        output_path,
+        url,
+    ]
+    returncode, stdout, stderr, timed_out = _run_process_with_timeout(
+        cmd,
+        env=os.environ.copy(),
+        timeout_seconds=max(30, int(timeout_seconds) + 10),
+    )
+    if timed_out or returncode != 0:
+        return False
+    return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+
+
+def _run_vps_unfold_attempt(step_file: str, output_dir: str, part_name: str, timeout_seconds: int) -> dict:
+    domain, api_key = _resolve_vps_api_config()
+    if not domain or not api_key:
+        return {"success": False, "error": "VPS unfold geconfigureerd maar VPS_DOMAIN_API/API_KEY ontbreken"}
+
+    analyze_url = _normalize_vps_url(domain, "/api/v1/analyze", {"force": "true"})
+    analyze_payload = _curl_json(
+        analyze_url,
+        api_key,
+        method="POST",
+        form_file=step_file,
+        timeout_seconds=max(timeout_seconds, 120),
+    )
+    job_id = str(analyze_payload.get("job_id") or "").strip()
+    if not job_id:
+        return {"success": False, "error": f"VPS analyze gaf geen job_id terug: {analyze_payload}"}
+
+    trigger_url = _normalize_vps_url(domain, f"/api/v1/jobs/{job_id}/unfold")
+    _curl_json(trigger_url, api_key, method="POST", timeout_seconds=60)
+
+    status_url = _normalize_vps_url(domain, f"/api/v1/jobs/{job_id}/unfold")
+    deadline = time.time() + max(60, int(timeout_seconds) + 120)
+    last_status = None
+    while time.time() < deadline:
+        status_payload = _curl_json(status_url, api_key, method="GET", timeout_seconds=60)
+        status = str(status_payload.get("status") or "").lower()
+        last_status = status_payload
+        if status in {"completed", "failed"}:
+            break
+        time.sleep(5)
+
+    if not last_status:
+        return {"success": False, "error": "VPS unfold polling gaf geen status terug"}
+
+    result_payload = dict(last_status.get("result") or {})
+    if not result_payload:
+        if str(last_status.get("status") or "").lower() == "failed":
+            return {"success": False, "error": str(last_status.get("error") or "VPS unfold status failed")}
+        return {"success": False, "error": "VPS unfold gaf geen result payload terug"}
+
+    result_payload.setdefault("runtime_source", "vps-unfold-api")
+    result_payload["vps_job_id"] = job_id
+
+    flat_step_url = result_payload.get("flat_step_url")
+    if isinstance(flat_step_url, str) and flat_step_url.strip():
+        flat_step_path = os.path.join(output_dir, f"{part_name}_flat.step")
+        download_url = _normalize_vps_url(domain, flat_step_url)
+        if _curl_download(download_url, api_key, flat_step_path):
+            result_payload["flat_step_path"] = flat_step_path
+
+    dxf_url = result_payload.get("dxf_url")
+    if isinstance(dxf_url, str) and dxf_url.strip():
+        dxf_path = os.path.join(output_dir, f"{part_name}_flat.dxf")
+        download_url = _normalize_vps_url(domain, dxf_url)
+        if _curl_download(download_url, api_key, dxf_path):
+            result_payload["dxf_path"] = dxf_path
+
+    return result_payload
 
 
 def _merge_fold_segments_runtime(bend_line_segments, bends_logical, fold_merge_settings=None):
@@ -1182,7 +1350,76 @@ def _extract_fold_segments_from_edges(fold_edges):
             pass
     return fold_details, bend_line_segments
 
-def _attempt_new_unfolder(obj, base_idx, detected_thickness):
+def _collect_cylinder_strategy_metrics(solid, detected_thickness):
+    total_faces = len(getattr(solid, "Faces", []) or [])
+    all_cyl_faces = []
+    likely_bend_cyl_faces = 0
+    likely_detail_cyl_faces = 0
+    small_radius_cyl_faces = 0
+    thickness = float(detected_thickness or 0.0)
+    bend_radius_min = max(0.25, thickness * 0.35) if thickness > 0 else 0.25
+    bend_radius_max = max(2.5, thickness * 4.0) if thickness > 0 else 2.5
+    detail_radius_max = max(1.0, thickness * 0.8) if thickness > 0 else 1.0
+    min_bend_length = max(5.0, thickness * 2.0) if thickness > 0 else 5.0
+    min_bend_area = max(20.0, thickness * 8.0) if thickness > 0 else 20.0
+
+    for face in getattr(solid, "Faces", []) or []:
+        try:
+            if "Cylinder" not in face.Surface.TypeId:
+                continue
+            cyl = face.Surface
+            radius = abs(float(getattr(cyl, "Radius", 0.0) or 0.0))
+            area = abs(float(getattr(face, "Area", 0.0) or 0.0))
+            u_min, u_max, v_min, v_max = face.ParameterRange
+            angle_span = abs(float(u_max) - float(u_min))
+            axial_length = abs(float(v_max) - float(v_min))
+            all_cyl_faces.append(face)
+
+            if radius <= detail_radius_max:
+                small_radius_cyl_faces += 1
+
+            looks_like_bend = (
+                bend_radius_min <= radius <= bend_radius_max
+                and angle_span >= 0.35
+                and axial_length >= min_bend_length
+                and area >= min_bend_area
+            )
+            looks_like_detail = (
+                radius <= detail_radius_max
+                or area <= min_bend_area
+                or angle_span < 0.35
+                or axial_length < min_bend_length
+            )
+
+            if looks_like_bend:
+                likely_bend_cyl_faces += 1
+            if looks_like_detail:
+                likely_detail_cyl_faces += 1
+        except Exception:
+            continue
+
+    cyl_faces = len(all_cyl_faces)
+    cyl_ratio = (float(cyl_faces) / float(total_faces)) if total_faces else 0.0
+    complexity_score = round(
+        (cyl_faces * 1.0)
+        + (likely_detail_cyl_faces * 1.5)
+        + (small_radius_cyl_faces * 0.75)
+        + (total_faces * 0.1)
+        + (cyl_ratio * 25.0)
+        - (likely_bend_cyl_faces * 0.5),
+        2,
+    )
+    return {{
+        "total_faces": total_faces,
+        "cyl_faces": cyl_faces,
+        "cyl_ratio": round(cyl_ratio, 3),
+        "likely_bend_cyl_faces": likely_bend_cyl_faces,
+        "likely_detail_cyl_faces": likely_detail_cyl_faces,
+        "small_radius_cyl_faces": small_radius_cyl_faces,
+        "complexity_score": complexity_score,
+    }}
+
+def _attempt_new_unfolder(obj, base_idx, detected_thickness, strategy_meta=None):
     if not new_unfolder_available:
         raise RuntimeError(new_unfolder_import_error or "SheetMetalNewUnfolder niet beschikbaar")
 
@@ -1266,6 +1503,10 @@ def _attempt_new_unfolder(obj, base_idx, detected_thickness):
         "sheetmetal_source": getattr(SheetMetalNewUnfolder, "__file__", ""),
         "unfolder_variant": "new",
         "used_face_idx": base_idx,
+        "selected_strategy": (strategy_meta or {{}}).get("selected_strategy"),
+        "skip_sheet_tree_reason": (strategy_meta or {{}}).get("skip_sheet_tree_reason"),
+        "complexity_score": (strategy_meta or {{}}).get("complexity_score"),
+        "geometry_diagnostics": dict((strategy_meta or {{}}).get("geometry_diagnostics") or {{}}),
     }}
 
 result = {{
@@ -1274,6 +1515,10 @@ result = {{
     "attempts": 0,
     "error_details": [],
     "first_traceback": None,
+    "selected_strategy": None,
+    "skip_sheet_tree_reason": None,
+    "complexity_score": None,
+    "geometry_diagnostics": {{}},
 }}
 best_score = -1
 
@@ -1306,18 +1551,60 @@ for solid_idx, solid in enumerate(sorted_solids[:_max_solids]):
     print(f"DEBUG: detected thickness={{detected_thickness}}")
 
     # COMPLEXITY STRATEGY: Count cylindrical faces to decide which unfolders to try.
-    # SheetTree.Bend_analysis() traverses ALL cylindrical faces — on parts with 100+
-    # edge fillets (e.g. heavily filleted laser-cut holes) this becomes O(n²) and
-    # can take 10-40+ minutes. BRepAlgoAPI_Defeaturing (used by solid.defeaturing())
-    # is similarly slow for >30 faces. Instead: skip SheetTree entirely for complex
-    # parts and rely on SheetMetalNewUnfolder which bypasses Bend_analysis.
+    # SheetTree.Bend_analysis() traverses all cylindrical faces and becomes very slow
+    # on parts with many filleted holes or edge rounds. We do not try defeaturing
+    # anymore; for high-cylinder-count parts we skip SheetTree entirely and rely on
+    # SheetMetalNewUnfolder, which bypasses Bend_analysis.
+    _strategy_metrics = _collect_cylinder_strategy_metrics(solid, detected_thickness)
     _all_cyl = [f for f in solid.Faces if "Cylinder" in f.Surface.TypeId]
-    print(f"DEBUG: {{len(_all_cyl)}} cylindrical faces, {{len(solid.Faces)}} total")
+    print(
+        "DEBUG: cylinder metrics "
+        f"cyl={{_strategy_metrics['cyl_faces']}}/{{_strategy_metrics['total_faces']}}, "
+        f"likely_bends={{_strategy_metrics['likely_bend_cyl_faces']}}, "
+        f"likely_details={{_strategy_metrics['likely_detail_cyl_faces']}}, "
+        f"small_radius={{_strategy_metrics['small_radius_cyl_faces']}}, "
+        f"score={{_strategy_metrics['complexity_score']}}"
+    )
     _skip_tree_threshold = unfold_simplif_settings["skip_sheet_tree_cyl_threshold"]
+    _score_skip_threshold = max(float(_skip_tree_threshold), 80.0)
+    _skip_reasons = []
     _skip_sheet_tree = False
     if len(_all_cyl) > _skip_tree_threshold:
+        _skip_reasons.append(
+            f"cyl_faces={{len(_all_cyl)}} exceeds threshold {{_skip_tree_threshold}}"
+        )
+    if (
+        _strategy_metrics["complexity_score"] >= _score_skip_threshold
+        and _strategy_metrics["likely_detail_cyl_faces"] >= max(40, _strategy_metrics["likely_bend_cyl_faces"] * 2)
+    ):
+        _skip_reasons.append(
+            f"complexity_score={{_strategy_metrics['complexity_score']}} with many likely detail cylinders"
+        )
+    if _skip_reasons:
         _skip_sheet_tree = True
-        print(f"DEBUG: {{len(_all_cyl)}} cyl faces > {{_skip_tree_threshold}} → skip SheetTree (Bend_analysis too slow), new unfolder only")
+    _selected_strategy = (
+        "new_only"
+        if _skip_sheet_tree or unfolder_variant_mode == "new"
+        else ("old_only" if unfolder_variant_mode == "old" else "auto")
+    )
+    _skip_sheet_tree_reason = "; ".join(_skip_reasons) if _skip_reasons else None
+    _strategy_meta = {{
+        "selected_strategy": _selected_strategy,
+        "skip_sheet_tree_reason": _skip_sheet_tree_reason,
+        "complexity_score": _strategy_metrics["complexity_score"],
+        "geometry_diagnostics": dict(_strategy_metrics),
+    }}
+    result.update(_strategy_meta)
+    if _skip_sheet_tree_reason:
+        print(
+            f"DEBUG: strategy={{_selected_strategy}} for solid {{solid_idx}} "
+            f"-> skip SheetTree: {{_skip_sheet_tree_reason}}"
+        )
+    else:
+        print(
+            f"DEBUG: strategy={{_selected_strategy}} for solid {{solid_idx}} "
+            f"-> SheetTree remains eligible"
+        )
 
     # Find planar faces for base — ranked to hit the main flat face first.
     # Sheet metal has two dominant parallel faces with the largest area and
@@ -1364,17 +1651,21 @@ for solid_idx, solid in enumerate(sorted_solids[:_max_solids]):
     doc.recompute()
 
     # Try the configured number of largest faces to find the best base for unfolding
-    for base_info in planar_faces[:{unfold_settings["candidate_limits"]["max_base_faces_per_solid"]}]:
+    _max_base_faces = {unfold_settings["candidate_limits"]["max_base_faces_per_solid"]}
+    if _skip_sheet_tree:
+        _max_base_faces = min(_max_base_faces, 2)
+        print(f"DEBUG: high-complexity part -> limit base face attempts to {{_max_base_faces}}")
+    for base_info in planar_faces[:_max_base_faces]:
         base_idx = base_info["index"]
         result["attempts"] += 1
         print(f"DEBUG: trying base face {{base_idx}}, area={{base_info['area']:.1f}}")
         try:
-            # When _skip_sheet_tree is set, only try the new unfolder — SheetTree.Bend_analysis
-            # is O(n²) on parts with many cylindrical faces (edge fillets) and would time out.
+            # When _skip_sheet_tree is set, only try the new unfolder because
+            # SheetTree.Bend_analysis is too slow on high-cylinder-count parts.
             should_try_new = unfolder_variant_mode in ("auto", "new") or _skip_sheet_tree
             if should_try_new:
                 try:
-                    new_result = _attempt_new_unfolder(obj, base_idx, detected_thickness)
+                    new_result = _attempt_new_unfolder(obj, base_idx, detected_thickness, _strategy_meta)
                     new_result["attempts"] = result.get("attempts", 0)
                     new_result["error_details"] = result.get("error_details", [])
                     new_result["first_traceback"] = result.get("first_traceback")
@@ -1589,6 +1880,10 @@ for solid_idx, solid in enumerate(sorted_solids[:_max_solids]):
                                 "sheetmetal_source": sheetmetal_source,
                                 "unfolder_variant": "old",
                                 "used_face_idx": base_idx,
+                                "selected_strategy": _selected_strategy,
+                                "skip_sheet_tree_reason": _skip_sheet_tree_reason,
+                                "complexity_score": _strategy_metrics["complexity_score"],
+                                "geometry_diagnostics": dict(_strategy_metrics),
                             }}
                 elif unfold_tree.error_code:
                     _record_error(
@@ -1822,6 +2117,10 @@ payload = {{
     "bend_line_groups": result.get("bend_line_groups", []),
     "raw_fold_lines": result.get("raw_fold_lines"),
     "used_face_idx": result.get("used_face_idx"),
+    "selected_strategy": result.get("selected_strategy"),
+    "skip_sheet_tree_reason": result.get("skip_sheet_tree_reason"),
+    "complexity_score": result.get("complexity_score"),
+    "geometry_diagnostics": result.get("geometry_diagnostics"),
 }}
 
 if result.get("success") and result.get("flat_shape") is not None:
@@ -1939,8 +2238,37 @@ def run_unfold_to_step(step_file, output_dir, part_name, analysis):
     except OSError:
         size_mb = 0.0
     print(f"  [unfold] File size: {size_mb:.1f} MB → timeout: {timeout_seconds}s")
+    os.makedirs(output_dir, exist_ok=True)
 
     mode = os.getenv("FREECAD_UNFOLD_MODE", "auto").strip().lower()
+    vps_mode = _vps_unfold_mode()
+    if vps_mode not in {"off", "0", "false", "local", "disabled"}:
+        _t0 = time.perf_counter()
+        try:
+            vps_result = _run_vps_unfold_attempt(
+                step_file,
+                output_dir,
+                part_name,
+                timeout_seconds=timeout_seconds,
+            )
+        except Exception as exc:
+            vps_result = {"success": False, "error": f"VPS unfold exception: {exc}"}
+        timings["vps_attempt_ms"] = round((time.perf_counter() - _t0) * 1000)
+        if vps_result.get("success"):
+            timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
+            timings["route"] = "vps"
+            vps_result.setdefault("route", "vps")
+            vps_result = canonicalize_unfold_payload(vps_result)
+            vps_result["unfold_timings_ms"] = timings
+            _print_unfold_timings(part_name, timings)
+            return vps_result
+        if vps_mode in {"always", "vps", "strict"}:
+            timings["total_ms"] = round((time.perf_counter() - _t_total) * 1000)
+            timings["route"] = "vps-failed"
+            vps_result.setdefault("route", "vps-failed")
+            vps_result["unfold_timings_ms"] = timings
+            _print_unfold_timings(part_name, timings)
+            return vps_result
 
     direct_result = {"success": False, "error": "Host direct mode skipped"}
     if mode not in {"direct-python", "python"}:
