@@ -1261,6 +1261,36 @@ for solid_idx, solid in enumerate(sorted_solids[:{unfold_settings["candidate_lim
     detected_thickness = get_thickness_from_solid(solid)
     print(f"DEBUG: detected thickness={{detected_thickness}}")
 
+    # PRE-SIMPLIFICATION: remove small cylindrical fillet faces before SheetTree.
+    # Parts with many edge fillets (e.g. heavily rounded holes/bends) cause
+    # SheetTree.Bend_analysis to traverse hundreds of non-bend cylindrical faces,
+    # leading to extreme slowdowns. Filter them out proportional to thickness.
+    _all_cyl = [f for f in solid.Faces if "Cylinder" in f.Surface.TypeId]
+    print(f"DEBUG: {{len(_all_cyl)}} cylindrical faces, {{len(solid.Faces)}} total")
+    if len(_all_cyl) > 100:
+        _t_ref = detected_thickness if (detected_thickness and detected_thickness > 0) else 3.0
+        # Bends require radius >= ~thickness; fillets/hole edges are much smaller.
+        # Use 40% of thickness as the cut-off, floored at 1.5mm.
+        _fillet_max_r = max(_t_ref * 0.40, 1.5)
+        _fillet_fs = []
+        for _f in _all_cyl:
+            try:
+                if _f.Surface.Radius < _fillet_max_r:
+                    _fillet_fs.append(_f)
+            except Exception:
+                pass
+        print(f"DEBUG: defeature {{len(_fillet_fs)}}/{{len(_all_cyl)}} cyl (r<{{_fillet_max_r:.1f}}mm)")
+        if len(_fillet_fs) >= 30:
+            try:
+                _simplified = solid.defeaturing(_fillet_fs)
+                if _simplified and _simplified.Faces and len(_simplified.Faces) < len(solid.Faces):
+                    print(f"DEBUG: defeaturing OK {{len(solid.Faces)}}→{{len(_simplified.Faces)}} faces")
+                    solid = _simplified
+                else:
+                    print(f"DEBUG: defeaturing returned no improvement, keeping original")
+            except Exception as _def_e:
+                print(f"DEBUG: defeaturing skipped: {{_def_e}}")
+
     # Find planar faces for base — ranked to hit the main flat face first.
     # Sheet metal has two dominant parallel faces with the largest area and
     # matching normals (roughly antiparallel). Prefer faces whose normals are
