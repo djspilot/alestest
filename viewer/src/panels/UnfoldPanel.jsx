@@ -93,19 +93,62 @@ export default function UnfoldPanel({ unfoldVisuals, selectedFoldId, onFoldSelec
         </div>
       )}
 
+      {unfoldVisuals?.theoretical && (
+        <div style={{ color: '#ff9800', fontSize: 11, marginTop: 4 }}>
+          ⚠ Theoretische uitslag (FreeCAD ontbuigen niet geslaagd — geschatte afmetingen)
+        </div>
+      )}
+
+      {unfoldVisuals?.unfold_timings_ms && (
+        <div style={{ marginTop: 10 }}>
+          <div className="timeline-stage" style={{ marginBottom: 4 }}>Timing</div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, color: '#ccc' }}>
+            <tbody>
+              {unfoldVisuals.route && <tr><td style={{ padding: '2px 8px 2px 0', color: '#888' }}>Route</td><td style={{ fontFamily: 'monospace' }}>{unfoldVisuals.route}</td></tr>}
+              {unfoldVisuals.unfold_timings_ms.direct_attempt_ms != null && <tr><td style={{ padding: '2px 8px 2px 0', color: '#888' }}>Direct</td><td style={{ fontFamily: 'monospace' }}>{unfoldVisuals.unfold_timings_ms.direct_attempt_ms} ms</td></tr>}
+              {unfoldVisuals.unfold_timings_ms.subprocess_attempt_ms != null && <tr><td style={{ padding: '2px 8px 2px 0', color: '#888' }}>Subprocess</td><td style={{ fontFamily: 'monospace' }}>{unfoldVisuals.unfold_timings_ms.subprocess_attempt_ms} ms</td></tr>}
+              {unfoldVisuals.unfold_timings_ms.worker_attempt_ms != null && <tr><td style={{ padding: '2px 8px 2px 0', color: '#888' }}>Worker</td><td style={{ fontFamily: 'monospace' }}>{unfoldVisuals.unfold_timings_ms.worker_attempt_ms} ms</td></tr>}
+              {unfoldVisuals.unfold_timings_ms.subprocess_fallback_ms != null && <tr><td style={{ padding: '2px 8px 2px 0', color: '#888' }}>Subprocess fallback</td><td style={{ fontFamily: 'monospace' }}>{unfoldVisuals.unfold_timings_ms.subprocess_fallback_ms} ms</td></tr>}
+              {unfoldVisuals.unfold_timings_ms.theoretical_fallback_ms != null && <tr><td style={{ padding: '2px 8px 2px 0', color: '#888' }}>Theoretisch fallback</td><td style={{ fontFamily: 'monospace' }}>{unfoldVisuals.unfold_timings_ms.theoretical_fallback_ms} ms</td></tr>}
+              {unfoldVisuals.unfold_timings_ms.total_ms != null && <tr><td style={{ padding: '2px 8px 2px 0', color: '#888' }}>Totaal</td><td style={{ fontFamily: 'monospace' }}>{(unfoldVisuals.unfold_timings_ms.total_ms / 1000).toFixed(1)} s</td></tr>}
+              {unfoldVisuals.attempts != null && <tr><td style={{ padding: '2px 8px 2px 0', color: '#888' }}>Pogingen (base face)</td><td style={{ fontFamily: 'monospace' }}>{unfoldVisuals.attempts}</td></tr>}
+              {unfoldVisuals.simplified_faces != null && <tr><td style={{ padding: '2px 8px 2px 0', color: '#888' }}>Vlakken na vereenv.</td><td style={{ fontFamily: 'monospace' }}>{unfoldVisuals.simplified_faces}</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {unfoldVisuals?.error_details?.length > 0 && (
+        <details style={{ marginTop: 8 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 11, color: '#888' }}>
+            {unfoldVisuals.error_details.length} mislukte poging(en) — klik voor details
+          </summary>
+          <div style={{ marginTop: 4 }}>
+            {unfoldVisuals.error_details.map((detail, i) => (
+              <div key={i} style={{ fontSize: 10, color: '#666', padding: '2px 0', borderBottom: '1px solid #333' }}>
+                <span style={{ color: '#555', marginRight: 6 }}>Face {detail.face_idx ?? '?'}</span>
+                <span style={{ color: '#888', marginRight: 6 }}>{detail.stage ?? ''}</span>
+                <span>{detail.message ?? ''}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+
       <div style={{ marginTop: 12 }}>
         <div className="timeline-stage" style={{ marginBottom: 4 }}>Criteria &amp; thresholds (freecad_unfold)</div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, color: '#ccc' }}>
           <tbody>
             {[
               ['K-factor', '0.44 (vast voor alle plaatdiktes)'],
-              ['Max pogingen (base face)', '5'],
-              ['Subprocess timeout', '300 s'],
+              ['Max pogingen (base face)', '10'],
+              ['Subprocess timeout', 'dynamisch (bestand-afhankelijk)'],
               ['Bend filter: min hoek', '> 0.3 rad (≈ 17°)'],
               ['Bend filter: min lengte', '> 5 mm'],
               ['Deduplicatie key', '(round(hoek,1), round(lengte,1))'],
               ['Bij duplicaat', 'Kleinste radius wint (inner radius)'],
               ['Merge gesplitste bends', 'Exact gelijke hoek + radius'],
+              ['Vereenv. drempel (fillet r)', '< 40% dikte (min 1.5 mm)'],
             ].map(([label, val]) => (
               <tr key={label}>
                 <td style={{ padding: '2px 8px 2px 0', color: '#888', whiteSpace: 'nowrap' }}>{label}</td>

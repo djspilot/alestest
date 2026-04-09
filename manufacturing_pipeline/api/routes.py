@@ -193,18 +193,29 @@ def _build_unfold_result(job_id: str, result: dict | None, error: str | None = N
         if dxf_path and os.path.exists(dxf_path)
         else None
     )
+    # Pass through debug/timing fields from the unfold result
+    for key in ("unfold_timings_ms", "route", "error_details", "theoretical", "attempts", "simplified_faces"):
+        if result and key in result and key not in payload:
+            payload[key] = result[key]
     return payload
 
 
 def _build_unfold_status(job) -> UnfoldStatus:
     unfold_payload = _build_unfold_result(job.job_id, getattr(job, "unfold_result", None), getattr(job, "unfold_error", None))
+    unfold_status = getattr(job, "unfold_status", "idle") or "idle"
+    unfold_started_at = getattr(job, "unfold_started_at", None)
+    elapsed_seconds = None
+    if unfold_status == "processing" and unfold_started_at is not None:
+        elapsed_seconds = round(max((datetime.now(timezone.utc) - unfold_started_at).total_seconds(), 0.0), 1)
     return UnfoldStatus(
-        status=getattr(job, "unfold_status", "idle") or "idle",
+        status=unfold_status,
         requested_at=getattr(job, "unfold_requested_at", None),
-        started_at=getattr(job, "unfold_started_at", None),
+        started_at=unfold_started_at,
         completed_at=getattr(job, "unfold_completed_at", None),
         error=getattr(job, "unfold_error", None),
         result=UnfoldResult(**unfold_payload) if unfold_payload else None,
+        phase=getattr(job, "unfold_phase", None) if isinstance(getattr(job, "unfold_phase", None), str) else None,
+        elapsed_seconds=elapsed_seconds,
     )
 
 
@@ -842,6 +853,7 @@ def _run_unfold_job(job_id: str):
             thickness=(job.result or {}).get("thickness") or 0.0,
             is_sheet_metal=True,
         )
+        jobs.set_unfold_phase(job_id, "FreeCAD subprocess gestart...")
         result = run_unfold_to_step(job.file_path, output_dir, part_name, analysis_stub)
         result["dxf_path"] = os.path.join(output_dir, f"{part_name}_flat.dxf")
         jobs.mark_unfold_completed(job_id, _build_unfold_result(job_id, result) or result)

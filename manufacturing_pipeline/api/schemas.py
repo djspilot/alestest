@@ -129,6 +129,12 @@ class UnfoldResult(BaseModel):
     bend_line_groups: list[dict] = Field(default_factory=list)
     flat_step_url: Optional[str] = None
     dxf_url: Optional[str] = None
+    unfold_timings_ms: Optional[dict] = None
+    route: Optional[str] = None          # "direct" | "subprocess" | "worker" | "theoretical" | "failed"
+    error_details: list[dict] = Field(default_factory=list)
+    theoretical: bool = False             # true when only estimated dims returned
+    attempts: Optional[int] = None        # how many base faces were tried
+    simplified_faces: Optional[int] = None  # face count after defeaturing (None = not simplified)
 
 
 class UnfoldStatus(BaseModel):
@@ -138,6 +144,8 @@ class UnfoldStatus(BaseModel):
     completed_at: Optional[datetime] = None
     error: Optional[str] = None
     result: Optional[UnfoldResult] = None
+    phase: Optional[str] = None           # human-readable current phase during processing
+    elapsed_seconds: Optional[float] = None  # computed elapsed, returned by API during processing
 
 
 class JobCreated(BaseModel):

@@ -23,7 +23,8 @@ class Job:
                  "archived", "archived_at",
                  "file_size_bytes", "progress_events", "progress_summary",
                  "unfold_status", "unfold_requested_at", "unfold_started_at",
-                 "unfold_completed_at", "unfold_result", "unfold_error")
+                 "unfold_completed_at", "unfold_result", "unfold_error",
+                 "unfold_phase")
 
     def __init__(self, job_id: str, file_path: str, file_name: str = "",
                  file_hash: str = "", request_fingerprint: str = "",
@@ -50,6 +51,7 @@ class Job:
         self.unfold_completed_at: Optional[datetime] = None
         self.unfold_result: Optional[dict] = None
         self.unfold_error: Optional[str] = None
+        self.unfold_phase: Optional[str] = None
 
 
 class JobManager:
@@ -90,7 +92,8 @@ class JobManager:
                     unfold_started_at TEXT,
                     unfold_completed_at TEXT,
                     unfold_result_json TEXT,
-                    unfold_error TEXT
+                    unfold_error TEXT,
+                    unfold_phase TEXT
                 );
             """)
             existing_columns = {
@@ -117,6 +120,8 @@ class JobManager:
                 conn.execute("ALTER TABLE api_jobs ADD COLUMN unfold_result_json TEXT")
             if "unfold_error" not in existing_columns:
                 conn.execute("ALTER TABLE api_jobs ADD COLUMN unfold_error TEXT")
+            if "unfold_phase" not in existing_columns:
+                conn.execute("ALTER TABLE api_jobs ADD COLUMN unfold_phase TEXT")
             conn.executescript("""
                 CREATE INDEX IF NOT EXISTS idx_api_jobs_status
                     ON api_jobs(status);
@@ -189,6 +194,7 @@ class JobManager:
         job.unfold_error = row["unfold_error"]
         unfold_result_json = row["unfold_result_json"]
         job.unfold_result = json.loads(unfold_result_json) if unfold_result_json else None
+        job.unfold_phase = row["unfold_phase"] if "unfold_phase" in row.keys() else None
         return job
 
     # ------------------------------------------------------------------
@@ -359,11 +365,21 @@ class JobManager:
             if job:
                 job.unfold_status = "processing"
                 job.unfold_started_at = now
+                job.unfold_phase = None
         self._update_db(
             job_id,
             unfold_status="processing",
             unfold_started_at=self._dt_to_str(now),
+            unfold_phase=None,
         )
+
+    def set_unfold_phase(self, job_id: str, phase: str):
+        """Update the human-readable current phase for a processing unfold job."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job:
+                job.unfold_phase = phase
+        self._update_db(job_id, unfold_phase=phase)
 
     def mark_unfold_completed(self, job_id: str, result: dict):
         now = datetime.now(timezone.utc)

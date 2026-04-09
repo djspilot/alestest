@@ -432,6 +432,10 @@ def _build_fold_detail_from_group_runtime(group, segments, index):
 
 def canonicalize_unfold_payload(result, fold_merge_settings=None):
     payload = dict(result or {})
+    # Pass through debug/timing fields so they are never dropped
+    for _passthrough_key in ("unfold_timings_ms", "route", "error_details", "theoretical", "attempts", "simplified_faces"):
+        if _passthrough_key in payload:
+            pass  # already present; will be preserved in returned payload dict
     original_segments = list(payload.get("bend_line_segments") or [])
     filtered_segments, discarded_count = _filter_fold_segments_runtime(original_segments)
     if original_segments and not filtered_segments:
@@ -1333,6 +1337,7 @@ for solid_idx, solid in enumerate(sorted_solids[:_max_solids]):
                             print(f"DEBUG: defeaturing produced degenerate solid (volume={{_simplified.Volume:.1f}}), keeping original")
                         else:
                             print(f"DEBUG: defeaturing OK {{len(solid.Faces)}}→{{len(_simplified.Faces)}} faces")
+                            result["simplified_faces"] = len(_simplified.Faces)
                             solid = _simplified
                     else:
                         print(f"DEBUG: defeaturing returned no improvement, keeping original")

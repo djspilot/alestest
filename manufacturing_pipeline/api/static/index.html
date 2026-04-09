@@ -252,12 +252,49 @@
     const unfoldStatus = unfold.status || 'idle';
     const unfoldResult = unfold.result || null;
     const unfoldBadgeClass = unfoldStatus === 'completed' ? 'unfold-completed' : unfoldStatus;
-    const statusBadge = `<span class="badge ${unfoldBadgeClass}">${escapeHtml(unfoldStatus)}</span>`;
     const canQueue = job.status === 'completed' && !['queued', 'processing'].includes(unfoldStatus);
     const unfoldError = unfold.error ? `<div class="subtle">${escapeHtml(unfold.error)}</div>` : '';
+
+    // Seed liveUnfold map so the poll timer knows what to poll
+    if (unfoldStatus === 'processing' && !liveUnfold[job.job_id]) {
+      liveUnfold[job.job_id] = unfold;
+    } else if (unfoldStatus !== 'processing') {
+      delete liveUnfold[job.job_id];
+    }
+
+    let statusBadge, liveInfo;
+    if (unfoldStatus === 'processing') {
+      const elapsed = unfold.elapsed_seconds != null ? unfold.elapsed_seconds : null;
+      const phase = unfold.phase || '';
+      const elapsedStr = elapsed != null
+        ? `${Math.floor(elapsed / 60)}:${String(Math.round(elapsed % 60)).padStart(2, '0')}`
+        : '';
+      statusBadge = `<span class="badge processing">⏳ verwerken</span>`;
+      const fileSizeMb = job.file_size_bytes ? job.file_size_bytes / (1024 * 1024) : null;
+      const parts = [];
+      if (elapsedStr) parts.push(`${elapsedStr} verstreken`);
+      if (phase) parts.push(phase);
+      if (fileSizeMb != null) parts.push(`${fileSizeMb.toFixed(1)} MB`);
+      liveInfo = parts.length ? `<div class="subtle unfold-live-info">${escapeHtml(parts.join(' · '))}</div>` : '';
+    } else {
+      statusBadge = `<span class="badge ${unfoldBadgeClass}">${escapeHtml(unfoldStatus)}</span>`;
+      liveInfo = '';
+    }
+
     const foldSummary = unfoldResult?.fold_lines != null
       ? `<div class="subtle">zetlijnen ${escapeHtml(unfoldResult.fold_lines)} / raw ${escapeHtml(unfoldResult.raw_fold_lines ?? '—')}</div>`
       : '';
+
+    // Timing summary on completed unfold
+    let timingSummary = '';
+    if (unfoldStatus === 'completed' && unfoldResult?.unfold_timings_ms) {
+      const t = unfoldResult.unfold_timings_ms;
+      const totalS = t.total_ms != null ? `${Math.round(t.total_ms / 1000)}s` : '';
+      const route = unfoldResult.route || '';
+      const theoretical = unfoldResult.theoretical ? ' · theoretisch' : '';
+      const simpFaces = unfoldResult.simplified_faces != null ? ` · ${unfoldResult.simplified_faces} vlakken na vereenv.` : '';
+      timingSummary = `<div class="subtle">${[totalS, route].filter(Boolean).join(' · ')}${theoretical}${simpFaces}</div>`;
+    }
     const downloadItems = [];
     if (job.status === 'completed') {
       const fileStem = escapeHtml((job.file_name || job.job_id).replace(/\.[^.]+$/, ''));
@@ -316,7 +353,9 @@
           ${reanalyzeBtn}
           ${downloadMenu}
         </div>
+        ${liveInfo}
         ${foldSummary}
+        ${timingSummary}
         ${unfoldError}
       </div>
     `;
@@ -471,6 +510,7 @@
   }
 
   const liveProgress = {};
+  const liveUnfold = {};
 
   async function loadJobs() {
     activeJobIds = new Set();
@@ -606,6 +646,7 @@
     await Promise.all([checkHealth(), loadJobs()]);
     startAutoRefresh();
     startFastPoll();
+    startUnfoldPoll();
   }
 
   function startFastPoll() {
@@ -637,6 +678,56 @@
       });
       await Promise.all(promises);
     }, 3000);
+  }
+
+  // Poll unfold status for jobs where unfold is processing
+  let unfoldPollTimer = null;
+  function startUnfoldPoll() {
+    if (unfoldPollTimer) clearInterval(unfoldPollTimer);
+    unfoldPollTimer = setInterval(async () => {
+      // Find job rows with processing unfold
+      const rows = document.querySelectorAll('tr[data-job-id]');
+      const processingIds = [];
+      rows.forEach(row => {
+        const jobId = row.getAttribute('data-job-id');
+        if (jobId && liveUnfold[jobId]?.status === 'processing') processingIds.push(jobId);
+      });
+      if (!processingIds.length) return;
+      const promises = processingIds.map(async (jobId) => {
+        try {
+          const r = await fetch(`/api/v1/jobs/${jobId}/unfold`, { headers: headers() });
+          if (!r.ok) return;
+          const unfoldStatus = await r.json();
+          liveUnfold[jobId] = unfoldStatus;
+          // Trigger re-render of the actions cell for this job
+          updateUnfoldInline(jobId);
+        } catch {}
+      });
+      await Promise.all(promises);
+    }, 3000);
+  }
+
+  function updateUnfoldInline(jobId) {
+    const row = document.querySelector(`tr[data-job-id="${CSS.escape(jobId)}"]`);
+    if (!row) return;
+    const actionsTd = row.querySelector('.action-stack');
+    if (!actionsTd) return;
+    const unfoldData = liveUnfold[jobId];
+    if (!unfoldData || unfoldData.status !== 'processing') return;
+    const elapsed = unfoldData.elapsed_seconds != null ? unfoldData.elapsed_seconds : null;
+    const phase = unfoldData.phase || '';
+    const elapsedStr = elapsed != null
+      ? `${Math.floor(elapsed / 60)}:${String(Math.round(elapsed % 60)).padStart(2, '0')}`
+      : '';
+    const badge = actionsTd.querySelector('.badge');
+    if (badge) badge.outerHTML = `<span class="badge processing">⏳ verwerken</span>`;
+    let liveDiv = actionsTd.querySelector('.unfold-live-info');
+    if (!liveDiv) {
+      liveDiv = document.createElement('div');
+      liveDiv.className = 'unfold-live-info subtle';
+      actionsTd.appendChild(liveDiv);
+    }
+    liveDiv.textContent = [elapsedStr ? `${elapsedStr} verstreken` : '', phase].filter(Boolean).join(' · ');
   }
 
   function updateProgressInline(jobId) {
@@ -946,9 +1037,40 @@
         if (ur.flat_width != null) html += detailItem('Uitslag B', `${(+ur.flat_width).toFixed(2)} mm`, true);
         html += detailItem('Zetlijnen', ur.fold_lines ?? '—');
         if (ur.raw_fold_lines != null) html += detailItem('Raw zetlijnen', ur.raw_fold_lines);
+        if (ur.route) html += detailItem('Route', ur.route);
+        if (ur.theoretical) html += detailItem('Theoretisch', 'Ja – geschatte afmetingen');
+        if (ur.attempts != null) html += detailItem('Pogingen (base face)', ur.attempts);
+        if (ur.simplified_faces != null) html += detailItem('Vlakken na vereenv.', ur.simplified_faces);
       }
       if (unfold.error) html += detailItem('Fout', unfold.error);
-      html += '</div></div>';
+      html += '</div>';
+
+      // Unfold debug section: timings + error_details
+      if (unfold.result?.unfold_timings_ms || (unfold.result?.error_details?.length > 0)) {
+        html += '<div class="detail-section" style="margin-top:0"><h3>Unfold debug</h3>';
+        if (unfold.result?.unfold_timings_ms) {
+          const t = unfold.result.unfold_timings_ms;
+          html += '<div class="detail-grid">';
+          if (t.direct_attempt_ms != null) html += detailItem('Direct (ms)', t.direct_attempt_ms, true);
+          if (t.subprocess_attempt_ms != null) html += detailItem('Subprocess (ms)', t.subprocess_attempt_ms, true);
+          if (t.worker_attempt_ms != null) html += detailItem('Worker (ms)', t.worker_attempt_ms, true);
+          if (t.subprocess_fallback_ms != null) html += detailItem('Subprocess fallback (ms)', t.subprocess_fallback_ms, true);
+          if (t.subprocess_retry_ms != null) html += detailItem('Subprocess retry (ms)', t.subprocess_retry_ms, true);
+          if (t.theoretical_fallback_ms != null) html += detailItem('Theoretisch fallback (ms)', t.theoretical_fallback_ms, true);
+          if (t.total_ms != null) html += detailItem('Totaal (ms)', t.total_ms, true);
+          html += '</div>';
+        }
+        if (unfold.result?.error_details?.length > 0) {
+          html += `<details style="margin-top:8px"><summary style="cursor:pointer;font-size:11px;color:#888">${escapeHtml(unfold.result.error_details.length)} mislukte poging(en) — klik voor details</summary>`;
+          html += '<table class="detail-table" style="margin-top:4px"><thead><tr><th>Face</th><th>Stage</th><th>Fout</th></tr></thead><tbody>';
+          unfold.result.error_details.forEach(d => {
+            html += `<tr><td>${escapeHtml(String(d.face_idx ?? '?'))}</td><td>${escapeHtml(d.stage ?? '')}</td><td>${escapeHtml(d.message ?? '')}</td></tr>`;
+          });
+          html += '</tbody></table></details>';
+        }
+        html += '</div>';
+      }
+      html += '</div>';
     }
 
     // ── Timeline visualization ──
