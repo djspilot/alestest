@@ -803,7 +803,10 @@ def _persistent_freecad_worker_enabled() -> bool:
 
 
 def _worker_cache_key(sys_config: SystemConfig) -> str:
-    return os.path.abspath(sys_config.freecad_python or "")
+    # Include thread ID so each API handler thread owns its own FreeCAD worker
+    # process.  Without this, concurrent jobs share one worker and serialize on
+    # it: a slow unfold (large file) blocks every other job until timeout.
+    return f"{os.path.abspath(sys_config.freecad_python or '')}:{threading.get_ident()}"
 
 
 def _get_persistent_freecad_worker(sys_config: SystemConfig) -> _PersistentFreeCADWorkerClient:
