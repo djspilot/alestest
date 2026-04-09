@@ -37,6 +37,9 @@ export default function DebugPanel({
       { label: 'Pipeline job', value: pipeline.pipelineState?.jobId || '—' },
       { label: 'Actieve stage', value: pipeline.summary?.active_stage || '—' },
       { label: 'Pipeline fout', value: pipeline.pipelineState?.error || '—' },
+      { label: 'Unfold success', value: pipeline.pipelineState?.result?.visuals?.unfold?.success ?? '—' },
+      { label: 'Unfold fold_lines', value: pipeline.pipelineState?.result?.visuals?.unfold?.fold_lines ?? '—' },
+      { label: 'Unfold raw_fold_lines', value: pipeline.pipelineState?.result?.visuals?.unfold?.raw_fold_lines ?? '—' },
       { label: 'Pipeline debug code', value: pipeline.pipelineState?.debug?.code || '—' },
       { label: 'Pipeline debug bericht', value: pipeline.pipelineState?.debug?.message || '—' },
       { label: 'Health URL', value: pipeline.pipelineState?.debug?.checkedUrl || '—' },
@@ -52,6 +55,9 @@ export default function DebugPanel({
       pipeline.pipelineState?.debug?.message,
       pipeline.pipelineState?.error,
       pipeline.pipelineState?.jobId,
+      pipeline.pipelineState?.result?.visuals?.unfold?.fold_lines,
+      pipeline.pipelineState?.result?.visuals?.unfold?.raw_fold_lines,
+      pipeline.pipelineState?.result?.visuals?.unfold?.success,
       pipeline.pipelineState?.status,
       pipeline.summary?.active_stage,
       viewer.engineStatus,
@@ -63,11 +69,25 @@ export default function DebugPanel({
   )
 
   const copyDebugDump = async () => {
+    const unfoldVisuals = pipeline.pipelineState?.result?.visuals?.unfold || null
     const payload = {
       generatedAt: new Date().toISOString(),
       summary: Object.fromEntries(summary.map((item) => [item.label, item.value])),
       viewerEvents: viewer.debugEvents || [],
+      pipelineDebugEvents: pipeline.debugEvents || [],
       pipelineEvents: pipeline.debugEvents || [],
+      timelineEvents: pipeline.pipelineState?.events || [],
+      timelineSummary: pipeline.pipelineState?.summary || null,
+      unfoldStatus: unfoldVisuals
+        ? {
+            success: unfoldVisuals.success ?? null,
+            fold_lines: unfoldVisuals.fold_lines ?? null,
+            raw_fold_lines: unfoldVisuals.raw_fold_lines ?? null,
+            error: unfoldVisuals.error ?? null,
+            attempts: unfoldVisuals.attempts ?? null,
+            route: unfoldVisuals.route ?? null,
+          }
+        : null,
       events: combinedEvents,
       pipelineDebug: pipeline.pipelineState?.debug || null,
     }
