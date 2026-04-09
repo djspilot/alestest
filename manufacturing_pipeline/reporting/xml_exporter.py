@@ -558,6 +558,19 @@ def _append_calculation_result(root: "_Elem", result: Dict[str, Any], part_name:
         except Exception:
             return None
 
+    def _parse_hole_size_values(value):
+        text = str(value or '').strip().lower()
+        if not text:
+            return []
+        text = text.replace('ø', '').replace('mm', '').strip()
+        parts = [part.strip() for part in text.split('x')] if 'x' in text else [text]
+        dims = []
+        for part in parts:
+            parsed = _to_float(part)
+            if parsed is not None and parsed > 0:
+                dims.append(parsed)
+        return dims
+
     def _segment_merge_settings():
         try:
             return get_unfold_thresholds().get('fold_merge', {})
@@ -710,10 +723,14 @@ def _append_calculation_result(root: "_Elem", result: Dict[str, Any], part_name:
         item for item in (hole_visuals.get('items') or [])
         if str(item.get('status') or '').lower() == 'accepted'
     ]
+    sheet_hole_semantics = result.get('sheet_hole_semantics') or {}
 
     holes_total = len(accepted_visual_holes)
     if holes_total <= 0:
         holes_total = int(production.get('holes_total', 0) or 0)
+    semantic_holes_total = sheet_hole_semantics.get('nr_holes')
+    if semantic_holes_total is not None:
+        holes_total = max(0, int(semantic_holes_total or 0))
 
     canonical_unfold_bends = _canonical_unfold_bends(unfold_visuals)
     bend_count_xml = len(canonical_unfold_bends) if canonical_unfold_bends else int(production.get('bends_total', 0) or 0)
@@ -833,6 +850,13 @@ def _append_calculation_result(root: "_Elem", result: Dict[str, Any], part_name:
             if perimeter > 0:
                 hole_contours_values.append(perimeter)
 
+            if diameter <= 0 and perimeter <= 0:
+                size_dims = _parse_hole_size_values(hole.get('size') or hole.get('label'))
+                if size_dims:
+                    major_dim = max(size_dims)
+                    hole_contours_values.append(major_dim)
+                    hole_radii_values.append(major_dim / 2.0)
+
             contour_points = [
                 pt for pt in (hole.get('contour_points') or [])
                 if isinstance(pt, (list, tuple)) and len(pt) >= 3
@@ -860,6 +884,18 @@ def _append_calculation_result(root: "_Elem", result: Dict[str, Any], part_name:
         calc.find('Sheet_ThreadedHoles').text = str(threaded_count)
         calc.find('Sheet_CountersunkHoles').text = str(countersunk_count)
         calc.find('Sheet_CountersunkAngles').text = '_'.join(_format_float(v) for v in countersunk_angles) if countersunk_angles else ''
+
+        semantic_threaded = sheet_hole_semantics.get('threaded_holes')
+        semantic_countersunk = sheet_hole_semantics.get('countersunk_holes')
+        semantic_angles = sheet_hole_semantics.get('countersunk_angles') or []
+        if semantic_threaded is not None:
+            calc.find('Sheet_ThreadedHoles').text = str(max(0, int(semantic_threaded or 0)))
+        if semantic_countersunk is not None:
+            calc.find('Sheet_CountersunkHoles').text = str(max(0, int(semantic_countersunk or 0)))
+        if semantic_angles:
+            calc.find('Sheet_CountersunkAngles').text = '_'.join(
+                _format_float(float(v)) for v in semantic_angles if _to_float(v) is not None
+            )
 
     # Fallback to AAG holes only when visuals don't provide accepted hole items.
     hole_details = aag_details.get('hole_details', [])
@@ -2237,6 +2273,8 @@ def _process_plaat_item(
         except Exception as e:
             print(f"    [WARN] Could not apply cut-feature hole fallback: {str(e)[:60]}")
 
+    semantic_holes_locked = cut_features_result is not None and int(getattr(cut_features_result, 'nr_holes', 0) or 0) > 0
+
     # CROSS-SECTION ANALYSIS: Primary method for bent prismatic plates.
     # Analyses the 2D cross-section perpendicular to the extrusion axis to extract
     # thickness, bend count, angles, inner radii, and flat developed width.
@@ -2733,12 +2771,12 @@ def _process_plaat_item(
                     except Exception:
                         current_holes = 0
 
-                    if current_holes <= 0 or int(nr_holes or 0) >= current_holes:
+                    if current_holes <= 0 or (not semantic_holes_locked and int(nr_holes or 0) >= current_holes):
                         calc_result.find('Sheet_NrHoles').text = str(nr_holes)
                         calc_result.find('Sheet_HoleContours').text = hole_contours
                     else:
                         print(
-                            f"    [INFO] Keeping cut-feature holes ({current_holes}) over DXF ({nr_holes})"
+                            f"    [INFO] Keeping semantic hole count ({current_holes}) over DXF ({nr_holes})"
                         )
                     
                     # Store contour overrides (fields are created later)
@@ -2782,12 +2820,12 @@ def _process_plaat_item(
                         except Exception:
                             current_holes = 0
 
-                        if current_holes <= 0 or nr_holes >= current_holes:
+                        if current_holes <= 0 or (not semantic_holes_locked and nr_holes >= current_holes):
                             calc_result.find('Sheet_NrHoles').text = str(nr_holes)
                             calc_result.find('Sheet_HoleContours').text = hole_contours
                         else:
                             print(
-                                f"    [INFO] Keeping cut-feature holes ({current_holes}) over DXF ({nr_holes})"
+                                f"    [INFO] Keeping semantic hole count ({current_holes}) over DXF ({nr_holes})"
                             )
 
                         outer_contour_dxf = float(dxf_metrics.get('outer_contour', 0.0) or 0.0)

@@ -11,6 +11,66 @@ from manufacturing_pipeline.core.paths import PROJECT_ROOT
 from manufacturing_pipeline.reporting.xml_exporter import export_to_xml
 
 
+def _load_shape_for_cut_features(path: str):
+    from manufacturing_pipeline.analysis.step_processing import load_step_file
+
+    shape = load_step_file(path)
+    if hasattr(shape, "val"):
+        try:
+            return shape.val().wrapped
+        except Exception:
+            return shape.val()
+    return shape
+
+
+def _build_sheet_hole_semantics(step_file: str, output_dir: str, result: dict) -> dict | None:
+    category = str(result.get("category") or "").upper()
+    if category not in {"PLAAT (VLAK)", "GEBOGEN PLAATWERK", "SHEET_METAL"}:
+        return None
+
+    # Keep VPS/XML semantics aligned with the generic cut_features ISO rules.
+    # Do not add diameter-specific exceptions in this enrichment path.
+
+    try:
+        from manufacturing_pipeline.analysis.cut_features import extract_cut_features_for_sheet
+    except Exception:
+        return None
+
+    try:
+        solid = _load_shape_for_cut_features(step_file)
+    except Exception:
+        return None
+
+    unfold_result = None
+    flat_step_path = os.path.join(output_dir, f"{_safe_stem(step_file)}_flat.step")
+    if os.path.exists(flat_step_path):
+        try:
+            flat_shape = _load_shape_for_cut_features(flat_step_path)
+            unfold_result = {"success": True, "flat_pattern": flat_shape}
+        except Exception:
+            unfold_result = None
+
+    try:
+        cut_features = extract_cut_features_for_sheet(
+            solid=solid,
+            unfold_result=unfold_result,
+            part_classification="plaat",
+        )
+    except Exception:
+        return None
+
+    if cut_features is None:
+        return None
+
+    return {
+        "source": getattr(cut_features, "source", None),
+        "threaded_holes": int(getattr(cut_features, "threaded_holes", 0) or 0),
+        "countersunk_holes": int(getattr(cut_features, "countersunk_holes", 0) or 0),
+        "countersunk_angles": list(getattr(cut_features, "countersunk_angles", []) or []),
+        "nr_holes": int(getattr(cut_features, "nr_holes", 0) or 0),
+    }
+
+
 def pipeline_vps_mode() -> str:
     explicit = os.getenv("PIPELINE_VPS_MODE", "").strip().lower()
     if explicit:
@@ -216,6 +276,10 @@ def run_pipeline_analysis_via_vps(
             "status_payload": status_payload,
             "reused_existing": bool(analyze_payload.get("reused_existing")),
         }
+
+    sheet_hole_semantics = _build_sheet_hole_semantics(step_file, output_dir, result)
+    if sheet_hole_semantics:
+        result["sheet_hole_semantics"] = sheet_hole_semantics
 
     os.makedirs(output_dir, exist_ok=True)
     stem = _safe_stem(step_file)

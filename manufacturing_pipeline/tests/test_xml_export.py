@@ -57,3 +57,33 @@ def test_xml_export_contains_core_fields(tmp_path: Path) -> None:
     assert "<Sheet_Thickness>3</Sheet_Thickness>" in xml
     assert "<Sheet_NrBends>2</Sheet_NrBends>" in xml
     assert "<Sheet_NrHoles>4</Sheet_NrHoles>" in xml
+
+
+def test_xml_export_prefers_semantic_sheet_hole_count_over_visual_fallback(tmp_path: Path) -> None:
+    """Sheet XML must keep semantic hole totals authoritative when fallback visuals add extras."""
+    output_path = tmp_path / "sample_part.xml"
+    result = _sample_result()
+    result["visuals"] = {
+        "holes": {
+            "items": [
+                {"status": "accepted", "type": "cylindrical", "diameter": 10.0, "perimeter": 31.4},
+                {"status": "accepted", "type": "cylindrical", "diameter": 6.8, "perimeter": 21.4},
+                {"status": "accepted", "type": "closed_contour", "size": "12x8"},
+                {"status": "accepted", "type": "irregular_contour", "label": "65"},
+                {"status": "accepted", "type": "irregular_contour", "label": "65"},
+            ]
+        }
+    }
+    result["sheet_hole_semantics"] = {
+        "nr_holes": 2,
+        "threaded_holes": 1,
+        "countersunk_holes": 0,
+        "countersunk_angles": [],
+    }
+
+    export_to_xml(result, output_path)
+    xml = output_path.read_text(encoding="utf-8")
+
+    assert "<Sheet_NrHoles>2</Sheet_NrHoles>" in xml
+    assert "<Sheet_ThreadedHoles>1</Sheet_ThreadedHoles>" in xml
+

@@ -82,8 +82,11 @@ Kernpunten:
 - Labeling wordt toegepast in `cut_features_extractors` en contour-labeling helpers.
 
 Vaste afspraak (niet opnieuw ter discussie zonder expliciete wijzigingsvraag):
-- Diameter 8.5 mm mag als `thread` worden geclassificeerd wanneer de actieve ISO-regels dat toelaten.
-- Deze afspraak blijft staan; dit is geen fout zolang de threadcriteria verder worden gehaald.
+- De actieve ISO-regels zijn generiek bepalend voor threadclassificatie.
+- Threaddetectie is dus niet vastgelegd op specifieke diameters; iedere diameter die volgens de actieve ISO-regels als `thread` kwalificeert,
+  moet ook zo worden geteld in analyse, XML en VPS-uitvoer.
+- Voorbeelden met specifieke diameters zijn alleen validatievoorbeelden en mogen niet worden vertaald naar speciale codepaden of uitzonderingen.
+- Export- en serialisatieroutes mogen deze semantiek niet impliciet vernauwen, verbreden of verliezen.
 
 ## Feature 5: countersink-detectie
 Kernpunten:
@@ -104,6 +107,7 @@ In deze baseline geldt expliciet:
 - Als zulke contourfragmenten worden gezien in de detectiestap, moeten ze als opmerking/debug-reden worden vastgelegd als:
   - `open_contour_candidate_not_counted`
   - met reden: `contour is niet gesloten, daarom niet meegeteld als gat`.
+- Latere visual/debug fallback-routes mogen deze afspraak niet overrulen in productie-uitvoer; `nr_holes` moet semantisch gebaseerd blijven op gesloten binnencontouren of gevalideerde cilindrische gaten.
 
 Procedure-afspraak:
 - Open contour = signaal voor kwaliteitscontrole/modelreview, geen productie-gat.
@@ -133,4 +137,5 @@ Bij elke wijziging in hole-detection:
    - `sum(hole_contours)`
 3. Documenteer impact op beslislogica in dit document.
 4. Geen merge als thread/countersink-semantiek impliciet verandert zonder expliciete akkoord.
-5. Voor profielcases altijd expliciet controleren dat profiel-uiteinde-filtering actief is en dat 8.5 mm threadclassificatie niet onbedoeld wordt teruggedraaid.
+5. Voor profielcases altijd expliciet controleren dat profiel-uiteinde-filtering actief is en dat generieke ISO-threadclassificatie niet onbedoeld wordt teruggedraaid.
+6. Voor VPS/XML-routes expliciet controleren dat semantische threadtelling gelijk blijft aan de actieve `cut_features`-regels en niet terugvalt naar alleen geometrische holetypes.
