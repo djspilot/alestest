@@ -80,6 +80,15 @@ def _run_new_unfolder(step_path: str, output_dir: str, part_name: str, k_factor:
     import SheetMetalNewUnfolder  # type: ignore
     from SheetMetalNewUnfolder import BendAllowanceCalculator  # type: ignore
     import importDXF  # type: ignore
+    if bool(getattr(SheetMetalNewUnfolder, "IS_COMPAT_SHIM", False)):
+        return {
+            "success": False,
+            "error": "SheetMetalNewUnfolder compat shim actief; auto-route slaat new-unfolder pass over",
+            "attempts": 0,
+            "error_details": [],
+            "used_face_idx": None,
+            "unfolder_variant": "new",
+        }
 
     shape = Part.Shape()
     shape.read(step_path)

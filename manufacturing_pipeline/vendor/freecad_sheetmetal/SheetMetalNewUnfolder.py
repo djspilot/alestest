@@ -14,6 +14,8 @@ import Part  # type: ignore
 
 import SheetMetalUnfolder  # type: ignore
 
+IS_COMPAT_SHIM = True
+
 
 _DEFAULT_K_BUCKETS = (
     0.5,
@@ -100,4 +102,3 @@ def getUnfold(
     bend_lines_compound = fold_compound if fold_compound is not None else Part.Compound([])
     bend_infos = []
     return selected_face, unfolded_shape, bend_lines_compound, root_normal, bend_infos
-

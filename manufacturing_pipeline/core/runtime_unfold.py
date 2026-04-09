@@ -1061,7 +1061,13 @@ new_unfolder_import_error = ""
 try:
     import SheetMetalNewUnfolder
     from SheetMetalNewUnfolder import BendAllowanceCalculator
-    new_unfolder_available = True
+    if bool(getattr(SheetMetalNewUnfolder, "IS_COMPAT_SHIM", False)):
+        SheetMetalNewUnfolder = None
+        BendAllowanceCalculator = None
+        new_unfolder_import_error = "SheetMetalNewUnfolder compat shim actief"
+        new_unfolder_available = False
+    else:
+        new_unfolder_available = True
 except Exception as exc:
     SheetMetalNewUnfolder = None
     BendAllowanceCalculator = None
