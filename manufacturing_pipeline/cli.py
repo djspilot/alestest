@@ -18,8 +18,6 @@ from datetime import datetime
 from manufacturing_pipeline.core.paths import PROJECT_ROOT, DATA_DIR, DB_DIR, PARTS_DIR, OUTPUT_DIR
 from manufacturing_pipeline.core.config import diagnose_freecad_setup
 from manufacturing_pipeline.core.file_utils import find_step_files, select_step_file, get_output_dir, process_single_file
-from manufacturing_pipeline.core.runtime_analysis import run_analysis
-from manufacturing_pipeline.core.runtime_reporting import run_debug
 from manufacturing_pipeline.core.runtime_unfold import run_unfold_to_step
 from manufacturing_pipeline.core.cache import get_file_hash, load_cache, save_cache, cache_result, CACHE_FILE
 from manufacturing_pipeline.core.python_dependencies import (
@@ -35,6 +33,7 @@ def run_quick(step_file, args):
     """Run quick analysis on a single STEP file (or each solid in an assembly)."""
     import shutil
     from manufacturing_pipeline.analysis.io.step_file_io import extract_solids_to_temp_files
+    from manufacturing_pipeline.core.runtime_analysis import run_analysis
 
     output_dir, part_name = get_output_dir(step_file)
 
@@ -503,6 +502,7 @@ def main():
         return
 
     if args.debug:
+        from manufacturing_pipeline.core.runtime_reporting import run_debug
         run_debug(step_file)
         return
 
