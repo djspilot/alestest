@@ -1582,6 +1582,15 @@ for solid_idx, solid in enumerate(sorted_solids[:_max_solids]):
         )
     if _skip_reasons:
         _skip_sheet_tree = True
+    # If the new unfolder is unavailable we cannot run in "new-only" mode.
+    # Fall back to SheetTree so unfold still has a chance to succeed.
+    if _skip_sheet_tree and not new_unfolder_available:
+        print(
+            "DEBUG: SheetMetalNewUnfolder unavailable "
+            f"({{new_unfolder_import_error or 'unknown import error'}}) -> keep SheetTree enabled"
+        )
+        _skip_sheet_tree = False
+        _skip_reasons.append("new_unfolder_unavailable_fallback_to_sheettree")
     _selected_strategy = (
         "new_only"
         if _skip_sheet_tree or unfolder_variant_mode == "new"
@@ -1662,7 +1671,7 @@ for solid_idx, solid in enumerate(sorted_solids[:_max_solids]):
         try:
             # When _skip_sheet_tree is set, only try the new unfolder because
             # SheetTree.Bend_analysis is too slow on high-cylinder-count parts.
-            should_try_new = unfolder_variant_mode in ("auto", "new") or _skip_sheet_tree
+            should_try_new = (unfolder_variant_mode in ("auto", "new") or _skip_sheet_tree) and new_unfolder_available
             if should_try_new:
                 try:
                     new_result = _attempt_new_unfolder(obj, base_idx, detected_thickness, _strategy_meta)
@@ -1677,6 +1686,11 @@ for solid_idx, solid in enumerate(sorted_solids[:_max_solids]):
                     _record_error(result, base_idx, "new_unfolder", -3, str(new_exc))
                     if unfolder_variant_mode == "new" or _skip_sheet_tree:
                         continue
+            elif unfolder_variant_mode == "new" and not new_unfolder_available:
+                print(
+                    "DEBUG: FREECAD_UNFOLDER_VARIANT=new but SheetMetalNewUnfolder unavailable "
+                    f"({{new_unfolder_import_error or 'unknown import error'}}), trying SheetTree fallback"
+                )
 
             unfold_tree = build_sheet_tree(solid, base_idx, kFactorLookup, obj)
             if unfold_tree.error_code:
