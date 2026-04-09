@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 from manufacturing_pipeline.core.runtime_analysis import run_analysis
 from manufacturing_pipeline.core.file_utils import get_output_dir
+from manufacturing_pipeline.core.vps_pipeline import pipeline_vps_enabled, run_pipeline_analysis_via_vps
 
 
 def _erp_bend_angle(angle: float | int | None) -> float | None:
@@ -667,6 +668,27 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
 
     try:
         output_dir, _ = get_output_dir(step_file)
+        if pipeline_vps_enabled():
+            remote = run_pipeline_analysis_via_vps(
+                step_file,
+                output_dir,
+                use_aag=use_aag,
+                disable_stages=disable_stages,
+            )
+            if not remote.get("success"):
+                return {
+                    "file": part_name,
+                    "success": False,
+                    "error": remote.get("error") or "VPS pipeline failed",
+                }
+            result = dict(remote.get("result") or {})
+            result.setdefault("file", part_name)
+            result["vps_job_id"] = remote.get("job_id")
+            result["vps_result_source"] = "remote-api"
+            if remote.get("xml_path"):
+                result["local_xml_path"] = remote.get("xml_path")
+            return result
+
         analysis, total_holes = run_analysis(
             step_file,
             output_dir,

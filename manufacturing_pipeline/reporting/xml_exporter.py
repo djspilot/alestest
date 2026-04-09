@@ -10,6 +10,8 @@ import os
 import sys
 import re
 
+from manufacturing_pipeline.core.thresholds import get_unfold_thresholds
+
 
 # ---------------------------------------------------------------------------
 # Pure-Python XML builder — no pyexpat / _elementtree dependency.
@@ -548,6 +550,162 @@ def _append_calculation_result(root: "_Elem", result: Dict[str, Any], part_name:
     production = result.get('production', {})
     visuals = result.get('visuals', {}) or {}
     hole_visuals = visuals.get('holes', {}) or {}
+    unfold_visuals = (visuals.get('unfold') or {}) if isinstance(visuals, dict) else {}
+
+    def _to_float(value):
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    def _segment_merge_settings():
+        try:
+            return get_unfold_thresholds().get('fold_merge', {})
+        except Exception:
+            return {}
+
+    def _segment_line_offset(segment):
+        axis = str(segment.get('axis') or '').upper()
+        center = segment.get('center') or []
+        if not isinstance(center, (list, tuple)) or len(center) < 2:
+            return None
+        if axis == 'Y':
+            return _to_float(center[0])
+        if axis == 'X':
+            return _to_float(center[1])
+        return None
+
+    def _canonical_unfold_bends(unfold_payload):
+        if not isinstance(unfold_payload, dict):
+            return []
+
+        merge_settings = _segment_merge_settings()
+        offset_tol = float(merge_settings.get('offset_tol_mm', 2.0) or 2.0)
+        overlap_tol = float(merge_settings.get('overlap_tol_mm', 5.0) or 5.0)
+        gap_tol = float(merge_settings.get('gap_tol_mm', 120.0) or 120.0)
+
+        def _merge_fold_segments_for_xml():
+            raw_segments = unfold_payload.get('bend_line_segments') or []
+            prepared = []
+            for segment in raw_segments:
+                axis = str(segment.get('axis') or '').upper()
+                axis_span = segment.get('axis_span') or []
+                if axis not in {'X', 'Y'} or not isinstance(axis_span, (list, tuple)) or len(axis_span) < 2:
+                    continue
+                span_min = _to_float(min(axis_span[0], axis_span[1]))
+                span_max = _to_float(max(axis_span[0], axis_span[1]))
+                line_offset = _segment_line_offset(segment)
+                if span_min is None or span_max is None or line_offset is None:
+                    continue
+                prepared.append(
+                    {
+                        'axis': axis,
+                        'line_offset': line_offset,
+                        'span_min': span_min,
+                        'span_max': span_max,
+                    }
+                )
+
+            if not prepared:
+                return []
+
+            prepared.sort(key=lambda item: (item['axis'], round(item['line_offset'] / max(offset_tol, 0.001), 0), item['span_min']))
+
+            def _effective_gap_tol(prev_item, next_item):
+                prev_len = max(0.0, prev_item['span_max'] - prev_item['span_min'])
+                next_len = max(0.0, next_item['span_max'] - next_item['span_min'])
+                dynamic_tol = max(
+                    gap_tol,
+                    2.0 * max(prev_len, next_len),
+                    5.0 * min(prev_len, next_len),
+                )
+                return min(dynamic_tol, 500.0)
+
+            groups = []
+            current = None
+            for item in prepared:
+                if current is None:
+                    current = {
+                        'axis': item['axis'],
+                        'line_offset': item['line_offset'],
+                        'span_min': item['span_min'],
+                        'span_max': item['span_max'],
+                    }
+                    continue
+
+                same_line = (
+                    current['axis'] == item['axis']
+                    and abs(current['line_offset'] - item['line_offset']) <= offset_tol
+                )
+                overlap = max(0.0, min(current['span_max'], item['span_max']) - max(current['span_min'], item['span_min']))
+                gap = max(0.0, item['span_min'] - current['span_max'])
+                extension_ok = overlap <= overlap_tol and gap <= _effective_gap_tol(current, item)
+
+                if same_line and extension_ok:
+                    current['span_min'] = min(current['span_min'], item['span_min'])
+                    current['span_max'] = max(current['span_max'], item['span_max'])
+                else:
+                    groups.append(current)
+                    current = {
+                        'axis': item['axis'],
+                        'line_offset': item['line_offset'],
+                        'span_min': item['span_min'],
+                        'span_max': item['span_max'],
+                    }
+
+            if current is not None:
+                groups.append(current)
+
+            return [round(group['span_max'] - group['span_min'], 3) for group in groups]
+
+        visual_bends = unfold_payload.get('bends_logical') or []
+        meaningful_visual_bends = []
+        for bend in visual_bends:
+            angle_raw = _to_float(bend.get('angle_raw'))
+            angle = _to_float(bend.get('angle'))
+            radius = _to_float(bend.get('radius'))
+
+            raw_meaningful = angle_raw is not None and abs(angle_raw) > 1e-3
+            angle_meaningful = angle is not None and abs(angle) > 1e-3 and abs(abs(angle) - 180.0) > 1e-3
+            radius_meaningful = radius is not None and abs(radius) > 1e-3
+
+            if raw_meaningful or angle_meaningful or radius_meaningful:
+                meaningful_visual_bends.append(
+                    {
+                        'angle': angle,
+                        'radius': radius,
+                    }
+                )
+
+        bend_angles_erp = [
+            angle
+            for angle in (_to_float(value) for value in (unfold_payload.get('bend_angles_erp') or []))
+            if angle is not None and abs(angle) > 1e-3
+        ]
+
+        merged_fold_lengths = _merge_fold_segments_for_xml()
+
+        if bend_angles_erp:
+            canonical = []
+            fallback_radii = [
+                bend.get('radius')
+                for bend in meaningful_visual_bends
+                if bend.get('radius') is not None and abs(float(bend.get('radius') or 0.0)) > 1e-3
+            ]
+            for index, angle in enumerate(bend_angles_erp):
+                radius = fallback_radii[index] if index < len(fallback_radii) else None
+                length = merged_fold_lengths[index] if index < len(merged_fold_lengths) else None
+                canonical.append({'angle': angle, 'radius': radius, 'length': length})
+            return canonical
+
+        if meaningful_visual_bends and merged_fold_lengths:
+            canonical = []
+            for index, bend in enumerate(meaningful_visual_bends):
+                length = merged_fold_lengths[index] if index < len(merged_fold_lengths) else None
+                canonical.append({**bend, 'length': length})
+            return canonical
+
+        return meaningful_visual_bends
     accepted_visual_holes = [
         item for item in (hole_visuals.get('items') or [])
         if str(item.get('status') or '').lower() == 'accepted'
@@ -557,7 +715,10 @@ def _append_calculation_result(root: "_Elem", result: Dict[str, Any], part_name:
     if holes_total <= 0:
         holes_total = int(production.get('holes_total', 0) or 0)
 
-    ET.SubElement(calc, 'Sheet_NrBends').text = str(production.get('bends_total', 0))
+    canonical_unfold_bends = _canonical_unfold_bends(unfold_visuals)
+    bend_count_xml = len(canonical_unfold_bends) if canonical_unfold_bends else int(production.get('bends_total', 0) or 0)
+
+    ET.SubElement(calc, 'Sheet_NrBends').text = str(bend_count_xml)
     ET.SubElement(calc, 'Sheet_NrHoles').text = str(holes_total)
     ET.SubElement(calc, 'Sheet_HoleTypes').text = ''
     ET.SubElement(calc, 'Sheet_ThreadedHoles').text = '0'
@@ -593,16 +754,40 @@ def _append_calculation_result(root: "_Elem", result: Dict[str, Any], part_name:
 
     # AAG details (if available)
     aag_details = result.get('aag_details') or {}
-    unfold_visuals = (visuals.get('unfold') or {}) if isinstance(visuals, dict) else {}
     sheet_metrics = result.get('sheet_metrics') or {}
 
     # Bend details
     bend_details = aag_details.get('bend_details', [])
-    if bend_details:
-        bend_angles = '_'.join(_format_float(b.get('angle', 0)) for b in bend_details)
-        bend_radii = '_'.join(_format_float(b.get('radius', 0)) for b in bend_details)
+    if canonical_unfold_bends:
+        bend_angles = '_'.join(
+            _format_float(b.get('angle', 0))
+            for b in canonical_unfold_bends
+            if b.get('angle') is not None
+        )
+        bend_radii = '_'.join(
+            _format_float(b.get('radius', 0))
+            for b in canonical_unfold_bends
+            if b.get('radius') is not None
+        )
+        bend_lengths = '_'.join(
+            _format_float(b.get('length', 0))
+            for b in canonical_unfold_bends
+            if b.get('length') is not None
+        )
         ET.SubElement(calc, 'Sheet_BendAngles').text = bend_angles
         ET.SubElement(calc, 'Sheet_BendInnerRadii').text = bend_radii
+        ET.SubElement(calc, 'Sheet_BendLength').text = bend_lengths
+    elif bend_details:
+        bend_angles = '_'.join(_format_float(b.get('angle', 0)) for b in bend_details)
+        bend_radii = '_'.join(_format_float(b.get('radius', 0)) for b in bend_details)
+        bend_lengths = '_'.join(
+            _format_float(b.get('length', 0))
+            for b in bend_details
+            if b.get('length') is not None
+        )
+        ET.SubElement(calc, 'Sheet_BendAngles').text = bend_angles
+        ET.SubElement(calc, 'Sheet_BendInnerRadii').text = bend_radii
+        ET.SubElement(calc, 'Sheet_BendLength').text = bend_lengths
     else:
         visual_bends = unfold_visuals.get('bends_logical') or []
         bend_angles = '_'.join(
@@ -615,8 +800,14 @@ def _append_calculation_result(root: "_Elem", result: Dict[str, Any], part_name:
             for b in visual_bends
             if b.get('radius') is not None
         )
+        bend_lengths = '_'.join(
+            _format_float(detail.get('length', 0))
+            for detail in (unfold_visuals.get('fold_details') or [])
+            if detail.get('length') is not None
+        )
         ET.SubElement(calc, 'Sheet_BendAngles').text = bend_angles
         ET.SubElement(calc, 'Sheet_BendInnerRadii').text = bend_radii
+        ET.SubElement(calc, 'Sheet_BendLength').text = bend_lengths
 
     # Hole details
     if accepted_visual_holes:

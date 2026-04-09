@@ -119,6 +119,24 @@ Uitleg criteria:
 - Radiuscompatibiliteit: segmenten zijn radius-compatibel als het radiusverschil `<= 0.5 mm` blijft.
 - Extension-compatibility: segmenten worden samengevoegd wanneer de aansluiting voldoet aan `overlap <= 5.0 mm` en `gap <= 120.0 mm`.
 
+### XML-afspraak voor zettingen
+Voor XML-uitvoer wordt uitgegaan van de canonieke zetlijnen na merge, niet van het ruwe aantal segmenten.
+
+Dat betekent:
+- `Sheet_NrBends` = aantal canonieke zetlijnen na samenvoegen.
+- `Sheet_BendAngles` = ERP-hoek per canonieke zetlijn.
+- `Sheet_BendInnerRadii` = binnenradius per canonieke zetlijn.
+- `Sheet_BendLength` = totale zetlengte per canonieke zetlijn, berekend als de volledige span van de samengevoegde segmentgroep.
+
+Belangrijk voor `Sheet_BendLength`:
+- De lengte is niet alleen de som van losse segmentlengtes.
+- Ook de tussenliggende gaten worden meegeteld wanneer segmenten volgens bovenstaande merge-criteria tot dezelfde fysieke zetlijn horen.
+- Formeel: `Sheet_BendLength = span_max - span_min` van de samengevoegde segmentgroep.
+
+Voorbeeld:
+- Als een zetlijn door gaten is onderbroken in meerdere segmenten, maar de segmenten liggen op dezelfde lijn, hebben compatibele hoek/radius en vallen binnen de gap/overlap-toleranties, dan telt XML dit als 1 zetlijn.
+- De bijbehorende `Sheet_BendLength` is dan de totale lengte van begin tot eind van die samengevoegde lijn.
+
 ### Resultaatvelden
 Bij succes bevat output onder andere:
 - `flat_step_path`
@@ -132,6 +150,12 @@ Bij succes bevat output onder andere:
 - `bends_logical`
 - `attempts`
 - `error_details`
+
+Bij XML-export voor gezette plaat zijn de relevante zetvelden dus:
+- `Sheet_NrBends`
+- `Sheet_BendAngles`
+- `Sheet_BendInnerRadii`
+- `Sheet_BendLength`
 
 ## 3) Rol van freecad_unfold.py
 

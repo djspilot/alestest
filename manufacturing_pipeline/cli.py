@@ -23,6 +23,7 @@ from manufacturing_pipeline.core.python_dependencies import (
     auto_install_python_dependencies_enabled,
     ensure_host_python_dependencies,
 )
+from manufacturing_pipeline.core.vps_pipeline import pipeline_vps_enabled, run_pipeline_analysis_via_vps
 
 # ---------------------------------------------------------------------------
 # Quick-mode single-file runner
@@ -88,6 +89,40 @@ def run_quick(step_file, args):
 
     # Single-solid path
     try:
+        if pipeline_vps_enabled():
+            remote_disable_stages = set()
+            if args.no_unfold:
+                remote_disable_stages.add("unfold")
+            remote = run_pipeline_analysis_via_vps(
+                step_file,
+                output_dir,
+                use_aag=True,
+                disable_stages=remote_disable_stages,
+                force=bool(args.no_cache),
+            )
+            if not remote.get("success"):
+                raise RuntimeError(remote.get("error") or "VPS pipeline failed")
+
+            result = remote.get("result") or {}
+            print(f"\n{'=' * 60}")
+            print("COMPLETE (VPS)")
+            print(f"{'=' * 60}")
+            print(f"VPS job: {remote.get('job_id')}")
+            if remote.get("reused_existing"):
+                print("Remote result: reused existing job")
+            print(f"Category: {result.get('category', 'UNKNOWN')}")
+            dimensions = result.get("dimensions") or {}
+            if dimensions:
+                print(
+                    "Dimensions: "
+                    f"{dimensions.get('length', 0):.0f} x {dimensions.get('width', 0):.0f} x {dimensions.get('height', 0):.0f} mm"
+                )
+            print(f"Output files in: {output_dir}/")
+            for fname in sorted(os.listdir(output_dir)):
+                if os.path.isfile(os.path.join(output_dir, fname)):
+                    print(f"  - {fname}")
+            return
+
         run_analysis(step_file, output_dir, args)
 
         print(f"\n{'=' * 60}")
@@ -242,6 +277,8 @@ def run_batch(step_files, args, cache):
         "no_unfold": args.no_unfold,
         "no_pdf": args.no_pdf,
         "no_cache": args.no_cache,
+        "use_aag": True,
+        "disable_stages": set(),
     }
 
     results = []

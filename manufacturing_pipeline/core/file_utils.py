@@ -75,28 +75,90 @@ def get_output_dir(step_file):
 def process_single_file(step_file, args_dict, cache_data=None):
     """Worker function to process a single STEP file (for parallel processing)."""
     from manufacturing_pipeline.core.utils import run_analysis
+    from manufacturing_pipeline.core.vps_pipeline import pipeline_vps_enabled, run_pipeline_analysis_via_vps
     
     # Convert args dict back to namespace
     args = SimpleNamespace(**args_dict)
     
     output_dir, _ = get_output_dir(step_file)
+
+    def _summarize_remote_result(remote_result):
+        result = dict(remote_result or {})
+        if result.get("is_assembly"):
+            parts = result.get("parts") or []
+            holes = sum(len((part.get("production") or {}).get("holes") or []) for part in parts)
+            bends = sum(int((part.get("production") or {}).get("bends_total") or 0) for part in parts)
+            category = "ASSEMBLY"
+        else:
+            production = result.get("production") or {}
+            holes = len(production.get("holes") or [])
+            bends = int(production.get("bends_total") or 0)
+            category = result.get("category") or "UNKNOWN"
+        return category, holes, bends
     
     try:
+        if pipeline_vps_enabled():
+            remote_disable_stages = set(getattr(args, "disable_stages", set()) or set())
+            if getattr(args, "no_unfold", False):
+                remote_disable_stages.add("unfold")
+            remote = run_pipeline_analysis_via_vps(
+                step_file,
+                output_dir,
+                use_aag=bool(getattr(args, "use_aag", True)),
+                disable_stages=remote_disable_stages,
+                force=bool(getattr(args, "no_cache", False)),
+            )
+            if not remote.get("success"):
+                return {
+                    'file': os.path.basename(step_file),
+                    'filepath': step_file,
+                    'success': False,
+                    'analysis': None,
+                    'profiler': None,
+                    'error': remote.get('error') or 'VPS pipeline failed',
+                    'cached': bool(remote.get('reused_existing')),
+                }
+
+            result = dict(remote.get("result") or {})
+            category, holes, bends = _summarize_remote_result(result)
+            return {
+                'file': os.path.basename(step_file),
+                'filepath': step_file,
+                'success': True,
+                'analysis': result,
+                'profiler': None,
+                'error': None,
+                'category': category,
+                'holes': holes,
+                'bends': bends,
+                'cached': bool(remote.get('reused_existing')),
+            }
+
         analysis, profiler = run_analysis(step_file, output_dir, args)
+        category = getattr(analysis, 'part_category', None) or getattr(getattr(analysis, 'part_type', None), 'value', None) or 'UNKNOWN'
+        holes = int(getattr(analysis, 'hole_count', 0) or getattr(analysis, 'nr_holes', 0) or 0)
+        bends = int(getattr(analysis, 'bend_count_erp', 0) or 0)
         return {
-            'file': step_file,
+            'file': os.path.basename(step_file),
+            'filepath': step_file,
             'success': True,
             'analysis': analysis,
             'profiler': profiler,
-            'error': None
+            'error': None,
+            'category': category,
+            'holes': holes,
+            'bends': bends,
+            'cached': False,
         }
     except Exception as e:
         return {
-            'file': step_file,
+            'file': os.path.basename(step_file),
+            'filepath': step_file,
             'success': False,
             'analysis': None,
             'profiler': None,
-            'error': str(e)
+            'error': str(e),
+            'cached': False,
         }
 
 
