@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { checkPipelineConnection, getDefaultPipelineApiBase, runPipelineAnalysis } from '../pipelineClient'
+import { cancelPipelineJob, checkPipelineConnection, getDefaultPipelineApiBase, runPipelineAnalysis } from '../pipelineClient'
 import {
   groupEventsByStage,
   isMergedHolesStageName,
@@ -95,6 +95,18 @@ export function usePipeline() {
     }
   }, [])
 
+  // Cancel the current server-side job (fire-and-forget) and stop client polling
+  const cancelCurrentJob = useCallback(() => {
+    stopPipelineRequest()
+    setPipelineState((prev) => {
+      if (prev.jobId && (prev.status === 'processing' || prev.status === 'queued')) {
+        cancelPipelineJob(prev.jobId, { apiBase: pipelineApiBase, apiKey: pipelineApiKey })
+        return { ...prev, status: 'cancelled' }
+      }
+      return prev
+    })
+  }, [pipelineApiBase, pipelineApiKey, stopPipelineRequest])
+
   useEffect(() => {
     if (!pipelineEnabled) {
       stopPipelineRequest()
@@ -124,7 +136,8 @@ export function usePipeline() {
         return
       }
 
-      stopPipelineRequest()
+      // Cancel the previous server job before starting a new one
+      cancelCurrentJob()
       const controller = new AbortController()
       pipelineAbortRef.current = controller
 
@@ -264,7 +277,7 @@ export function usePipeline() {
         }))
       }
     },
-    [aagFallbackEnabled, disabledStages, pipelineApiBase, pipelineApiKey, pipelineEnabled, stopPipelineRequest],
+    [aagFallbackEnabled, cancelCurrentJob, disabledStages, pipelineApiBase, pipelineApiKey, pipelineEnabled],
   )
 
   // Auto-restart when settings change
@@ -339,6 +352,7 @@ export function usePipeline() {
     debugEvents,
     startPipeline,
     stopPipelineRequest,
+    cancelCurrentJob,
     triggerAutoRestart,
     backendMesh,
     pipelineVisuals,

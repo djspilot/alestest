@@ -26,6 +26,7 @@ export default function Sidebar({
   selectedStageIndex,
   onSelectStageIndex,
   onRetryPipeline,
+  onCancelPipeline,
   pipelineStatus,
   pipelineDebug,
   onResetPipelineApiBase,
@@ -202,6 +203,15 @@ export default function Sidebar({
                   API URL reset naar launcher default
                 </button>
               </div>
+            )}
+            {fileName && pipelineEnabled && (pipelineState?.status === 'processing' || pipelineState?.status === 'queued') && (
+              <button
+                className="toolbar-btn"
+                style={{ marginTop: 8, width: '100%', color: '#f87171' }}
+                onClick={onCancelPipeline}
+              >
+                Analyse stoppen
+              </button>
             )}
             {fileName && pipelineEnabled && (
               <button className="toolbar-btn" style={{ marginTop: 8, width: '100%' }} onClick={onRetryPipeline}>

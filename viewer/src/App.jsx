@@ -582,6 +582,16 @@ function AppContent({
                   {selection.probeMode ? 'Probe mode aan' : 'Probe mode'}
                 </button>
                 <button className="toolbar-btn" onClick={resetViewer}>Nieuw bestand</button>
+                {(pipeline.pipelineState.status === 'processing' || pipeline.pipelineState.status === 'queued') && (
+                  <button
+                    className="toolbar-btn"
+                    style={{ color: '#f87171' }}
+                    onClick={pipeline.cancelCurrentJob}
+                    title="Analyse stoppen"
+                  >
+                    Stop analyse
+                  </button>
+                )}
               </div>
               <div className="studio-menu-shell">
                 <button

@@ -134,6 +134,20 @@ export function getDefaultPipelineApiBase() {
   return trimTrailingSlash(DEFAULT_API_BASE)
 }
 
+export async function cancelPipelineJob(jobId, options = {}) {
+  const { apiBase = getDefaultPipelineApiBase(), apiKey = '' } = options
+  const base = trimTrailingSlash(apiBase)
+  if (!base || !jobId) return
+  try {
+    await fetch(`${base}/api/v1/jobs/${jobId}/cancel`, {
+      method: 'POST',
+      headers: buildHeaders(apiKey),
+    })
+  } catch {
+    // best-effort: ignore network errors when cancelling
+  }
+}
+
 export async function checkPipelineConnection(options = {}) {
   const { apiBase = getDefaultPipelineApiBase(), apiKey = '', signal } = options
 

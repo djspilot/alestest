@@ -162,6 +162,9 @@ def _refresh_live_summary(summary_raw: dict | None) -> dict | None:
 
 def _run_analysis_job(job_id: str, step_path: str, use_aag: bool, disable_stages: set[str] | None = None):
     """Background task that runs the analysis and updates job state."""
+    job = jobs.get(job_id)
+    if job and job.status == "cancelled":
+        return
     jobs.mark_processing(job_id)
     try:
         result = run_step_analysis(
@@ -170,8 +173,15 @@ def _run_analysis_job(job_id: str, step_path: str, use_aag: bool, disable_stages
             progress_callback=lambda event, summary: jobs.record_progress(job_id, event, summary),
             disable_stages=disable_stages,
         )
+        # Don't overwrite a job that was cancelled while analysis was running
+        job = jobs.get(job_id)
+        if job and job.status == "cancelled":
+            return
         jobs.mark_completed(job_id, result)
     except Exception as e:
+        job = jobs.get(job_id)
+        if job and job.status == "cancelled":
+            return
         jobs.mark_failed(job_id, str(e))
 
 
@@ -1012,6 +1022,35 @@ async def get_job(
         response.result = AnalysisResult(**_effective_result_dict(job))
 
     return response
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=JobStatus)
+async def cancel_job(job_id: str):
+    """Cancel a queued or processing job."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    cancelled = jobs.mark_cancelled(job_id)
+    if not cancelled:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job cannot be cancelled (status: {job.status})",
+        )
+    job = jobs.get(job_id)
+    timeline_raw, summary_raw = _resolve_job_timeline(job)
+    return JobStatus(
+        job_id=job.job_id,
+        status=job.status,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        archived=bool(getattr(job, "archived", False)),
+        archived_at=getattr(job, "archived_at", None),
+        source_step_available=_source_step_available(job),
+        timeline_summary=TimelineSummary(**summary_raw) if summary_raw else None,
+        timeline_events=[TimelineEvent(**e) for e in timeline_raw],
+        error="Geannuleerd door gebruiker",
+    )
 
 
 @router.post("/jobs/{job_id}/archive", response_model=JobStatus)

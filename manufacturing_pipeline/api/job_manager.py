@@ -337,6 +337,21 @@ class JobManager:
                         completed_at=self._dt_to_str(now),
                         error=error)
 
+    def mark_cancelled(self, job_id: str) -> bool:
+        """Cancel a queued or processing job. Returns True if the job existed."""
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return False
+            if job.status not in ("queued", "processing"):
+                return False
+            job.status = "cancelled"
+            job.completed_at = now
+        self._update_db(job_id, status="cancelled",
+                        completed_at=self._dt_to_str(now))
+        return True
+
     def queue_unfold(self, job_id: str):
         now = datetime.now(timezone.utc)
         with self._lock:

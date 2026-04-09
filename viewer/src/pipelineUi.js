@@ -6,6 +6,7 @@ export const STATUS_LABELS = {
   processing: 'Analyseren',
   completed: 'Klaar',
   failed: 'Mislukt',
+  cancelled: 'Geannuleerd',
   unavailable: 'Niet bereikbaar',
   auth_required: 'API-key nodig',
 }
