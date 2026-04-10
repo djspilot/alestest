@@ -54,6 +54,9 @@ async def _cleanup_loop():
 async def startup():
     """Initialize on startup."""
     os.makedirs(UPLOAD_DIR, exist_ok=True)
+    recovered = jobs.recover_stale_jobs()
+    if recovered:
+        print(f"  [startup] recovered {recovered} stale queued/processing jobs")
     asyncio.create_task(_cleanup_loop())
     # Pre-warm FreeCAD worker so the first unfold job pays no cold-start penalty.
     if "unfold" not in _disabled_stages():

@@ -11,3 +11,4 @@ deploy.sh
 *.md
 .env
 .env.example
+.vps.env

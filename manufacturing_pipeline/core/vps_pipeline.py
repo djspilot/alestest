@@ -78,6 +78,9 @@ def pipeline_vps_mode() -> str:
     if os.getenv("PYTEST_CURRENT_TEST"):
         return "off"
     # Avoid recursive self-calls when the code runs inside the API server itself.
+    if os.getenv("RUNNING_IN_API", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return "off"
+    # Backward-compat guard in environments that still provide API_KEYS.
     if os.getenv("API_KEYS", "").strip():
         return "off"
     return "always" if os.path.exists(os.path.join(PROJECT_ROOT, ".vps.env")) else "off"
