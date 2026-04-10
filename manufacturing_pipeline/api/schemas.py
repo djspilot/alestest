@@ -96,6 +96,7 @@ class AnalysisResult(BaseModel):
     # Assembly fields (present when the uploaded STEP contains multiple solids)
     is_assembly: Optional[bool] = None
     solid_count: Optional[int] = None
+    unique_solid_count: Optional[int] = None
     parts: Optional[list[dict]] = None  # per-solid AnalysisResult dicts
     # Per-solid identification (set when this result is a part inside an assembly)
     solid_name: Optional[str] = None
@@ -198,6 +199,7 @@ class ResultSummary(BaseModel):
     production: Optional[dict] = None
     is_assembly: Optional[bool] = None
     solid_count: Optional[int] = None
+    unique_solid_count: Optional[int] = None
     parts: Optional[list[dict]] = None
 
 
