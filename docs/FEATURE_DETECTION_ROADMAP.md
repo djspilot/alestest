@@ -8,6 +8,9 @@ Doel: bouw een feature-aware pipeline die classificatie robuuster maakt bij comp
 
 Onderstaande volgorde is leidend voor de manufacturing pipeline. De feature-detection v3 techniek blijft ondersteunend, maar de uitvoering gebeurt eerst via gecontroleerde XML-invulling per stap.
 
+Bij bronconflicten en fallback-interpretatie geldt aanvullend:
+- zie `docs/CLASSIFICATION_AUTHORITY_PLAN.md` als werkdocument voor bronautoriteit, auditvolgorde en teststrategie.
+
 ### Fase 1 — Vlakke plaatdelen: naam, aantallen, afmetingen
 - Scope: alleen niet-gezette plaatdelen
 - XML velden minimaal: `Sheet_PartName`, `Sheet_Name`, `Sheet_Count`, `Sheet_BoxX`, `Sheet_BoxY`, `Sheet_Thickness`
@@ -156,5 +159,5 @@ M6. Feature-v3 verdieping (parallel spoor)
 
 ## Referenties
 
-- [docs/ENGINE.md](ENGINE.md)
+- [docs/archive/reference/ARCHIVE_ENGINE.md](archive/reference/ARCHIVE_ENGINE.md)
 - [CLASSIFICATION_METHODOLOGY.md](../CLASSIFICATION_METHODOLOGY.md)

@@ -6,7 +6,7 @@ Deze wijziging voegt een robuuste fallback toe voor hole-detectie op unfold/flat
 - als gesloten contour terugbrengen in de pipeline
 - exact als contour tonen in de viewer
 
-Dit document gebruikt de aanpak uit `docs/newfacesholes.md` en past die in op de bestaande productie-logica uit `docs/holedetection_review.md`.
+Dit document gebruikt de aanpak uit `docs/newfacesholes.md` en past die in op de bestaande productie-logica die inmiddels is vastgelegd in `docs/PIPELINE_STEP_02_SHEET_FEATURES.md`.
 
 ## Inpassing in bestaande architectuur
 Bestaande leidende regel blijft geldig:
@@ -92,4 +92,4 @@ Minimaal valideren op:
 3. viewer (`ViewerCanvas`):
 - `HoleOutline` laten tekenen op exacte contour als `contour_points` aanwezig is
 
-4. Geen wijziging aan de bestaande hoofdcriteria uit `docs/holedetection_review.md`; alleen uitbreiding van fallbackpad.
+4. Geen wijziging aan de bestaande hoofdcriteria uit `docs/PIPELINE_STEP_02_SHEET_FEATURES.md`; alleen uitbreiding van fallbackpad.

@@ -37,8 +37,8 @@ Dat betekent:
 - `manufacturing_pipeline/analysis/cut_features.py`
 - `manufacturing_pipeline/analysis/profile_features.py`
 - `docs/FEATURE_DETECTION_ROADMAP.md`
-- `docs/pipeline_flow.md`
-- `docs/holedetection_review.md`
+- `docs/archive/reference/ARCHIVE_pipeline_flow.md`
+- `docs/archive/reference/ARCHIVE_holedetection_review.md`
 - `docs/overhaul.md`
 
 ## Hoofdconclusie

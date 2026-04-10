@@ -6,11 +6,13 @@ Technische documentatie voor de ALES Manufacturing Pipeline.
 
 | Document | Beschrijving |
 |----------|-------------|
-| [engine.md](engine.md) | Technische beschrijving van de analyse-engine (STEP verwerking, gatdetectie, zetdetectie, ontvouwen, AAG, ISO-normen) |
-| [classification.md](classification.md) | Classificatie: beslisboom, thresholds, Step 0 criteria, categorie-details |
-| [pipeline_flow.md](pipeline_flow.md) | Mermaid diagrammen van de pipeline flow (quick mode, XML export, classificatie, full mode) |
-| [holedetection_review.md](holedetection_review.md) | Actieve hole-detection criteria, thresholds en beslislogica |
-| [unfold_review.md](unfold_review.md) | Huidige unfold-logica: criteria, thresholds, K-factor, FreeCAD integratie |
+| [pipeline_step_00_overview.md](pipeline_step_00_overview.md) | Overzicht van de gestandaardiseerde stapdocumenten en centrale variabelenbron |
+| [pipeline_step_01_classification.md](pipeline_step_01_classification.md) | Actieve afspraken voor classificatie |
+| [pipeline_step_02_sheet_features.md](pipeline_step_02_sheet_features.md) | Actieve afspraken voor plaatfeatures en hole-semantiek |
+| [pipeline_step_03_profile_features.md](pipeline_step_03_profile_features.md) | Actieve afspraken voor profielmaatvoering en profielfeatures |
+| [pipeline_step_04_unfold.md](pipeline_step_04_unfold.md) | Actieve afspraken voor unfold en bendvelden |
+| [pipeline_step_05_xml_export_authority.md](pipeline_step_05_xml_export_authority.md) | Actieve afspraken voor XML-veldautoriteit |
+| [pipeline_variables.md](pipeline_variables.md) | Centrale uitleg van beslissingsvariabelen en compatibiliteitslagen |
 | [thickness_estimator_validation_protocol.md](thickness_estimator_validation_protocol.md) | Validatieprotocol voor branch Thicknessestimator: dikte eerst, unfold daarna |
 | [thickness_estimator_validation_matrix.md](thickness_estimator_validation_matrix.md) | Bevroren Ronde 1-testset en invulmatrix voor main versus Thicknessestimator |
 | [naming_strategy.md](naming_strategy.md) | Naamgeving strategie voor onderdelen in XML-output |
@@ -30,3 +32,17 @@ Technische documentatie voor de ALES Manufacturing Pipeline.
 ## Archief
 
 Oudere handovers, testresultaten en scratch-notities staan in [`archive/`](archive/).
+
+Gearchiveerde voormalige operationele documenten:
+
+| Document | Beschrijving |
+|----------|-------------|
+| [archive/reference/ARCHIVE_ENGINE.md](archive/reference/ARCHIVE_ENGINE.md) | Voormalige engine-uitleg; nu alleen naslagwerk |
+| [archive/reference/ARCHIVE_classification.md](archive/reference/ARCHIVE_classification.md) | Voormalige classificatiereferentie; nu alleen naslagwerk |
+| [archive/reference/ARCHIVE_pipeline_flow.md](archive/reference/ARCHIVE_pipeline_flow.md) | Voormalige flowdiagrammen; nu alleen naslagwerk |
+| [archive/reference/ARCHIVE_holedetection_review.md](archive/reference/ARCHIVE_holedetection_review.md) | Voormalige hole-review; nu alleen naslagwerk |
+| [archive/reference/ARCHIVE_Unfold_review.md](archive/reference/ARCHIVE_Unfold_review.md) | Voormalige unfold-review; nu alleen naslagwerk |
+
+## Migratiestatus
+
+De documenten [archive/reference/ARCHIVE_classification.md](archive/reference/ARCHIVE_classification.md), [archive/reference/ARCHIVE_holedetection_review.md](archive/reference/ARCHIVE_holedetection_review.md), [archive/reference/ARCHIVE_Unfold_review.md](archive/reference/ARCHIVE_Unfold_review.md) en `CLASSIFICATION_AUTHORITY_PLAN.md` blijven voorlopig bruikbaar als migratiebron, maar de herkenbare stapdocumenten hierboven zijn de nieuwe doelstructuur.

@@ -10,6 +10,8 @@ This module contains:
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
+from manufacturing_pipeline.core.decision_variables import get_classification_review_thresholds
+
 
 # =============================================================================
 # Criterion Builders
@@ -333,31 +335,7 @@ def build_classification_visuals(analysis: Any, legacy_class: str, legacy_trace:
 # Constants for Threshold Computation
 # =============================================================================
 
-CLASSIFICATION_THRESHOLDS = {
-    "bent_sheet": {
-        "aspect_ratio_min": 1.5,
-        "min_edge_count": 8,
-        "thickness_max_mm": 25,
-        "top2_faces_max_pct": 50,
-        "volume_ratio_min": 0.01,
-        "volume_ratio_max": 0.5,
-    },
-    "plate": {
-        "aspect_ratio_min": 1.2,
-        "face_top2_threshold_pct": 65,
-        "thick_max_mm": 20,
-        "thickness_ratio_max": 0.25,
-    },
-    "profile": {
-        "smallest_min_mm": 3.0,
-        "length_ratio_min": 2.5,
-        "cross_ratio_min": 0.7,
-        "cross_ratio_max": 5.0,
-        "sa_v_ratio_max": 2.0,
-        "volume_ratio_strong_min": 0.3,
-        "volume_ratio_weak_min": 0.1,
-    },
-}
+CLASSIFICATION_THRESHOLDS = get_classification_review_thresholds()
 
 
 __all__ = [

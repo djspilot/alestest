@@ -4,6 +4,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cadquery as cq
 
+from manufacturing_pipeline.core.decision_variables import PROFILE_FEATURE_DECISION_VARIABLES
+
 
 def _get_bounding_box(shape) -> Dict[str, float]:
     try:
@@ -59,7 +61,10 @@ def _filter_profile_end_opening_shaped_holes(
     axis_vector[axis_idx] = 1.0
     axis_min = float(bbox_min[axis_idx])
     axis_max = float(bbox_max[axis_idx])
-    end_band = max(2.0, longest_dim * 0.05)
+    end_band = max(
+        PROFILE_FEATURE_DECISION_VARIABLES["end_opening_filter"]["end_band_min_mm"],
+        longest_dim * PROFILE_FEATURE_DECISION_VARIABLES["end_opening_filter"]["end_band_ratio"],
+    )
 
     kept: List[Dict[str, Any]] = []
     for shaped in shaped_holes:
@@ -72,7 +77,7 @@ def _filter_profile_end_opening_shaped_holes(
             continue
 
         axis_alignment = abs(dot(tuple(axis_vector), normal))
-        if axis_alignment < 0.95:
+        if axis_alignment < PROFILE_FEATURE_DECISION_VARIABLES["end_opening_filter"]["axis_alignment_min"]:
             kept.append(shaped)
             continue
 
@@ -86,7 +91,8 @@ def _filter_profile_end_opening_shaped_holes(
         max_dim = max(dim_a, dim_b)
         min_dim = min(dim_a, dim_b)
         is_large_end_opening = (
-            max_dim >= cross_dims[1] * 0.60 and min_dim >= cross_dims[0] * 0.50
+            max_dim >= cross_dims[1] * PROFILE_FEATURE_DECISION_VARIABLES["end_opening_filter"]["large_opening_max_dim_ratio"] and
+            min_dim >= cross_dims[0] * PROFILE_FEATURE_DECISION_VARIABLES["end_opening_filter"]["large_opening_min_dim_ratio"]
         )
         if is_large_end_opening:
             continue
@@ -128,14 +134,14 @@ def _infer_profile_countersink_pairs(
                 continue
 
             ratio = float(large.diameter) / max(float(small.diameter), 1e-9)
-            if ratio < 1.6 or ratio > 2.6:
+            if ratio < PROFILE_FEATURE_DECISION_VARIABLES["countersink_pairing"]["diameter_ratio_min"] or ratio > PROFILE_FEATURE_DECISION_VARIABLES["countersink_pairing"]["diameter_ratio_max"]:
                 continue
 
             a = normalize_vector(getattr(large, "axis", None))
             b = normalize_vector(getattr(small, "axis", None))
             if a is None or b is None:
                 continue
-            if abs(dot(a, b)) < 0.98:
+            if abs(dot(a, b)) < PROFILE_FEATURE_DECISION_VARIABLES["countersink_pairing"]["axis_alignment_min"]:
                 continue
 
             p_large = as_point_tuple(getattr(large, "position", None))
@@ -144,19 +150,21 @@ def _infer_profile_countersink_pairs(
                 continue
 
             perp = distance_point_to_axis(p_small, p_large, a)
-            if perp > 4.0:
+            if perp > PROFILE_FEATURE_DECISION_VARIABLES["countersink_pairing"]["perp_dist_max_mm"]:
                 continue
 
             axial = abs(signed_axis_distance(p_small, p_large, a))
-            if axial < 5.0 or axial > 30.0:
+            if axial < PROFILE_FEATURE_DECISION_VARIABLES["countersink_pairing"]["axial_dist_min_mm"] or axial > PROFILE_FEATURE_DECISION_VARIABLES["countersink_pairing"]["axial_dist_max_mm"]:
                 continue
 
             depth_large = float(getattr(large, "depth", 0.0) or 0.0)
             depth_small = float(getattr(small, "depth", 0.0) or 0.0)
-            if abs(depth_large - depth_small) > 2.0:
+            if abs(depth_large - depth_small) > PROFILE_FEATURE_DECISION_VARIABLES["countersink_pairing"]["depth_delta_max_mm"]:
                 continue
 
-            score = perp + 0.05 * abs(axial - 15.0)
+            score = perp + PROFILE_FEATURE_DECISION_VARIABLES["countersink_pairing"]["axial_weight"] * abs(
+                axial - PROFILE_FEATURE_DECISION_VARIABLES["countersink_pairing"]["axial_target_mm"]
+            )
             if best_score is None or score < best_score:
                 best_score = score
                 best_j = j

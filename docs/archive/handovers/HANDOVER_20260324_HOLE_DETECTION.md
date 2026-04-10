@@ -29,8 +29,8 @@
   - regressietests voor inferred countersinks
   - regressietest voor profile end-opening shaped-hole filtering
 
-- holedetection_review.md
-  - bijgewerkt met de nieuwe detectieregels en huidige diagnosecontext
+- PIPELINE_STEP_02_SHEET_FEATURES.md
+  - actuele doelbron voor detectieregels; dit handoverdocument blijft alleen historische context
 
 ## 3. Teststatus
 

@@ -10,6 +10,8 @@ from OCP.TopAbs import TopAbs_EDGE
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 
+from manufacturing_pipeline.core.decision_variables import SHEET_FEATURE_DECISION_VARIABLES
+
 
 def _detect_countersunk_by_coaxial_pairs(cylindrical_holes, matches, *, normalize_vector, as_point_tuple, dot, distance_point_to_axis, signed_axis_distance) -> Dict[int, float]:
     """Fallback: infer countersinks from coaxial large/small cylindrical pairs.
@@ -50,11 +52,11 @@ def _detect_countersunk_by_coaxial_pairs(cylindrical_holes, matches, *, normaliz
                 continue
 
             radial_dist = distance_point_to_axis(origin2, origin1, axis1)
-            if radial_dist > 3.5:
+            if radial_dist > SHEET_FEATURE_DECISION_VARIABLES["countersink_pairing"]["coaxial_radial_dist_max_mm"]:
                 continue
 
             axial_dist = abs(signed_axis_distance(origin2, origin1, axis1))
-            if axial_dist > 40.0:
+            if axial_dist > SHEET_FEATURE_DECISION_VARIABLES["countersink_pairing"]["coaxial_axial_dist_max_mm"]:
                 continue
 
             d1 = float(getattr(h1, "diameter", 0.0) or 0.0)
@@ -67,7 +69,7 @@ def _detect_countersunk_by_coaxial_pairs(cylindrical_holes, matches, *, normaliz
             ratio = d_large / d_small if d_small > 0.0 else 0.0
 
             # Countersink-like diameter step (e.g. 17 -> 8.5 gives ratio 2.0)
-            if ratio < 1.65 or ratio > 2.35:
+            if ratio < SHEET_FEATURE_DECISION_VARIABLES["countersink_pairing"]["diameter_ratio_min"] or ratio > SHEET_FEATURE_DECISION_VARIABLES["countersink_pairing"]["diameter_ratio_max"]:
                 continue
 
             depth1 = float(getattr(h1, "depth", 0.0) or 0.0)
@@ -76,7 +78,10 @@ def _detect_countersunk_by_coaxial_pairs(cylindrical_holes, matches, *, normaliz
             depth_small = depth2 if d1 >= d2 else depth1
 
             # Large diameter should be relatively shallow; small one continues deeper.
-            if depth_large > max(8.0, d_large * 0.7):
+            if depth_large > max(
+                SHEET_FEATURE_DECISION_VARIABLES["countersink_pairing"]["depth_large_abs_max_mm"],
+                d_large * SHEET_FEATURE_DECISION_VARIABLES["countersink_pairing"]["depth_large_rel_max_factor"],
+            ):
                 continue
             if depth_small + 1e-6 < depth_large:
                 continue
@@ -136,19 +141,25 @@ def _detect_countersunk_holes(cq_object, cylindrical_holes, *, collect_conical_f
 
         for cone in conical_faces:
             axis_dot = abs(dot(hole_axis, cone["axis"]))
-            if axis_dot < 0.97:
+            if axis_dot < SHEET_FEATURE_DECISION_VARIABLES["conical_matching"]["axis_alignment_min"]:
                 continue
 
             radial_dist = distance_point_to_axis(hole_axis_origin, cone["origin"], cone["axis"])
-            if radial_dist > max(1.0, hole_radius * 1.25):
+            if radial_dist > max(
+                SHEET_FEATURE_DECISION_VARIABLES["conical_matching"]["radial_dist_base_max_mm"],
+                hole_radius * SHEET_FEATURE_DECISION_VARIABLES["conical_matching"]["radial_dist_radius_factor"],
+            ):
                 continue
 
             axial_dist = abs(signed_axis_distance(hole_axis_origin, cone["origin"], cone["axis"]))
-            if axial_dist > max(25.0, hole_radius * 6.0):
+            if axial_dist > max(
+                SHEET_FEATURE_DECISION_VARIABLES["conical_matching"]["axial_dist_base_max_mm"],
+                hole_radius * SHEET_FEATURE_DECISION_VARIABLES["conical_matching"]["axial_dist_radius_factor"],
+            ):
                 continue
 
             included_angle = cone["included_angle"]
-            if included_angle < 55.0 or included_angle > 150.0:
+            if included_angle < SHEET_FEATURE_DECISION_VARIABLES["conical_matching"]["included_angle_min_deg"] or included_angle > SHEET_FEATURE_DECISION_VARIABLES["conical_matching"]["included_angle_max_deg"]:
                 continue
 
             score = radial_dist + (1.0 - axis_dot) * 10.0 + axial_dist * 0.05
@@ -233,12 +244,18 @@ def _candidate_matches_cylindrical_hole(candidate: Dict[str, Any], cylindrical_h
 
         radial_dist = distance_point_to_axis(hole_axis_origin, candidate_origin, candidate_axis)
         hole_radius = max(float(hole.diameter) * 0.5, 0.0)
-        radial_limit = max(1.0, min(candidate_inner_radius, hole_radius) * 0.8)
+        radial_limit = max(
+            SHEET_FEATURE_DECISION_VARIABLES["standalone_conical_matching"]["radial_limit_base_mm"],
+            min(candidate_inner_radius, hole_radius) * SHEET_FEATURE_DECISION_VARIABLES["standalone_conical_matching"]["radial_limit_inner_factor"],
+        )
         if radial_dist > radial_limit:
             continue
 
         axial_dist = abs(signed_axis_distance(hole_axis_origin, candidate_origin, candidate_axis))
-        if axial_dist > max(40.0, hole_radius * 8.0):
+        if axial_dist > max(
+            SHEET_FEATURE_DECISION_VARIABLES["standalone_conical_matching"]["axial_limit_base_mm"],
+            hole_radius * SHEET_FEATURE_DECISION_VARIABLES["standalone_conical_matching"]["axial_limit_radius_factor"],
+        ):
             continue
 
         return True
@@ -260,7 +277,7 @@ def _detect_standalone_countersunk_holes(cq_object, cylindrical_holes, *, collec
 
         if inner_radius <= 0:
             continue
-        if included_angle < 55.0 or included_angle > 150.0:
+        if included_angle < SHEET_FEATURE_DECISION_VARIABLES["standalone_conical_matching"]["included_angle_min_deg"] or included_angle > SHEET_FEATURE_DECISION_VARIABLES["standalone_conical_matching"]["included_angle_max_deg"]:
             continue
         if candidate_matches_cylindrical_hole(candidate, cylindrical_holes):
             continue

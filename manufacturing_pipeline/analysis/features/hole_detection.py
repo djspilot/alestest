@@ -14,6 +14,8 @@ from OCP.TopAbs import TopAbs_EDGE, TopAbs_REVERSED, TopAbs_VERTEX
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 
+from manufacturing_pipeline.core.decision_variables import HOLE_DETECTION_DECISION_VARIABLES
+
 
 @dataclass
 class HoleFeature:
@@ -144,8 +146,11 @@ def detect_holes(
             arc_length = radius * abs(u_max - u_min)
             depth = fd["area"] / arc_length if arc_length > 0 else 0
 
-            if is_flat_pattern and radius * 2 > 100 and thickness_ref is not None:
-                threshold = max(20.0, thickness_ref * 3.0)
+            if is_flat_pattern and radius * 2 > HOLE_DETECTION_DECISION_VARIABLES["flat_artifact_filter"]["diameter_min_mm"] and thickness_ref is not None:
+                threshold = max(
+                    HOLE_DETECTION_DECISION_VARIABLES["flat_artifact_filter"]["depth_abs_min_mm"],
+                    thickness_ref * HOLE_DETECTION_DECISION_VARIABLES["flat_artifact_filter"]["depth_thickness_factor"],
+                )
                 if depth > threshold:
                     item_id = f"hole-cyl-{candidate_counter}"
                     candidate_counter += 1
@@ -201,8 +206,11 @@ def detect_holes(
             arc_length = radius * abs(u_max - u_min)
             depth = area / arc_length if arc_length > 0 else 0
 
-            if is_flat_pattern and radius * 2 > 100 and thickness_ref is not None:
-                threshold = max(20.0, thickness_ref * 3.0)
+            if is_flat_pattern and radius * 2 > HOLE_DETECTION_DECISION_VARIABLES["flat_artifact_filter"]["diameter_min_mm"] and thickness_ref is not None:
+                threshold = max(
+                    HOLE_DETECTION_DECISION_VARIABLES["flat_artifact_filter"]["depth_abs_min_mm"],
+                    thickness_ref * HOLE_DETECTION_DECISION_VARIABLES["flat_artifact_filter"]["depth_thickness_factor"],
+                )
                 if depth > threshold:
                     item_id = f"hole-cyl-{candidate_counter}"
                     candidate_counter += 1

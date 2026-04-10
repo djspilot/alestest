@@ -9,59 +9,10 @@ import os
 from typing import Any, Dict
 
 from manufacturing_pipeline.core.paths import CONFIG_DIR
+from manufacturing_pipeline.core.decision_variables import get_unfold_default_thresholds
 
 
-DEFAULT_THRESHOLDS: Dict[str, Any] = {
-    "unfold": {
-        "runtime": {
-            "timeout_sec": 180,
-            "extra_timeout_per_mb_sec": 45,
-            "max_timeout_sec": 600,
-        },
-        "candidate_limits": {
-            "max_solids": 3,
-            "max_base_faces_per_solid": 10,
-        },
-        "thickness": {
-            "opposite_face_dot_max": -0.9,
-            "max_override_mm": 25.0,
-            "min_override_delta_mm": 0.1,
-        },
-        "fold_merge": {
-            "offset_tol_mm": 2.0,
-            "angle_tol_deg": 1.0,
-            "radius_tol_mm": 0.5,
-            "overlap_tol_mm": 5.0,
-            "gap_tol_mm": 10.0,
-        },
-        "simplification": {
-            "fillet_radius_thickness_factor": 0.40,
-            "min_fillet_faces_to_defeature": 30,
-            "min_cyl_faces_to_trigger": 100,
-            "skip_sheet_tree_cyl_threshold": 120,
-        },
-        "k_factor": {
-            "default": 0.44,
-            "thickness_buckets_mm": {
-                "0.5": 0.44,
-                "0.75": 0.44,
-                "1.0": 0.44,
-                "1.5": 0.44,
-                "2.0": 0.44,
-                "2.5": 0.44,
-                "3.0": 0.44,
-                "4.0": 0.44,
-                "5.0": 0.44,
-                "6.0": 0.44,
-                "8.0": 0.44,
-                "10.0": 0.44,
-                "12.0": 0.44,
-                "15.0": 0.44,
-                "20.0": 0.44,
-            },
-        },
-    },
-}
+DEFAULT_THRESHOLDS: Dict[str, Any] = {"unfold": get_unfold_default_thresholds()}
 
 
 def _default_thresholds_path() -> str:

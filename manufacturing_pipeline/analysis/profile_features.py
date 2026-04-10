@@ -18,6 +18,8 @@ from typing import Dict, List, Optional, Tuple, Any
 
 try:
     import numpy as np
+
+    from manufacturing_pipeline.core.decision_variables import PROFILE_FEATURE_DECISION_VARIABLES
 except ImportError:  # pragma: no cover - fallback without NumPy
     np = None
 
@@ -184,9 +186,9 @@ def _detect_tube_type(solid, dims: Tuple[float, float, float], volume: float) ->
     planar_pct = (planar_area / total_area * 100) if total_area > 0 else 0
     
     # Determine type
-    is_hollow = volume_ratio < 0.7
-    is_circular = cylindrical_pct >= 60.0 and is_hollow
-    is_rectangular = planar_pct >= 80.0 and is_hollow and not is_circular
+    is_hollow = volume_ratio < PROFILE_FEATURE_DECISION_VARIABLES["tube_type"]["hollow_volume_ratio_max"]
+    is_circular = cylindrical_pct >= PROFILE_FEATURE_DECISION_VARIABLES["tube_type"]["circular_cylindrical_min_pct"] and is_hollow
+    is_rectangular = planar_pct >= PROFILE_FEATURE_DECISION_VARIABLES["tube_type"]["rectangular_planar_min_pct"] and is_hollow and not is_circular
     
     return {
         'is_circular': is_circular,
@@ -380,17 +382,17 @@ def _extract_cylinder_radii(solid) -> List[float]:
             try:
                 cylinder = surf_adapter.Cylinder()
                 radius = cylinder.Radius()
-                if radius > 0.1:  # Filter noise
+                if radius > PROFILE_FEATURE_DECISION_VARIABLES["radius_detection"]["noise_min_radius_mm"]:
                     radii.append(radius)
             except:
                 pass
         
         face_exp.Next()
     
-    # Remove duplicates (tolerance 0.1mm)
+    # Remove duplicates with central tolerance.
     unique_radii = []
     for r in sorted(radii, reverse=True):
-        if not any(abs(r - ur) < 0.1 for ur in unique_radii):
+        if not any(abs(r - ur) < PROFILE_FEATURE_DECISION_VARIABLES["radius_detection"]["dedupe_tolerance_mm"] for ur in unique_radii):
             unique_radii.append(r)
     
     return unique_radii
@@ -421,17 +423,22 @@ def _extract_torus_radii(solid) -> List[float]:
                 major_radius = torus.MajorRadius()
                 
                 # Filter: minor radius should be reasonable for corner radius
-                if 0.5 < minor_radius < 50 and minor_radius < major_radius * 0.5:
+                if (
+                    PROFILE_FEATURE_DECISION_VARIABLES["radius_detection"]["torus_minor_radius_min_mm"]
+                    < minor_radius
+                    < PROFILE_FEATURE_DECISION_VARIABLES["radius_detection"]["torus_minor_radius_max_mm"]
+                    and minor_radius < major_radius * PROFILE_FEATURE_DECISION_VARIABLES["radius_detection"]["torus_minor_major_ratio_max"]
+                ):
                     radii.append(minor_radius)
             except:
                 pass
         
         face_exp.Next()
     
-    # Remove duplicates (tolerance 0.1mm)
+    # Remove duplicates with central tolerance.
     unique_radii = []
     for r in sorted(radii, reverse=True):
-        if not any(abs(r - ur) < 0.1 for ur in unique_radii):
+        if not any(abs(r - ur) < PROFILE_FEATURE_DECISION_VARIABLES["radius_detection"]["dedupe_tolerance_mm"] for ur in unique_radii):
             unique_radii.append(r)
     
     return unique_radii
