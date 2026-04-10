@@ -574,6 +574,43 @@ def _serialize_analysis_reasoning(analysis) -> list[dict]:
     return serialized
 
 
+def _group_solids_by_name_occurrence(solids: list[dict]) -> list[dict]:
+    """Collapse repeated occurrences into one analysis item per semantic solid name.
+
+    The XCAF/STEP naming contract treats duplicate names as repeated occurrences of the
+    same part. For VPS assembly analysis we analyse one representative STEP per unique
+    semantic name and preserve occurrence counts separately for XML/BOM output.
+    """
+    grouped: dict[str, dict] = {}
+    unique_solids: list[dict] = []
+
+    for fallback_index, solid_info in enumerate(solids or []):
+        raw_name = str(solid_info.get("name") or "").strip()
+        occurrence_index = int(solid_info.get("index", fallback_index) or fallback_index)
+        solid_name = raw_name or f"Part_{occurrence_index + 1:03d}"
+
+        existing = grouped.get(solid_name)
+        if existing is None:
+            grouped_entry = dict(solid_info)
+            grouped_entry["name"] = solid_name
+            grouped_entry["solid_index"] = len(unique_solids)
+            grouped_entry["representative_occurrence_index"] = occurrence_index
+            grouped_entry["occurrence_indices"] = [occurrence_index]
+            grouped_entry["quantity"] = 1
+            grouped_entry["occurrence_count"] = 1
+            unique_solids.append(grouped_entry)
+            grouped[solid_name] = grouped_entry
+            continue
+
+        occurrence_indices = list(existing.get("occurrence_indices") or [])
+        occurrence_indices.append(occurrence_index)
+        existing["occurrence_indices"] = occurrence_indices
+        existing["quantity"] = len(occurrence_indices)
+        existing["occurrence_count"] = len(occurrence_indices)
+
+    return unique_solids
+
+
 def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=None, disable_stages: set[str] | None = None) -> dict:
     """Run the manufacturing analysis pipeline on a STEP file.
 
@@ -593,10 +630,11 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
 
     solids = extract_solids_to_temp_files(step_file)
     if solids:
+        unique_solids = _group_solids_by_name_occurrence(solids)
         tmp_dir = solids[0]["tmp_dir"]
         parts = []
         try:
-            for solid_info in solids:
+            for solid_info in unique_solids:
                 part_result = run_step_analysis(
                     solid_info["path"],
                     use_aag=use_aag,
@@ -604,7 +642,13 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
                     disable_stages=disable_stages,
                 )
                 part_result["solid_name"] = solid_info["name"]
-                part_result["solid_index"] = solid_info["index"]
+                part_result["solid_index"] = int(solid_info.get("solid_index", len(parts)))
+                part_result["representative_occurrence_index"] = int(
+                    solid_info.get("representative_occurrence_index", solid_info.get("index", len(parts)))
+                )
+                part_result["occurrence_indices"] = list(solid_info.get("occurrence_indices") or [])
+                part_result["quantity"] = int(solid_info.get("quantity", 1) or 1)
+                part_result["occurrence_count"] = int(solid_info.get("occurrence_count", 1) or 1)
 
                 part_timeline = list(part_result.get("timeline") or part_result.get("timeline_events") or [])
                 part_summary = part_result.get("timeline_summary")
@@ -643,6 +687,7 @@ def run_step_analysis(step_file: str, use_aag: bool = True, progress_callback=No
             "success": all(p.get("success") for p in parts),
             "is_assembly": True,
             "solid_count": len(solids),
+            "unique_solid_count": len(unique_solids),
             "parts": parts,
         }
 

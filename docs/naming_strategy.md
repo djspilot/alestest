@@ -131,6 +131,26 @@ Als een STEP file **geen** PRODUCT namen bevat:
 
 ## Belangrijke Notities
 
+### Assembly/VPS afspraak: unieke geometrie, behoud van count
+
+Voor assemblies met herhaalde onderdelen geldt:
+
+- de **semantische identiteit** blijft de STEP/XCAF-partnaam;
+- het **aantal** blijft de occurrence-count uit de assembly-structuur;
+- de VPS-pipeline mag identieke occurrences als **één unieke solid** analyseren;
+- XML/BOM-uitvoer moet daarna wel het oorspronkelijke aantal blijven schrijven in `Sheet_Count`, `Tube_Count` of `Others_Count`.
+
+Concreet voor `10040878_1.stp` betekent dit bijvoorbeeld:
+
+- `10040853_1.2` kan één keer geometrisch geanalyseerd worden;
+- de count blijft `2` omdat de assembly twee occurrences bevat.
+
+### Tijdelijke STEP-bestandsnamen zijn niet normatief
+
+Bij het uitsplitsen van assemblies mogen namen voor tijdelijke STEP-bestanden worden gesanitizeerd voor filesystemgebruik, bijvoorbeeld `10040853_1.2` -> `10040853_1_2.step`.
+
+Die transportnaam is **niet** de autoritatieve partnaam. De normatieve naam blijft de oorspronkelijke STEP/XCAF-naam en moet in resultaat- en XML-identiteit behouden blijven.
+
 ### Reference XML Gebruik
 **Reference XML wordt NIET gebruikt voor naamgeving!**
 

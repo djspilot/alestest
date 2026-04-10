@@ -87,3 +87,36 @@ def test_xml_export_prefers_semantic_sheet_hole_count_over_visual_fallback(tmp_p
     assert "<Sheet_NrHoles>2</Sheet_NrHoles>" in xml
     assert "<Sheet_ThreadedHoles>1</Sheet_ThreadedHoles>" in xml
 
+
+def test_xml_export_assembly_preserves_quantity_for_unique_parts(tmp_path: Path) -> None:
+    """Assembly export must keep occurrence count on unique analysed parts."""
+    output_path = tmp_path / "assembly.xml"
+    result = {
+        "file": "assembly.stp",
+        "is_assembly": True,
+        "solid_count": 8,
+        "unique_solid_count": 5,
+        "parts": [
+            {
+                **_sample_result(),
+                "file": "10040853_1_2.step",
+                "solid_name": "10040853_1.2",
+                "quantity": 2,
+            },
+            {
+                **_sample_result(),
+                "file": "10040876_1.step",
+                "solid_name": "10040876_1",
+                "quantity": 1,
+            },
+        ],
+    }
+
+    export_to_xml(result, output_path)
+    xml = output_path.read_text(encoding="utf-8")
+
+    assert xml.count("<CalculationResult>") == 2
+    assert "<Sheet_Name>10040853_1.2</Sheet_Name>" in xml
+    assert "<Sheet_Count>2</Sheet_Count>" in xml
+    assert "<Sheet_Name>10040876_1</Sheet_Name>" in xml
+

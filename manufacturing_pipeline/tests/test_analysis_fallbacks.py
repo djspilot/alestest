@@ -11,6 +11,7 @@ import os
 import pytest
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
+from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +197,67 @@ class TestMeshFallback:
         assert result.get("success") is True
         # mesh is optioneel
         assert "mesh" not in result or result["mesh"] is None
+
+    def test_run_step_analysis_groups_duplicate_solid_names_once(self):
+        from manufacturing_pipeline.api import analysis_service
+
+        assembly_step = "/fake/assembly.step"
+        split_dir = "/fake/split"
+        split_items = [
+            {"name": "Part A", "path": f"{split_dir}/Part_A.step", "index": 0, "tmp_dir": split_dir},
+            {"name": "Part B", "path": f"{split_dir}/Part_B.step", "index": 1, "tmp_dir": split_dir},
+            {"name": "Part A", "path": f"{split_dir}/Part_A_002.step", "index": 2, "tmp_dir": split_dir},
+            {"name": "Part B", "path": f"{split_dir}/Part_B_002.step", "index": 3, "tmp_dir": split_dir},
+        ]
+
+        def fake_extract(step_path):
+            if step_path == assembly_step:
+                return split_items
+            return None
+
+        def fake_get_output_dir(step_path):
+            stem = Path(step_path).stem
+            return (f"/tmp/{stem}", stem)
+
+        mock_analysis = MagicMock()
+        mock_analysis.part_category = "PLAAT"
+        mock_analysis.part_type = None
+        mock_analysis.thickness = 2.0
+        mock_analysis.length = 100.0
+        mock_analysis.width = 50.0
+        mock_analysis.height = 2.0
+        mock_analysis.flat_length = 0
+        mock_analysis.flat_width = 0
+        mock_analysis.bend_count_erp = 0
+        mock_analysis.aag_result = None
+        mock_analysis.route_result = None
+        mock_analysis.unfold_result = None
+        mock_analysis.reasoning = []
+        mock_analysis.classification_visuals = None
+        mock_analysis.classification_trace = {}
+        mock_analysis.classification_criteria = []
+        mock_analysis.detected_hole_visuals = None
+        mock_analysis.detected_hole_visuals_pre_unfold = None
+
+        with patch.object(analysis_service, "extract_solids_to_temp_files", side_effect=fake_extract), \
+             patch.object(analysis_service, "get_output_dir", side_effect=fake_get_output_dir), \
+             patch.object(analysis_service, "run_analysis", return_value=(mock_analysis, 0)), \
+             patch.object(analysis_service, "_load_timing_json", return_value=None), \
+             patch("shutil.rmtree"):
+            result = analysis_service.run_step_analysis(assembly_step, use_aag=False, disable_stages={"unfold", "aag"})
+
+        assert result["success"] is True
+        assert result["is_assembly"] is True
+        assert result["solid_count"] == 4
+        assert result["unique_solid_count"] == 2
+        assert len(result["parts"]) == 2
+        assert [part["solid_name"] for part in result["parts"]] == ["Part A", "Part B"]
+        assert [part["quantity"] for part in result["parts"]] == [2, 2]
+        assert result["parts"][0]["occurrence_indices"] == [0, 2]
+        assert result["parts"][1]["occurrence_indices"] == [1, 3]
+        assert result["parts"][0]["solid_index"] == 0
+        assert result["parts"][1]["solid_index"] == 1
+        assert result["parts"][1]["representative_occurrence_index"] == 1
 
     def test_format_analysis_report_handles_missing_part_type(self):
         from manufacturing_pipeline.analysis.part_analyzer import format_analysis_report

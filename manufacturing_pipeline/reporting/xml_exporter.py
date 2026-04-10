@@ -541,6 +541,13 @@ def _append_calculation_result(root: "_Elem", result: Dict[str, Any], part_name:
 
     # Part identification
     ET.SubElement(calc, 'Sheet_PartName').text = part_name
+    ET.SubElement(calc, 'Sheet_Name').text = part_name
+    quantity = result.get('quantity', result.get('occurrence_count', 1))
+    try:
+        quantity_value = max(1, int(quantity or 1))
+    except Exception:
+        quantity_value = 1
+    ET.SubElement(calc, 'Sheet_Count').text = str(quantity_value)
 
     # Basic geometry
     thickness = result.get('thickness', 0)

@@ -385,12 +385,15 @@ def test_assembly_part_routes_expose_step_and_unfold_artifacts(tmp_path, monkeyp
             "success": True,
             "is_assembly": True,
             "solid_count": 2,
+            "unique_solid_count": 2,
             "parts": [
                 {
                     "file": "part_a.step",
                     "success": True,
                     "solid_name": "Part A",
                     "solid_index": 0,
+                    "representative_occurrence_index": 0,
+                    "quantity": 1,
                     "category": "PLAAT",
                     "thickness": 2.0,
                     "production": {"holes_total": 1, "bends_total": 2},
@@ -400,6 +403,8 @@ def test_assembly_part_routes_expose_step_and_unfold_artifacts(tmp_path, monkeyp
                     "success": True,
                     "solid_name": "Part B",
                     "solid_index": 1,
+                    "representative_occurrence_index": 4,
+                    "quantity": 2,
                     "category": "PLAAT",
                     "thickness": 3.0,
                     "production": {"holes_total": 0, "bends_total": 1},
@@ -417,7 +422,7 @@ def test_assembly_part_routes_expose_step_and_unfold_artifacts(tmp_path, monkeyp
         part_b.write_text("part-b-step")
         return [
             {"name": "Part A", "path": str(part_a), "index": 0, "tmp_dir": str(tmp_dir)},
-            {"name": "Part B", "path": str(part_b), "index": 1, "tmp_dir": str(tmp_dir)},
+            {"name": "Part B", "path": str(part_b), "index": 4, "tmp_dir": str(tmp_dir)},
         ]
 
     def fake_run_unfold_to_step(step_file, output_dir, part_name, analysis):

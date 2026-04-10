@@ -692,8 +692,11 @@ def _ensure_part_step_file(job, part_index: int) -> tuple[dict, str]:
     tmp_dir = extracted[0].get("tmp_dir")
     try:
         selected = None
+        representative_occurrence_index = int(
+            part.get("representative_occurrence_index", part.get("solid_index", part_index))
+        )
         for item in extracted:
-            if int(item.get("index", -1)) == int(part_index):
+            if int(item.get("index", -1)) == representative_occurrence_index:
                 selected = item
                 break
         if not selected:
