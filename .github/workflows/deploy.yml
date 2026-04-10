@@ -56,7 +56,7 @@ jobs:
         run: |
           cd /opt/manufacturing-api
           git fetch origin
-          git reset --hard origin/master
+          git reset --hard origin/main
           docker compose build api
           docker rm -f ales-api || true
           docker compose up -d api
